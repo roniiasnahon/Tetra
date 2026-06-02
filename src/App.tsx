@@ -47,6 +47,12 @@ interface PaperItem {
   description: string;
 }
 
+interface Tab {
+  id: string;
+  type: 'home' | 'document';
+  title: string;
+}
+
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -84,7 +90,15 @@ const TypewriterMarkdown = ({ content, timestamp }: { content: string, timestamp
 
 export default function App() {
   const [isAssistantOpen, setIsAssistantOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'document' | 'home'>('document');
+  
+  // Tab Management
+  const [tabs, setTabs] = useState<Tab[]>([
+    { id: 'initial-home', type: 'home', title: 'Home' },
+    { id: 'initial-doc', type: 'document', title: 'Untitled' }
+  ]);
+  const [activeTabId, setActiveTabId] = useState('initial-doc');
+
+  const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
   
   // Editor Styles and Customizations
   const [editorFont, setEditorFont] = useState('font-serif');
@@ -139,7 +153,7 @@ export default function App() {
     const clampedSize = Math.max(12, Math.min(72, nextSize));
 
     try {
-      document.execCommand('styleWithCSS', false, true);
+      document.execCommand('styleWithCSS', false, 'true');
       const tempFontName = `___fs_${Date.now()}___`;
       document.execCommand('fontName', false, tempFontName);
 
@@ -243,7 +257,7 @@ export default function App() {
 
   useEffect(() => {
     // If activeTab is document, make sure initial content is populated
-    if (activeTab === 'document' && editorRef.current) {
+    if (activeTab.type === 'document' && editorRef.current) {
       if (editorRef.current.innerHTML !== documentContent) {
         editorRef.current.innerHTML = documentContent;
         lastContentRef.current = documentContent;
@@ -414,7 +428,10 @@ Let me know if you would like me to draft new sections directly into the documen
       // If Gemini/Mistral returned structured citations or outline drafts, we can handle them!
       if (data.suggestion) {
         // Automatically switch to document view if AI is editing/suggesting content
-        setActiveTab('document');
+        const docTab = tabs.find(t => t.type === 'document');
+        if (docTab) {
+          setActiveTabId(docTab.id);
+        }
 
         // Robust check: even if type isn't 'edit_document', if we have content blocks, we should process them
         const isEditAction = data.suggestion.type === 'edit_document' || 
@@ -534,37 +551,54 @@ Let me know if you would like me to draft new sections directly into the documen
 
           {/* Tabs Container */}
           <div className="flex items-end h-full ml-3 gap-[2px]">
-            {/* Home Tab */}
-            <div 
-              onClick={() => setActiveTab('home')}
-              className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[10px] transition-colors cursor-pointer text-[13px] ${
-                activeTab === 'home' 
-                  ? 'bg-[#121212] text-[#e4e4e7]' 
-                  : 'bg-[#1a1a1a]/40 hover:bg-[#1a1a1a]/80 text-[#a1a1aa]'
-              }`}
-            >
-              <Home className="w-3.5 h-3.5" />
-              <span>Home</span>
-            </div>
+    {tabs.map((tab) => (
+      <div 
+        key={tab.id}
+        onClick={() => setActiveTabId(tab.id)}
+        className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[10px] transition-colors cursor-pointer text-[13px] ${
+          activeTabId === tab.id 
+            ? 'bg-[#121212] text-[#e4e4e7]' 
+            : 'bg-[#1a1a1a]/40 hover:bg-[#1a1a1a]/80 text-[#a1a1aa]'
+        }`}
+      >
+        {tab.type === 'home' ? (
+          <Home className="w-3.5 h-3.5" />
+        ) : (
+          <FileSignature className="w-3.5 h-3.5" />
+        )}
+        <span className="truncate max-w-[130px]">
+          {tab.type === 'home' ? 'Home' : (documentTitle || 'Untitled')}
+        </span>
+        {tabs.length > 1 && (
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              const newTabs = tabs.filter(t => t.id !== tab.id);
+              setTabs(newTabs);
+              if (activeTabId === tab.id) {
+                setActiveTabId(newTabs[0].id);
+              }
+            }}
+            className="ml-2 hover:text-white p-0.5 rounded-sm hover:bg-white/10"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        )}
+      </div>
+    ))}
 
-            {/* Document Tab */}
-            <div 
-              onClick={() => setActiveTab('document')}
-              className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[10px] transition-colors cursor-pointer text-[13px] ${
-                activeTab === 'document'
-                  ? 'bg-[#121212] text-[#e4e4e7]'
-                  : 'bg-[#1a1a1a]/40 hover:bg-[#1a1a1a]/80 text-[#a1a1aa]'
-              }`}
-            >
-              <FileSignature className="w-3.5 h-3.5" />
-              <span className="truncate max-w-[130px]">{documentTitle ? documentTitle : 'Untitled'}</span>
-            </div>
-
-            {/* Add Tab Button */}
-            <div className="flex items-center justify-center p-2 mb-0.5 ml-1 rounded-md hover:bg-[#1a1a1a] text-[#86868b] hover:text-[#e4e4e7] transition-colors cursor-pointer">
-              <Plus className="w-4 h-4" />
-            </div>
-          </div>
+    {/* Add Tab Button */}
+    <div 
+      onClick={() => {
+        const newId = `home-${Date.now()}`;
+        setTabs([...tabs, { id: newId, type: 'home', title: 'Home' }]);
+        setActiveTabId(newId);
+      }}
+      className="flex items-center justify-center p-2 mb-0.5 ml-1 rounded-md hover:bg-[#1a1a1a] text-[#86868b] hover:text-[#e4e4e7] transition-colors cursor-pointer"
+    >
+      <Plus className="w-4 h-4" />
+    </div>
+  </div>
 
           <div className="flex-1" />
 
@@ -585,14 +619,19 @@ Let me know if you would like me to draft new sections directly into the documen
         {/* Main Editor Component Container */}
         <div className="relative flex-1 bg-[#121212] rounded-2xl flex flex-col overflow-hidden min-w-0">
           
-          {activeTab === 'home' ? (
+          {activeTab.type === 'home' ? (
             <div className="flex-1 overflow-y-auto focus:outline-none scroll-smooth">
               <div className="max-w-[800px] mx-auto w-full p-8 md:p-14 lg:p-20 flex flex-col justify-center min-h-full">
                 <h1 className="text-3xl md:text-4xl text-[#f4f4f5] font-medium tracking-tight mb-8">Good afternoon.</h1>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
                   <button 
-                    onClick={() => setActiveTab('document')}
+                    onClick={() => {
+                      const docTab = tabs.find(t => t.type === 'document');
+                      if (docTab) {
+                        setActiveTabId(docTab.id);
+                      }
+                    }}
                     className="flex items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-colors rounded-xl text-left cursor-pointer group"
                   >
                     <div className="w-10 h-10 bg-[#27272a] rounded-lg flex items-center justify-center mr-4 group-hover:scale-105 transition-transform">
@@ -922,10 +961,11 @@ Let me know if you would like me to draft new sections directly into the documen
                   {/* Reasoning Process */}
                   {m.role === 'assistant' && m.thought && (
                     <details className="mb-2 group">
-                      <summary className="text-[11px] font-medium text-[#71717a] cursor-pointer hover:text-[#a1a1aa] transition-colors list-none outline-none">
+                      <summary className="text-[11px] font-medium text-[#71717a] hover:text-[#a1a1aa] cursor-pointer transition-colors list-none outline-none inline-flex items-center gap-1">
+                        <div className="w-1 h-1 rounded-full bg-[#71717a] group-hover:bg-[#a1a1aa] transition-colors" />
                         Thought
                       </summary>
-                      <div className="mt-1 text-[12px] text-[#71717a] py-1 leading-relaxed">
+                      <div className="mt-1.5 text-[12px] text-[#71717a] pb-2 leading-relaxed max-w-[95%]">
                         {m.thought}
                       </div>
                     </details>

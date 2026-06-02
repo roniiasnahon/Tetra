@@ -202,19 +202,25 @@ ${JSON.stringify(userOutlineList, null, 2)}
 
 IMPORTANT: You MUST return a valid JSON object. 
 
-DIRECTIVE FOR WRITING TASKS:
-1. ALWAYS use "suggestion.type": "edit_document"
-2. ALWAYS provide long-form text (essays, reports) in "suggestion.replaceContent".
-3. NEVER put long text in "content". Keep "content" under 20 words.
+DIRECTIVE FOR ALL RESPONSES (CHAT & WRITING):
+1. ALWAYS start your response by explaining your internal reasoning in the "thought" field.
+2. ALWAYS return a valid JSON object.
+3. For writing tasks (essays, reports):
+   - ALWAYS use "suggestion.type": "edit_document"
+   - ALWAYS provide the long-form text in "suggestion.replaceContent".
+   - Keep "content" UNDER 20 words (a brief summary).
+4. For general chat:
+   - Provide your response in the "content" field.
+   - Use "suggestion": null if no document edits are needed.
 
 MATCH THIS JSON SCHEMA:
 {
-  "thought": "internal reasoning",
-  "content": "brief summary",
+  "thought": "A detailed reasoning string explaining your logic and academic approach before writing",
+  "content": "Conversational response string",
   "suggestion": {
      "type": "edit_document",
-     "title": "new title",
-     "replaceContent": "FULL MARKDOWN ESSAY"
+     "title": "optional new title",
+     "replaceContent": "MARKDOWN STRING"
   }
 }
 
