@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
+import ReactMarkdown from 'react-markdown';
+import { marked } from 'marked';
 import { 
   Search, 
   ScanLine, 
@@ -17,10 +19,26 @@ import {
   HelpCircle,
   Bold,
   Italic,
+  Underline as UnderlineIcon,
+  Strikethrough,
+  List,
+  ListOrdered,
+  Minus,
+  Eraser,
   AlignLeft,
   AlignCenter,
   AlignRight,
-  AlignJustify
+  AlignJustify,
+  Undo,
+  Redo,
+  Subscript,
+  Superscript,
+  Highlighter,
+  Palette,
+  PanelLeft,
+  Home,
+  FileSignature,
+  ChevronDown
 } from 'lucide-react';
 
 interface PaperItem {
@@ -33,21 +51,139 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  thought?: string;
   timestamp: number;
 }
 
+const TypewriterMarkdown = ({ content, timestamp }: { content: string, timestamp: number }) => {
+  const [displayedContent, setDisplayedContent] = useState('');
+  const shouldAnimate = useRef(Date.now() - timestamp < 2000);
+
+  useEffect(() => {
+    if (!shouldAnimate.current) {
+      setDisplayedContent(content);
+      return;
+    }
+
+    let currentIndex = 0;
+    const interval = setInterval(() => {
+      currentIndex += 5; // characters per tick
+      if (currentIndex >= content.length) {
+        clearInterval(interval);
+        setDisplayedContent(content);
+      } else {
+        setDisplayedContent(content.substring(0, currentIndex));
+      }
+    }, 15);
+
+    return () => clearInterval(interval);
+  }, [content]);
+
+  return <ReactMarkdown>{displayedContent}</ReactMarkdown>;
+};
+
 export default function App() {
   const [isAssistantOpen, setIsAssistantOpen] = useState(true);
+  const [activeTab, setActiveTab] = useState<'document' | 'home'>('document');
   
   // Editor Styles and Customizations
   const [editorFont, setEditorFont] = useState('font-serif');
   const [editorFontSize, setEditorFontSize] = useState(18);
+  const [currentSelectionSize, setCurrentSelectionSize] = useState(18);
   const [editorAlign, setEditorAlign] = useState<'left' | 'center' | 'right' | 'justify'>('left');
+
+  const editorRef = useRef<HTMLDivElement>(null);
+  const lastContentRef = useRef('');
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+        const range = selection.getRangeAt(0);
+        const parentNode = range.commonAncestorContainer.parentElement;
+        
+        if (parentNode) {
+          const parentStyle = window.getComputedStyle(parentNode);
+          const sizeStr = parentStyle.fontSize;
+          if (sizeStr) {
+            const parsed = parseInt(sizeStr);
+            if (!isNaN(parsed)) {
+              setCurrentSelectionSize(parsed);
+              return;
+            }
+          }
+        }
+      }
+      setCurrentSelectionSize(editorFontSize);
+    };
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => document.removeEventListener("selectionchange", handleSelectionChange);
+  }, [editorFontSize]);
+
+  const changeSelectedFontSize = (increase: boolean) => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+
+    if (selection.isCollapsed) {
+      setEditorFontSize(prev => {
+        const next = increase ? prev + 1 : prev - 1;
+        const clamped = Math.min(72, Math.max(12, next));
+        setCurrentSelectionSize(clamped);
+        return clamped;
+      });
+      return;
+    }
+
+    const currentSize = currentSelectionSize;
+    const nextSize = increase ? currentSize + 1 : currentSize - 1;
+    const clampedSize = Math.max(12, Math.min(72, nextSize));
+
+    try {
+      document.execCommand('styleWithCSS', false, true);
+      const tempFontName = `___fs_${Date.now()}___`;
+      document.execCommand('fontName', false, tempFontName);
+
+      const editor = editorRef.current;
+      if (editor) {
+        const selector = `font[face="${tempFontName}"], span[style*="font-family: ${tempFontName}"], span[style*='font-family: "${tempFontName}"']`;
+        const targets = editor.querySelectorAll(selector);
+        
+        targets.forEach(el => {
+          const element = el as HTMLElement;
+          element.style.fontFamily = "";
+          element.removeAttribute("face");
+          element.style.fontSize = `${clampedSize}px`;
+          // ensure normal line height to prevent shifts
+          element.style.lineHeight = "normal";
+        });
+      }
+      
+      setCurrentSelectionSize(clampedSize);
+    } catch (e) {
+      console.error("Font resize failed:", e);
+      setEditorFontSize(prev => increase ? prev + 1 : prev - 1);
+    }
+
+    if (editorRef.current) {
+      const html = editorRef.current.innerHTML;
+      lastContentRef.current = html;
+      setDocumentContent(html);
+    }
+  };
+
+  const handleFormat = (command: string) => {
+    document.execCommand(command, false);
+    if (editorRef.current) {
+      const html = editorRef.current.innerHTML;
+      lastContentRef.current = html;
+      setDocumentContent(html);
+    }
+  };
   
   // Document Metadata State
-  const [documentTitle, setDocumentTitle] = useState('Done and done. Here is a summary of what was set up.');
-  const [folderName, setFolderName] = useState('Neuroplasticity');
-  const [savedNoteName, setSavedNoteName] = useState('Neuroplasticity in Adult Learning');
+  const [documentTitle, setDocumentTitle] = useState('');
+  const [folderName, setFolderName] = useState('');
+  const [savedNoteName, setSavedNoteName] = useState('');
   
   // Research Papers Data
   const [papers, setPapers] = useState<PaperItem[]>([
@@ -72,9 +208,6 @@ export default function App() {
       description: "Evidence for exercise, diet, and cognitive engagement driving neuroplasticity in aging adults."
     }
   ]);
-
-  // Search filter
-  const [searchQuery, setSearchQuery] = useState('');
 
   // AI Assistant Chat Messages
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -104,20 +237,38 @@ export default function App() {
     return cleaned.split(/\s+/).filter(Boolean).length;
   })();
 
-  // Filter papers for view
-  const filteredPapers = papers.filter(p => {
-    const sq = searchQuery.toLowerCase();
-    return p.author.toLowerCase().includes(sq) ||
-           p.title.toLowerCase().includes(sq) ||
-           p.description.toLowerCase().includes(sq);
+  const [documentContent, setDocumentContent] = useState(() => {
+    return "";
   });
 
-  const [documentContent, setDocumentContent] = useState(
-    "According to Marzola et al. (2023), neuroplasticity is not restricted to early developmental windows but remains active across the human lifespan. Their comprehensive review illuminates the delicate balance of synaptic remodeling, microglia pruning, and adult neurogenesis.\n\n" +
-    "Graybiel & Grafton (2015) synthesize groundbreaking evidence regarding the striatum's role in chunking actions. During the developmental cycle of any habit or motor skill, cortical representation shifts deeply into the dorsolateral striatum.\n\n" +
-    "Cramer et al. (2011) provide a critical NIH workshop consensus outline for translating neuroplasticity principles into rehabilitation.\n\n" +
-    "Phillips (2017) provides a meticulous analysis of exogenous lifestyle modulators. Chief among them are physical exercise, caloric restriction, and structured cognitive engagement."
-  );
+  useEffect(() => {
+    // If activeTab is document, make sure initial content is populated
+    if (activeTab === 'document' && editorRef.current) {
+      if (editorRef.current.innerHTML !== documentContent) {
+        editorRef.current.innerHTML = documentContent;
+        lastContentRef.current = documentContent;
+      }
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    // Keep editor sync if external changes occur (like AI editing)
+    if (editorRef.current && documentContent !== lastContentRef.current) {
+      editorRef.current.innerHTML = documentContent;
+      lastContentRef.current = documentContent;
+    }
+  }, [documentContent]);
+
+  // Helper to convert Markdown to HTML for the editor
+  const markdownToHtml = (markdown: string) => {
+    try {
+      // Use marked to parse, but clean it up to avoid top-level double paragraphs etc if needed
+      return marked.parse(markdown, { gfm: true, breaks: true }) as string;
+    } catch (e) {
+      console.error("Markdown conversion failed", e);
+      return markdown;
+    }
+  };
 
   // Intel fallback response generator for offline or key-missing states
   const getFallbackResponse = (query: string): { text: string; suggestion?: any } => {
@@ -147,6 +298,14 @@ export default function App() {
           type: 'edit_document',
           appendContent: "\n\nScholarly consensus indicates that cognitive consolidation is a highly physical, lifestyle-dependent adaptation. It requires both cortical neurodevelopmental responsiveness and striatal automation pathways, which are actively catalyzed by aerobic and cognitive stressors."
         }
+      };
+    }
+
+    if (lowercase.includes('hi') || lowercase.includes('hello') || lowercase.includes('hey') || lowercase.includes('help') || lowercase.includes('greet')) {
+      return {
+        text: `I have reviewed your initial workspace setup. The current title and single-section outline serve as a functional starting point, but to elevate this to a rigorous academic standard, we should restructure the document.
+
+I suggest organizing your notes and citations into a formal, multi-tiered outline. This structure separates the foundational biology of adult neuroplasticity (Marzola et al., 2023), the specific mechanisms of habit and motor skill acquisition in the striatum (Graybiel & Grafton, 2015), and the clinical and lifestyle interventions that modulate these pathways (Cramer et al., 2011; Phillips, 2017). Below is a proposed structural outline with integrated draft paragraphs that synthesize these sources academically:`
       };
     }
 
@@ -247,12 +406,22 @@ Let me know if you would like me to draft new sections directly into the documen
           id: String(Date.now() + 1),
           role: 'assistant',
           content: data.content || "I have analyzed your workspace papers and summarized the response.",
+          thought: data.thought,
           timestamp: Date.now()
         }
       ]);
 
-      // If Gemini returned structured citations or outline drafts, we can handle them!
+      // If Gemini/Mistral returned structured citations or outline drafts, we can handle them!
       if (data.suggestion) {
+        // Automatically switch to document view if AI is editing/suggesting content
+        setActiveTab('document');
+
+        // Robust check: even if type isn't 'edit_document', if we have content blocks, we should process them
+        const isEditAction = data.suggestion.type === 'edit_document' || 
+                           data.suggestion.replaceContent || 
+                           data.suggestion.appendContent || 
+                           data.suggestion.title;
+
         if (data.suggestion.type === 'citations' && data.suggestion.citations) {
           const newPapers: PaperItem[] = data.suggestion.citations.map((c: any) => ({
             author: `${c.authors} (${c.year})`,
@@ -260,10 +429,16 @@ Let me know if you would like me to draft new sections directly into the documen
             description: c.quoteSnippet || `${c.authors} review on ${c.source}`
           }));
           setPapers(prev => [...prev, ...newPapers]);
-        } else if (data.suggestion.type === 'edit_document') {
+        } else if (isEditAction) {
           if (data.suggestion.title) setDocumentTitle(data.suggestion.title);
-          if (data.suggestion.appendContent) setDocumentContent(prev => prev + data.suggestion.appendContent);
-          if (data.suggestion.replaceContent) setDocumentContent(data.suggestion.replaceContent);
+          if (data.suggestion.appendContent) {
+            const htmlContent = markdownToHtml(data.suggestion.appendContent);
+            setDocumentContent(prev => prev + htmlContent);
+          }
+          if (data.suggestion.replaceContent) {
+            const htmlContent = markdownToHtml(data.suggestion.replaceContent);
+            setDocumentContent(htmlContent);
+          }
         }
       }
 
@@ -276,8 +451,14 @@ Let me know if you would like me to draft new sections directly into the documen
       if (fallbackPayload.suggestion) {
         if (fallbackPayload.suggestion.type === 'edit_document') {
           if (fallbackPayload.suggestion.title) setDocumentTitle(fallbackPayload.suggestion.title);
-          if (fallbackPayload.suggestion.appendContent) setDocumentContent(prev => prev + fallbackPayload.suggestion.appendContent);
-          if (fallbackPayload.suggestion.replaceContent) setDocumentContent(fallbackPayload.suggestion.replaceContent);
+          if (fallbackPayload.suggestion.appendContent) {
+            const htmlContent = markdownToHtml(fallbackPayload.suggestion.appendContent);
+            setDocumentContent(prev => prev + htmlContent);
+          }
+          if (fallbackPayload.suggestion.replaceContent) {
+            const htmlContent = markdownToHtml(fallbackPayload.suggestion.replaceContent);
+            setDocumentContent(htmlContent);
+          }
         }
       }
 
@@ -343,37 +524,52 @@ Let me know if you would like me to draft new sections directly into the documen
       <div className="flex-1 flex flex-col min-w-0">
         
         {/* Header Bar */}
-        <header className="h-[34px] flex items-center justify-between shrink-0 mb-[2px] bg-[#070707] pl-1 pr-1">
-          <button className="text-[#52525b] hover:text-[#e4e4e7] transition-colors duration-200 cursor-pointer">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/>
-            </svg>
-          </button>
-
-          {/* Search Input Filter */}
-          <div className="flex-1 max-w-[500px] relative mx-4">
-            <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
-              <Search className="w-[15px] h-[15px] text-[#52525b]" />
-            </div>
-            <input 
-              type="text" 
-              placeholder="Filter research, citations, or summaries..." 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[#111111] border border-[#27272a] rounded-[10px] py-[7px] pl-9 pr-9 text-[13px] text-[#e4e4e7] placeholder-[#52525b] focus:outline-none focus:border-[#52525b] transition-colors"
-            />
-            {searchQuery && (
-              <button 
-                onClick={() => setSearchQuery('')}
-                className="absolute inset-y-0 right-3 flex items-center text-[#52525b] hover:text-[#e4e4e7] transition-colors cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
+        <header className="h-[38px] flex items-end shrink-0 bg-[#070707] px-2">
+          
+          <div className="flex items-center gap-3 h-full pb-1.5 pt-1.5">
+            <button className="text-[#a1a1aa] hover:text-[#e4e4e7] transition-colors duration-200 cursor-pointer p-1 rounded-md hover:bg-[#1a1a1a]">
+              <PanelLeft className="w-[18px] h-[18px]" />
+            </button>
           </div>
 
+          {/* Tabs Container */}
+          <div className="flex items-end h-full ml-3 gap-[2px]">
+            {/* Home Tab */}
+            <div 
+              onClick={() => setActiveTab('home')}
+              className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[10px] transition-colors cursor-pointer text-[13px] ${
+                activeTab === 'home' 
+                  ? 'bg-[#121212] text-[#e4e4e7]' 
+                  : 'bg-[#1a1a1a]/40 hover:bg-[#1a1a1a]/80 text-[#a1a1aa]'
+              }`}
+            >
+              <Home className="w-3.5 h-3.5" />
+              <span>Home</span>
+            </div>
+
+            {/* Document Tab */}
+            <div 
+              onClick={() => setActiveTab('document')}
+              className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[10px] transition-colors cursor-pointer text-[13px] ${
+                activeTab === 'document'
+                  ? 'bg-[#121212] text-[#e4e4e7]'
+                  : 'bg-[#1a1a1a]/40 hover:bg-[#1a1a1a]/80 text-[#a1a1aa]'
+              }`}
+            >
+              <FileSignature className="w-3.5 h-3.5" />
+              <span className="truncate max-w-[130px]">{documentTitle ? documentTitle : 'Untitled'}</span>
+            </div>
+
+            {/* Add Tab Button */}
+            <div className="flex items-center justify-center p-2 mb-0.5 ml-1 rounded-md hover:bg-[#1a1a1a] text-[#86868b] hover:text-[#e4e4e7] transition-colors cursor-pointer">
+              <Plus className="w-4 h-4" />
+            </div>
+          </div>
+
+          <div className="flex-1" />
+
           {/* Right Header Navigation & Panel Controls */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 h-full pb-1.5 pt-1.5">
             {!isAssistantOpen && (
               <button 
                 onClick={() => setIsAssistantOpen(true)}
@@ -389,163 +585,316 @@ Let me know if you would like me to draft new sections directly into the documen
         {/* Main Editor Component Container */}
         <div className="relative flex-1 bg-[#121212] rounded-2xl flex flex-col overflow-hidden min-w-0">
           
-          {/* Floating Pill Formatting Bar */}
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 shadow-2xl text-[12px] text-[#a1a1aa] whitespace-nowrap select-none">
-            
-            {/* Font Selector */}
-            <div className="flex items-center">
-              <select 
-                value={editorFont}
-                onChange={(e) => setEditorFont(e.target.value)}
-                className="bg-transparent border-none text-[#e4e4e7] focus:outline-none pr-1 cursor-pointer font-medium text-[11px]"
-              >
-                <option value="font-serif" className="bg-[#121212] text-white">Lora (Serif)</option>
-                <option value="font-sans" className="bg-[#121212] text-white">Inter (Sans)</option>
-                <option value="font-mono" className="bg-[#121212] text-white">JetBrains Mono</option>
-              </select>
+          {activeTab === 'home' ? (
+            <div className="flex-1 overflow-y-auto focus:outline-none scroll-smooth">
+              <div className="max-w-[800px] mx-auto w-full p-8 md:p-14 lg:p-20 flex flex-col justify-center min-h-full">
+                <h1 className="text-3xl md:text-4xl text-[#f4f4f5] font-medium tracking-tight mb-8">Good afternoon.</h1>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
+                  <button 
+                    onClick={() => setActiveTab('document')}
+                    className="flex items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-colors rounded-xl text-left cursor-pointer group"
+                  >
+                    <div className="w-10 h-10 bg-[#27272a] rounded-lg flex items-center justify-center mr-4 group-hover:scale-105 transition-transform">
+                      <FileSignature className="w-5 h-5 text-[#38bdf8]" />
+                    </div>
+                    <div>
+                      <h3 className="text-[#e4e4e7] font-medium text-sm">Resume Document</h3>
+                      <p className="text-[#a1a1aa] text-xs mt-0.5 truncate max-w-[200px]">{documentTitle || 'Untitled Document'}</p>
+                    </div>
+                  </button>
+                  
+                  <button className="flex items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-colors rounded-xl text-left cursor-pointer group">
+                    <div className="w-10 h-10 bg-[#27272a] rounded-lg flex items-center justify-center mr-4 group-hover:scale-105 transition-transform">
+                      <Plus className="w-5 h-5 text-[#e4e4e7]" />
+                    </div>
+                    <div>
+                      <h3 className="text-[#e4e4e7] font-medium text-sm">Create New</h3>
+                      <p className="text-[#a1a1aa] text-xs mt-0.5">Start a blank hypothesis</p>
+                    </div>
+                  </button>
+                </div>
+
+                <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wider mb-4">Recent Folders</h2>
+                <div className="space-y-2">
+                  {[folderName, 'Cognitive Psychology', 'Motor Cortex Analysis', 'Archived Drafts'].map((folder, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-3 px-4 rounded-lg hover:bg-[#1a1a1a] transition-colors cursor-pointer border border-transparent hover:border-[#27272a]">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-[#18181b] flex items-center justify-center">
+                          <span className="text-[#52525b] text-[10px] font-mono select-none">DIR</span>
+                        </div>
+                        <span className="text-[#e4e4e7] text-sm">{folder}</span>
+                      </div>
+                      <span className="text-[#52525b] text-xs font-mono">{idx === 0 ? 'Active' : 'Last week'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
+          ) : (
+            <>
+              {/* Floating Pill Formatting Bar */}
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 shadow-2xl text-[12px] text-[#a1a1aa] whitespace-nowrap select-none">
+                
+                {/* Font Selector */}
+                <div className="flex items-center relative gap-1">
+                  <select 
+                    value={editorFont}
+                    onChange={(e) => setEditorFont(e.target.value)}
+                    className="bg-transparent border-none focus:ring-0 outline-none text-[#e4e4e7] pr-4 cursor-pointer font-medium text-[11px] appearance-none"
+                  >
+                    <option value="font-serif" className="bg-[#121212] text-white">Lora (Serif)</option>
+                    <option value="font-sans" className="bg-[#121212] text-white">Inter (Sans)</option>
+                    <option value="font-mono" className="bg-[#121212] text-white">JetBrains Mono</option>
+                  </select>
+                  <ChevronDown className="w-3 h-3 absolute right-0 pointer-events-none text-[#52525b]" />
+                </div>
 
-            <div className="h-4 w-[1px] bg-[#2d2d30]" />
+                <div className="h-4 w-[1px] bg-[#2d2d30]" />
 
-            {/* Font Size Adjusters */}
-            <div className="flex items-center gap-1.5">
-              <button 
-                onClick={() => setEditorFontSize(Math.max(12, editorFontSize - 1))}
-                className="hover:bg-[#2c2c2e] hover:text-white rounded-full transition-colors text-[11px] font-bold w-5 h-5 flex items-center justify-center cursor-pointer"
-                title="Decrease Font Size"
-              >
-                -
-              </button>
-              <span className="text-[11.5px] font-mono w-6 text-center text-[#e4e4e7]">{editorFontSize}px</span>
-              <button 
-                onClick={() => setEditorFontSize(Math.min(32, editorFontSize + 1))}
-                className="hover:bg-[#2c2c2e] hover:text-white rounded-full transition-colors text-[11px] font-bold w-5 h-5 flex items-center justify-center cursor-pointer"
-                title="Increase Font Size"
-              >
-                +
-              </button>
-            </div>
+                {/* Font Size Adjusters */}
+                <div className="flex items-center gap-1.5">
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => changeSelectedFontSize(false)}
+                    className="hover:bg-[#2c2c2e] hover:text-white rounded-full transition-colors text-[11px] font-bold w-5 h-5 flex items-center justify-center cursor-pointer"
+                    title="Decrease Selection Font Size"
+                  >
+                    -
+                  </button>
+                  <span className="text-[11.5px] font-mono w-6 text-center text-[#e4e4e7]">{currentSelectionSize}px</span>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => changeSelectedFontSize(true)}
+                    className="hover:bg-[#2c2c2e] hover:text-white rounded-full transition-colors text-[11px] font-bold w-5 h-5 flex items-center justify-center cursor-pointer"
+                    title="Increase Selection Font Size"
+                  >
+                    +
+                  </button>
+                </div>
 
-            <div className="h-4 w-[1px] bg-[#2d2d30]" />
+                <div className="h-4 w-[1px] bg-[#2d2d30]" />
 
-            {/* Text Alignment Picker */}
-            <div className="flex items-center gap-0.5">
-              <button 
-                onClick={() => setEditorAlign('left')}
-                className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'left' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
-                title="Align Left"
-              >
-                <AlignLeft className="w-3.5 h-3.5" />
-              </button>
-              <button 
-                onClick={() => setEditorAlign('center')}
-                className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'center' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
-                title="Align Center"
-              >
-                <AlignCenter className="w-3.5 h-3.5" />
-              </button>
-              <button 
-                onClick={() => setEditorAlign('right')}
-                className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'right' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
-                title="Align Right"
-              >
-                <AlignRight className="w-3.5 h-3.5" />
-              </button>
-              <button 
-                onClick={() => setEditorAlign('justify')}
-                className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'justify' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
-                title="Align Justify"
-              >
-                <AlignJustify className="w-3.5 h-3.5" />
-              </button>
-            </div>
+                {/* Formatting controls */}
+                <div className="flex items-center gap-0.5">
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('undo')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Undo"
+                  >
+                    <Undo className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('redo')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Redo"
+                  >
+                    <Redo className="w-3.5 h-3.5" />
+                  </button>
+                </div>
 
-            <div className="h-4 w-[1px] bg-[#2d2d30]" />
+                <div className="h-4 w-[1px] bg-[#2d2d30]" />
 
-          </div>
+                <div className="flex items-center gap-0.5">
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('bold')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Bold Selection"
+                  >
+                    <Bold className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('italic')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Italic Selection"
+                  >
+                    <Italic className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('underline')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Underline Selection"
+                  >
+                    <UnderlineIcon className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('strikethrough')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Strikethrough Selection"
+                  >
+                    <Strikethrough className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('subscript')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Subscript"
+                  >
+                    <Subscript className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('superscript')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Superscript"
+                  >
+                    <Superscript className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('hiliteColor')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Highlight Selection"
+                  >
+                    <Highlighter className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('foreColor')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Change Text Color"
+                  >
+                    <Palette className="w-3.5 h-3.5" />
+                  </button>
+                </div>
 
-          {/* Independent Scrollable Document Surface */}
-          <div className="flex-1 overflow-y-auto p-8 pb-24 md:p-14 md:pb-28 lg:p-20 lg:pb-32 focus:outline-none scroll-smooth">
-            <div className={`max-w-[720px] mx-auto xl:mx-0 space-y-[2.2rem] ${editorFont} text-[#d4d4d8]`} style={{ fontSize: `${editorFontSize}px`, textAlign: editorAlign }}>
-              
-              {/* Main Document Title */}
-              <TextareaAutosize 
-                value={documentTitle}
-                onChange={(e) => setDocumentTitle(e.target.value)}
-                className="w-full bg-transparent text-[#f4f4f5] tracking-tight font-normal pb-2 resize-none outline-none leading-[1.25] text-[2.2rem] md:text-[2.6rem]"
-              />
-              
-              {/* Folder Location Meta */}
-              <div className="space-y-2 border-l-2 border-[#242426] pl-4 flex flex-col group/meta">
-                <div className="text-[1.35rem] md:text-[1.5rem] text-[#e4e4e7] font-normal flex items-center gap-2">
-                  <span className="text-[#52525b] text-[12px] font-mono select-none">FOLDER</span>
-                  <input 
-                    type="text"
-                    value={folderName}
-                    onChange={(e) => setFolderName(e.target.value)}
-                    className="bg-transparent text-[#38bdf8] outline-none max-w-[200px]"
+                <div className="h-4 w-[1px] bg-[#2d2d30]" />
+
+                {/* Lists */}
+                <div className="flex items-center gap-0.5">
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('insertUnorderedList')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Bullet List"
+                  >
+                    <List className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('insertOrderedList')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Numbered List"
+                  >
+                    <ListOrdered className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('insertHorizontalRule')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Horizontal Rule"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleFormat('removeFormat')}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                    title="Clear Formatting"
+                  >
+                    <Eraser className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="h-4 w-[1px] bg-[#2d2d30]" />
+
+                {/* Text Alignment Picker */}
+                <div className="flex items-center gap-0.5">
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setEditorAlign('left')}
+                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'left' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
+                    title="Align Left"
+                  >
+                    <AlignLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setEditorAlign('center')}
+                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'center' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
+                    title="Align Center"
+                  >
+                    <AlignCenter className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setEditorAlign('right')}
+                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'right' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
+                    title="Align Right"
+                  >
+                    <AlignRight className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setEditorAlign('justify')}
+                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'justify' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
+                    title="Align Justify"
+                  >
+                    <AlignJustify className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="h-4 w-[1px] bg-[#2d2d30]" />
+
+              </div>
+
+              {/* Independent Scrollable Document Surface */}
+              <div className="flex-1 overflow-y-auto p-8 pb-24 md:p-14 md:pb-28 lg:p-20 lg:pb-32 focus:outline-none scroll-smooth">
+                <div className={`max-w-[720px] mx-auto xl:mx-0 space-y-[2.2rem] ${editorFont} text-[#d4d4d8]`} style={{ fontSize: `${editorFontSize}px`, textAlign: editorAlign }}>
+                  
+                  {/* Main Document Title */}
+                  <TextareaAutosize 
+                    value={documentTitle}
+                    onChange={(e) => setDocumentTitle(e.target.value)}
+                    className="w-full bg-transparent text-[#f4f4f5] tracking-tight font-normal pb-2 resize-none outline-none leading-[1.25] text-[2.2rem] md:text-[2.6rem]"
                   />
-                </div>
-                <div className="text-[1.05rem] text-[#a1a1aa] font-sans flex items-center">
-                  <span className="select-none">Auto-saved inside path:&nbsp;</span>
-                  <span className="text-[#e4e4e7] flex items-center">
-                    <span className="cursor-default">{folderName}/</span>
-                    <input 
-                      type="text"
-                      value={savedNoteName}
-                      onChange={(e) => setSavedNoteName(e.target.value)}
-                      className="bg-transparent underline underline-offset-4 outline-none w-auto max-w-[250px]"
+                  
+                  
+                  {/* Main Document Content Area */}
+                  <div className="min-h-[400px]">
+                    <div
+                      ref={editorRef}
+                      contentEditable
+                      suppressContentEditableWarning
+                      onInput={(e) => {
+                        const html = e.currentTarget.innerHTML;
+                        lastContentRef.current = html;
+                        setDocumentContent(html);
+                      }}
+                      onBlur={() => {
+                        if (editorRef.current) {
+                          const html = editorRef.current.innerHTML;
+                          lastContentRef.current = html;
+                          setDocumentContent(html);
+                        }
+                      }}
+                      className="w-full bg-transparent text-inherit outline-none min-h-[400px] leading-relaxed focus:outline-none markdown-body"
                     />
-                  </span>
+                  </div>
+
+
+
                 </div>
               </div>
-              
-              {/* Research Bibliographies Header */}
-              {papers.length > 0 && (
-                <div className="pt-4 flex items-center justify-between border-t border-[#262626]">
-                  <h3 className="text-[1.25rem] md:text-[1.35rem] text-[#f4f4f5] font-normal">
-                    Papers Imported ({papers.length}):
-                  </h3>
-                  {searchQuery && (
-                    <span className="text-xs bg-[#242426] border border-[#27272a] px-2.5 py-1 rounded-full text-[#38bdf8] font-sans">
-                      Filtered {filteredPapers.length} of {papers.length}
-                    </span>
-                  )}
-                </div>
-              )}
-              
-              {/* Main Document Content Area */}
-              <div className="min-h-[400px]">
-                <TextareaAutosize 
-                  value={documentContent}
-                  onChange={(e) => setDocumentContent(e.target.value)}
-                  placeholder="Start writing your research document here..."
-                  className="w-full bg-transparent text-inherit outline-none resize-none leading-relaxed min-h-[400px]"
-                />
-              </div>
-
-              {/* Concluding segment info */}
-              <div className="pt-8 border-t border-[#262626] flex items-center gap-3">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                <p className="text-[1.125rem] text-[#e4e4e7] font-normal leading-relaxed">
-                  Note created: <span className="font-semibold text-white">{savedNoteName}</span> saved inside the <span className="text-[#38bdf8] font-semibold">{folderName}</span> folder.
-                </p>
-              </div>
-
-            </div>
-          </div>
+            </>
+          )}
           
         </div>
       </div>
 
       {/* Right Section - AI Assistant Window Panel */}
       {isAssistantOpen && (
-          <div className="w-[320px] md:w-[350px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden shadow-2xl animate-slide-in">
+          <div className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden shadow-2xl animate-slide-in">
             
             {/* Assistant Header */}
             <div className="h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212]">
               <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-cyan-400" />
                 <h2 className="text-[#e4e4e7] font-medium text-[13.5px]">AI Research Assistant</h2>
               </div>
               <button 
@@ -564,36 +913,39 @@ Let me know if you would like me to draft new sections directly into the documen
               {messages.map((m) => (
                 <div 
                   key={m.id} 
-                  className={`flex flex-col max-w-[88%] ${m.role === 'user' ? 'self-end bg-[#262626] text-white rounded-br-none' : 'self-start bg-[#161616] border border-[#242426] text-[#d4d4d8] rounded-bl-none'} p-3.5 rounded-xl text-[12.5px] leading-relaxed transition-all`}
+                  className={`flex flex-col ${
+                    m.role === 'user' 
+                      ? 'self-end max-w-[88%] bg-[#262626] text-white rounded-xl rounded-br-none p-3.5' 
+                      : 'self-start max-w-full bg-transparent text-[#d4d4d8] py-2'
+                  } text-[13px] leading-relaxed transition-all`}
                 >
-                  {/* Sender identity */}
-                  <span className={`text-[10px] font-mono uppercase tracking-wider mb-1.5 ${m.role === 'user' ? 'text-[#38bdf8]' : 'text-[#a1a1aa]'}`}>
-                    {m.role === 'user' ? 'Workspace Owner' : 'AI Advisor'}
-                  </span>
-                  
+                  {/* Reasoning Process */}
+                  {m.role === 'assistant' && m.thought && (
+                    <details className="mb-2 group">
+                      <summary className="text-[11px] font-medium text-[#71717a] cursor-pointer hover:text-[#a1a1aa] transition-colors list-none outline-none">
+                        Thought
+                      </summary>
+                      <div className="mt-1 text-[12px] text-[#71717a] py-1 leading-relaxed">
+                        {m.thought}
+                      </div>
+                    </details>
+                  )}
+
                   {/* Text message */}
-                  <div className="whitespace-pre-line prose select-text break-words">
-                    {m.content}
+                  <div className={`select-text break-words ${m.role === 'user' ? 'whitespace-pre-wrap' : 'markdown-body text-[#d4d4d8]'}`}>
+                    {m.role === 'user' ? (
+                      m.content
+                    ) : (
+                      <TypewriterMarkdown content={m.content} timestamp={m.timestamp} />
+                    )}
                   </div>
-                  
-                  {/* Message Timestamp */}
-                  <span className="text-[9px] text-[#52525b] text-right mt-1.5 font-mono select-none">
-                    {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
                 </div>
               ))}
 
               {/* Streaming loading animation state */}
               {isAiTyping && (
-                <div className="self-start bg-[#161616] border border-[#242426] text-[#d4d4d8] rounded-xl rounded-bl-none p-3.5 max-w-[88%] text-[12.5px] leading-relaxed">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-[#a1a1aa] block mb-2">
-                    AI Advisor is Synthesising...
-                  </span>
-                  <div className="flex items-center gap-1.5 py-1">
-                    <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
+                <div className="self-start bg-transparent py-2 max-w-full text-[13px] leading-relaxed select-none">
+                  <span className="shimmer-text font-jakarta font-medium">Thinking...</span>
                 </div>
               )}
 
@@ -612,7 +964,7 @@ Let me know if you would like me to draft new sections directly into the documen
                 </div>
               )}
 
-              <div className="bg-[#222222] rounded-[10px] flex flex-col border border-transparent focus-within:border-[#38bdf8] transition-colors">
+              <div className="bg-[#222222] rounded-[10px] flex flex-col border border-transparent transition-colors">
                 <textarea 
                   placeholder="Ask about your research, sources, or draft content..."
                   value={chatInput}

@@ -36,23 +36,22 @@ function getGeminiClient(): GoogleGenAI {
   return aiInstance;
 }
 
-const systemInstruction = `You are an elite, supportive Academic Research Mentor & Outline Draft Optimizer.
-Your job is to assist the user in framing academic outlines, organizing citation databases, and expanding loose drafting notes into high-quality scholarly paragraphs.
+const systemInstruction = `You are an AI Research Assistant. Your job is to help the user write, organize, and research their document.
 
 You are given the current research context of the user workspace:
 1. "Notes": Loose, raw ideas, citations fragments, or reference quotes.
 2. "Citations": Formatted bibliography entries (APA, MLA, IEEE, Chicago) containing meta-attributes.
-3. "Outline / Drafts": The current tree of hierarchical items containing heading levels, points, draft paragraphs, and links to source citation IDs.
+3. "Outline / Drafts": The current document state.
+
+Please adapt your tone to the user. If they just want to chat casually, be conversational and friendly. If they want help structuring a rigorous academic document, be scholarly and professional. Do not force a long academic evaluation when the user simply says "hi" or "yo"; greet them back naturally. If they ask for help with their document, use the context to provide insightful recommendations, synthesis, or document edits.
 
 Your responses must consist of:
-1. Conversational academic feedback ("content"), guiding the user through logical structure, source synthesis, literature reviews, or thesis formatting.
+1. Conversational feedback ("content").
 2. An optional structured "suggestion" payload ("suggestion") if the user requests or if it would be helpful to:
    - "outline": Propose a structured set of sections (including title, subsections, focal points, draft text suggestions, and cited source IDs mapped from the user's citation collection).
    - "citations": Convert raw notes/citations snippets into clean, standard bibliography objects.
    - "draft_section": Suggest a focused paragraph of highly polished draft markdown text for a specific outline section.
-   - "edit_document": Perform direct inline document edits upating title, adding a paper reference text, or removing a paper reference based on the user's explicit request.
-
-Always match the academic standards: citations should be properly integrated into paragraphs (e.g. MLA "[Author, Page]" or APA "[Author, Year]" style or standard numerical labels if requested), research outlines should flow logically, and content should remain intellectual, rigorous, and clear.`;
+   - "edit_document": Perform direct inline document edits updating title, adding a paper reference text, or removing a paper reference based on the user's explicit request.`;
 
 const geminiResponseSchema = {
   type: Type.OBJECT,
@@ -167,8 +166,6 @@ async function startServer() {
         return;
       }
 
-      const client = getGeminiClient();
-
       const userNoteList = context?.notes || [];
       const userCitationList = context?.citations || [];
       const userOutlineList = context?.outline || [];
@@ -182,46 +179,78 @@ ${JSON.stringify(userNoteList, null, 2)}
 RESEARCH CITATIONS:
 ${JSON.stringify(userCitationList, null, 2)}
 
-CURRENT STRUCTURAL OUTLINE:
+CURRENT STRUCTURAL OUTLINE (EDITOR CONTENT):
 ${JSON.stringify(userOutlineList, null, 2)}
 -------------------------------
 `;
 
-      const contents = messages.map((m: any) => ({
+      const openaiMessages = messages.map((m: any) => ({
         role: m.role,
-        parts: [{ text: m.content }]
+        content: m.content
       }));
 
-      // Inject current workspace context as structural context
-      contents.unshift({
+      // Inject current workspace context
+      openaiMessages.unshift({
         role: "user",
-        parts: [{ text: `Here is my current workspace state:\n${formattedContext}\nTreat this as background info and help me with my next steps.` }]
-      });
-      contents.push({
-        role: "user",
-        parts: [{ text: "Apply our strict academic guidelines, and output a valid JSON response including 'content' and optional 'suggestion' matching the response schema." }]
+        content: `Here is my current workspace state:\n${formattedContext}\nTreat this as background info. I am specifically asking you to help me with my document.`
       });
 
-      const response = await client.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: contents,
-        config: {
-          systemInstruction: systemInstruction,
-          responseMimeType: "application/json",
-          responseSchema: geminiResponseSchema,
-          temperature: 0.2, // Keep it focused and deterministic for academic outputs
-        }
+      // Add system instruction
+      openaiMessages.unshift({
+        role: "system",
+        content: systemInstruction + `
+
+IMPORTANT: You MUST return a valid JSON object. 
+
+DIRECTIVE FOR WRITING TASKS:
+1. ALWAYS use "suggestion.type": "edit_document"
+2. ALWAYS provide long-form text (essays, reports) in "suggestion.replaceContent".
+3. NEVER put long text in "content". Keep "content" under 20 words.
+
+MATCH THIS JSON SCHEMA:
+{
+  "thought": "internal reasoning",
+  "content": "brief summary",
+  "suggestion": {
+     "type": "edit_document",
+     "title": "new title",
+     "replaceContent": "FULL MARKDOWN ESSAY"
+  }
+}
+
+NOTE: Use "replaceContent" if you are rewriting the entire document or creating a new structured layout with headings.`
+      });
+      
+      const response = await fetch("https://api.mistral.ai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.MISTRAL_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "mistral-medium-latest",
+          messages: openaiMessages,
+          response_format: { type: "json_object" },
+          temperature: 0.7
+        })
       });
 
-      const text = response.text;
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Mistral API Error: ${response.status} ${errorText}`);
+      }
+
+      const data = await response.json();
+      const text = data.choices[0].message.content;
+
       if (!text) {
-        throw new Error("Empty response received from Gemini.");
+        throw new Error("Empty response received from Mistral.");
       }
 
       const parsedResponse = JSON.parse(text);
       res.json(parsedResponse);
     } catch (error: any) {
-      console.error("Gemini API Error:", error);
+      console.error("Mistral API Error:", error);
       res.status(500).json({
         error: error.message || "An internal error occurred during processing."
       });
