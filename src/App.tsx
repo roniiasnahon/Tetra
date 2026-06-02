@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import ReactMarkdown from 'react-markdown';
 import { marked } from 'marked';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, 
   ScanLine, 
@@ -38,7 +39,8 @@ import {
   PanelLeft,
   Home,
   FileSignature,
-  ChevronDown
+  ChevronDown,
+  Folder
 } from 'lucide-react';
 
 interface PaperItem {
@@ -90,6 +92,7 @@ const TypewriterMarkdown = ({ content, timestamp }: { content: string, timestamp
 
 export default function App() {
   const [isAssistantOpen, setIsAssistantOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
   // Tab Management
   const [tabs, setTabs] = useState<Tab[]>([
@@ -101,7 +104,7 @@ export default function App() {
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
   
   // Editor Styles and Customizations
-  const [editorFont, setEditorFont] = useState('font-serif');
+  const [editorFont, setEditorFont] = useState('font-jakarta');
   const [editorFontSize, setEditorFontSize] = useState(18);
   const [currentSelectionSize, setCurrentSelectionSize] = useState(18);
   const [editorAlign, setEditorAlign] = useState<'left' | 'center' | 'right' | 'justify'>('left');
@@ -200,35 +203,14 @@ export default function App() {
   const [savedNoteName, setSavedNoteName] = useState('');
   
   // Research Papers Data
-  const [papers, setPapers] = useState<PaperItem[]>([
-    {
-      author: "Marzola et al. (2023)",
-      title: "Exploring the Role of Neuroplasticity in Development, Aging, and Neurodegeneration",
-      description: "Broad review of neuroplasticity mechanisms (synaptic remodeling, neurogenesis) across the lifespan."
-    },
-    {
-      author: "Graybiel & Grafton (2015)",
-      title: "The Striatum: Where Skills and Habits Meet",
-      description: "Foundational work on striatal circuit dynamics during habit and skill acquisition. Full text available, so its passages anchor the note."
-    },
-    {
-      author: "Cramer et al. (2011)",
-      title: "Harnessing neuroplasticity for clinical applications",
-      description: "NIH workshop synthesis on translating plasticity research into training-based interventions."
-    },
-    {
-      author: "Phillips (2017)",
-      title: "Lifestyle Modulators of Neuroplasticity",
-      description: "Evidence for exercise, diet, and cognitive engagement driving neuroplasticity in aging adults."
-    }
-  ]);
+  const [papers, setPapers] = useState<PaperItem[]>([]);
 
   // AI Assistant Chat Messages
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome-msg',
       role: 'assistant',
-      content: "Hello! I am your AI Research Assistant. I have indexed the 4 imported papers regarding neuroplasticity and learning. You can ask me to compile literature syntheses, summarize key trends, or format bibliographies. Click any of the source badges below to focus my response on that paper!",
+      content: "Hello! I am your AI Student Success Mentor. I'm here to help you research, draft, and polish your academic work. You can upload PDFs as sources, ask me to summarize complex topics, or help you structure your next big essay. What are we working on today?",
       timestamp: Date.now() - 60000
     }
   ]);
@@ -317,45 +299,22 @@ export default function App() {
 
     if (lowercase.includes('hi') || lowercase.includes('hello') || lowercase.includes('hey') || lowercase.includes('help') || lowercase.includes('greet')) {
       return {
-        text: `I have reviewed your initial workspace setup. The current title and single-section outline serve as a functional starting point, but to elevate this to a rigorous academic standard, we should restructure the document.
+        text: `I'm ready to help you crush your research! If you have any source material (like PDFs or notes), click the paperclip icon inside the chat box or use the "Plus" button in the Workspace sidebar to add them. 
 
-I suggest organizing your notes and citations into a formal, multi-tiered outline. This structure separates the foundational biology of adult neuroplasticity (Marzola et al., 2023), the specific mechanisms of habit and motor skill acquisition in the striatum (Graybiel & Grafton, 2015), and the clinical and lifestyle interventions that modulate these pathways (Cramer et al., 2011; Phillips, 2017). Below is a proposed structural outline with integrated draft paragraphs that synthesize these sources academically:`
+I can help you:
+1. **Analyze Sources**: Pull out key arguments and data points from your papers.
+2. **Draft Content**: Write high-quality, long-form academic text.
+3. **Structure Outlines**: Organize your thoughts into a logical flow.
+
+What's on your mind?`
       };
     }
 
-    if (lowercase.includes('marzola') || lowercase.includes('neurodegeneration') || lowercase.includes('aging')) {
-      return { text: `According to **Marzola et al. (2023)**, neuroplasticity is not restricted to early developmental windows but remains active across the human lifespan. Their comprehensive review illuminates the delicate balance of synaptic remodeling, microglia pruning, and adult neurogenesis (particularly in the dentate gyrus). They suggest that targeting these latent plasticity pathways offers high-potential clinical vectors for combating neurodegenerative conditions like Alzheimer's or Parkinson's. 
+    return { text: `I'm all set to help you with your project!
 
-Is there a specific mechanism—such as synaptic density maintenance or neurogenesis factors—you would like me to draft a more detailed synthesis on?`};
-    }
-    
-    if (lowercase.includes('graybiel') || lowercase.includes('habit') || lowercase.includes('striatum') || lowercase.includes('skill')) {
-      return { text: `**Graybiel & Grafton (2015)** synthesize groundbreaking evidence regarding the striatum's role in chunking actions. During the developmental cycle of any habit or motor skill, cortical representation shifts deeply into the dorsolateral striatum. Once deep 'chunking' occurs, the neural firing pattern changes: spiking heavily only at the direct onset and termination of the sequence. This explains why consolidated habits are so neurologically persistent and resistant to conscious suppression.
+You haven't added any sources to this workspace yet. Feel free to upload your research papers or drop some notes in the "Notes" section. 
 
-Would you like me to generate a comparative analysis paragraph relating Graybiel's habit loops to cognitive learning curves?`};
-    }
-
-    if (lowercase.includes('cramer') || lowercase.includes('clinical') || lowercase.includes('training')) {
-      return { text: `**Cramer et al. (2011)** provide a critical NIH workshop consensus outline for translating neuroplasticity principles into rehabilitation. They emphasize that therapeutic intervention must rely heavily on specificity, high repetition, and high motivational engagement to drive functional axonal sprouting. Simply performing repetitive actions without task-relevance fails to alter cortical mappings.
-
-Would you like me to map out a clinical rehabilitation outline based on Cramer's key parameters?`};
-    }
-
-    if (lowercase.includes('phillips') || lowercase.includes('lifestyle') || lowercase.includes('diet') || lowercase.includes('exercise')) {
-      return { text: `**Phillips (2017)** provides a meticulous analysis of exogenous lifestyle modulators. Chief among them are physical exercise (which significantly elevates brain-derived neurotrophic factor, or **BDNF**), caloric restriction or healthy nutrition, and structured cognitive engagement. These factors cumulatively enhance cellular resilient states, bolster dendritic branching, and protect the aging cortex from metabolic decline.
-
-I can write a draft detailing how exercise synergizes with cognitive training for you. Should I append that directly?` };
-    }
-
-    return { text: `I have parsed your query against our imported neuroplasticity collection. 
-
-We can look at:
-1. **Marzola et al. (2023)** — Lifespan neuroplasticity & disease.
-2. **Graybiel & Grafton (2015)** — Striatum, habit acquisition & chunking.
-3. **Cramer et al. (2011)** — NIH clinical rehabilitation principles.
-4. **Phillips (2017)** — Exercise, BDNF, and healthy aging buffers.
-
-Let me know if you would like me to draft new sections directly into the document, modify existing content, or provide comparative analysis.`};
+Once you have content, I can help you draft sections, summarize findings, or format your bibliography in APA, MLA, or Chicago style.`};
   };
 
   // Sending chat messages
@@ -535,22 +494,102 @@ Let me know if you would like me to draft new sections directly into the documen
   };
 
   return (
-    <div className="h-screen bg-[#070707] text-[#e4e4e7] font-sans flex gap-[2px] p-[2px] selection:bg-[#262626] overflow-hidden">
+    <div className="h-screen bg-[#070707] text-[#e4e4e7] font-sans flex selection:bg-[#262626] overflow-hidden">
       
-      {/* Left Column (Header + Editor) */}
+      {/* Left Sidebar */}
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <motion.div 
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 240, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="flex flex-col h-full shrink-0 overflow-hidden bg-[#070707] font-jakarta"
+          >
+            {/* User Profile Header */}
+            <div className="p-3 mb-1">
+              <button className="w-full flex items-center gap-2.5 text-[#f4f4f5] text-[12px] hover:bg-[#1a1a1a] p-1.5 rounded-lg transition-colors group">
+                <div className="w-6 h-6 rounded-full bg-[#27272a] flex-shrink-0 flex items-center justify-center overflow-hidden border border-[#3f3f46]">
+                   <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Ron" alt="Avatar" className="w-full h-full object-cover" />
+                </div>
+                <span className="truncate font-medium flex-1 text-left">Asnahon, Ron Niño Miguel L....</span>
+                <ChevronDown className="w-3.5 h-3.5 text-[#71717a] group-hover:text-[#f4f4f5] shrink-0" />
+              </button>
+            </div>
+            
+            {/* Primary Navigation Grid */}
+            <nav className="px-3 grid grid-cols-4 gap-2 mb-6">
+              {[
+                { icon: FileSignature, label: 'Create' },
+                { icon: Home, label: 'Home', active: true },
+                { icon: List, label: 'Library' },
+                { icon: Search, label: 'Search' }
+              ].map((item) => (
+                <button 
+                  key={item.label} 
+                  className={`flex flex-col items-center justify-center gap-1.5 py-2.5 rounded-lg transition-colors ${
+                    item.active 
+                      ? 'bg-[#1a1a1a] text-[#f4f4f5]' 
+                      : 'text-[#52525b] hover:bg-[#1a1a1a] hover:text-[#a1a1aa]'
+                  }`}
+                >
+                  <item.icon className="w-4 h-4 shrink-0" />
+                  <span className="text-[10px] font-medium">{item.label}</span>
+                </button>
+              ))}
+            </nav>
+
+            {/* Files/Chats Toggle Tabs */}
+            <div className="mx-3 mb-4 p-1 bg-[#111111] rounded-lg flex items-center gap-1">
+              <button className="flex-1 py-1 text-[#f4f4f5] text-[11px] font-medium bg-[#27272a] rounded-[6px] shadow-sm transition-all">
+                Files
+              </button>
+              <button className="flex-1 py-1 text-[#71717a] text-[11px] font-medium hover:text-[#a1a1aa] transition-colors">
+                Chats
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto px-3">
+              {/* Folder List */}
+              <div className="space-y-0.5">
+                 <button className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-[#1a1a1a] transition-all group">
+                    <div className="w-4 h-4 flex items-center justify-center shrink-0">
+                       <Folder className="w-4 h-4 text-[#71717a] group-hover:text-[#f4f4f5]" />
+                    </div>
+                    <span className="text-[#a1a1aa] text-[12.5px] font-medium truncate group-hover:text-[#f4f4f5]">My Research</span>
+                 </button>
+              </div>
+            </div>
+
+            {/* Bottom Section */}
+            <div className="mt-auto p-3">
+              <button className="w-full flex items-center gap-2 px-2 py-2 text-[#71717a] hover:text-[#a1a1aa] text-[12px] font-medium transition-colors">
+                <HelpCircle className="w-3.5 h-3.5" />
+                <span>Support</span>
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Main Content (Editor Column) */}
       <div className="flex-1 flex flex-col min-w-0">
         
         {/* Header Bar */}
         <header className="h-[38px] flex items-end shrink-0 bg-[#070707] px-2">
           
-          <div className="flex items-center gap-3 h-full pb-1.5 pt-1.5">
-            <button className="text-[#a1a1aa] hover:text-[#e4e4e7] transition-colors duration-200 cursor-pointer p-1 rounded-md hover:bg-[#1a1a1a]">
+          <div className="flex items-center gap-3 h-full pb-1.5 pt-1.5 group">
+            <button 
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className={`transition-all duration-300 cursor-pointer p-1 rounded-md ${isSidebarOpen ? 'opacity-0 group-hover:opacity-100 bg-[#1a1a1a] text-[#f4f4f5]' : 'text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1a1a1a]'}`}
+              title={isSidebarOpen ? "Close Sidebar" : "Open Sidebar"}
+            >
               <PanelLeft className="w-[18px] h-[18px]" />
             </button>
           </div>
 
           {/* Tabs Container */}
-          <div className="flex items-end h-full ml-3 gap-[2px]">
+          <div className="flex items-end h-full ml-3 gap-[2px] overflow-x-auto no-scrollbar min-w-0">
     {tabs.map((tab) => (
       <div 
         key={tab.id}
@@ -635,7 +674,7 @@ Let me know if you would like me to draft new sections directly into the documen
                     className="flex items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-colors rounded-xl text-left cursor-pointer group"
                   >
                     <div className="w-10 h-10 bg-[#27272a] rounded-lg flex items-center justify-center mr-4 group-hover:scale-105 transition-transform">
-                      <FileSignature className="w-5 h-5 text-[#38bdf8]" />
+                      <FileSignature className="w-5 h-5 text-[#f4f4f5]" />
                     </div>
                     <div>
                       <h3 className="text-[#e4e4e7] font-medium text-sm">Resume Document</h3>
@@ -656,7 +695,7 @@ Let me know if you would like me to draft new sections directly into the documen
 
                 <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wider mb-4">Recent Folders</h2>
                 <div className="space-y-2">
-                  {[folderName, 'Cognitive Psychology', 'Motor Cortex Analysis', 'Archived Drafts'].map((folder, idx) => (
+                  {[folderName || 'My Research', 'Semester Projects', 'Workshops', 'Archived Drafts'].map((folder, idx) => (
                     <div key={idx} className="flex items-center justify-between p-3 px-4 rounded-lg hover:bg-[#1a1a1a] transition-colors cursor-pointer border border-transparent hover:border-[#27272a]">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-[#18181b] flex items-center justify-center">
@@ -673,7 +712,7 @@ Let me know if you would like me to draft new sections directly into the documen
           ) : (
             <>
               {/* Floating Pill Formatting Bar */}
-              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 shadow-2xl text-[12px] text-[#a1a1aa] whitespace-nowrap select-none">
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 shadow-2xl text-[12px] text-[#a1a1aa] whitespace-nowrap select-none max-w-[calc(100%-2rem)] overflow-x-auto no-scrollbar">
                 
                 {/* Font Selector */}
                 <div className="flex items-center relative gap-1">
@@ -682,6 +721,7 @@ Let me know if you would like me to draft new sections directly into the documen
                     onChange={(e) => setEditorFont(e.target.value)}
                     className="bg-transparent border-none focus:ring-0 outline-none text-[#e4e4e7] pr-4 cursor-pointer font-medium text-[11px] appearance-none"
                   >
+                    <option value="font-jakarta" className="bg-[#121212] text-white">Plus Jakarta</option>
                     <option value="font-serif" className="bg-[#121212] text-white">Lora (Serif)</option>
                     <option value="font-sans" className="bg-[#121212] text-white">Inter (Sans)</option>
                     <option value="font-mono" className="bg-[#121212] text-white">JetBrains Mono</option>
@@ -848,7 +888,7 @@ Let me know if you would like me to draft new sections directly into the documen
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => setEditorAlign('left')}
-                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'left' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
+                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'left' ? 'text-[#f4f4f5] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
                     title="Align Left"
                   >
                     <AlignLeft className="w-3.5 h-3.5" />
@@ -856,7 +896,7 @@ Let me know if you would like me to draft new sections directly into the documen
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => setEditorAlign('center')}
-                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'center' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
+                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'center' ? 'text-[#f4f4f5] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
                     title="Align Center"
                   >
                     <AlignCenter className="w-3.5 h-3.5" />
@@ -864,7 +904,7 @@ Let me know if you would like me to draft new sections directly into the documen
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => setEditorAlign('right')}
-                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'right' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
+                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'right' ? 'text-[#f4f4f5] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
                     title="Align Right"
                   >
                     <AlignRight className="w-3.5 h-3.5" />
@@ -872,7 +912,7 @@ Let me know if you would like me to draft new sections directly into the documen
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => setEditorAlign('justify')}
-                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'justify' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
+                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'justify' ? 'text-[#f4f4f5] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
                     title="Align Justify"
                   >
                     <AlignJustify className="w-3.5 h-3.5" />
@@ -885,15 +925,15 @@ Let me know if you would like me to draft new sections directly into the documen
 
               {/* Independent Scrollable Document Surface */}
               <div className="flex-1 overflow-y-auto p-8 pb-24 md:p-14 md:pb-28 lg:p-20 lg:pb-32 focus:outline-none scroll-smooth">
-                <div className={`max-w-[720px] mx-auto xl:mx-0 space-y-[2.2rem] ${editorFont} text-[#d4d4d8]`} style={{ fontSize: `${editorFontSize}px`, textAlign: editorAlign }}>
+                <div className={`max-w-[720px] mx-auto space-y-[1.5rem] ${editorFont} text-[#d4d4d8]`} style={{ fontSize: `${editorFontSize}px`, textAlign: editorAlign }}>
                   
                   {/* Main Document Title */}
                   <TextareaAutosize 
                     value={documentTitle}
                     onChange={(e) => setDocumentTitle(e.target.value)}
-                    className="w-full bg-transparent text-[#f4f4f5] tracking-tight font-normal pb-2 resize-none outline-none leading-[1.25] text-[2.2rem] md:text-[2.6rem]"
+                    placeholder="Untitled"
+                    className="w-full bg-transparent text-[#f4f4f5] tracking-tight font-normal pb-2 resize-none outline-none leading-[1.25] text-[2.2rem] md:text-[2.6rem] placeholder:text-[#3f3f46] font-jakarta"
                   />
-                  
                   
                   {/* Main Document Content Area */}
                   <div className="min-h-[400px]">
@@ -901,6 +941,7 @@ Let me know if you would like me to draft new sections directly into the documen
                       ref={editorRef}
                       contentEditable
                       suppressContentEditableWarning
+                      data-placeholder="Start writing..."
                       onInput={(e) => {
                         const html = e.currentTarget.innerHTML;
                         lastContentRef.current = html;
@@ -929,6 +970,7 @@ Let me know if you would like me to draft new sections directly into the documen
 
       {/* Right Section - AI Assistant Window Panel */}
       {isAssistantOpen && (
+        <div className="p-[4px] flex h-full"> 
           <div className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden shadow-2xl animate-slide-in">
             
             {/* Assistant Header */}
@@ -1033,7 +1075,7 @@ Let me know if you would like me to draft new sections directly into the documen
                     disabled={!chatInput.trim()}
                     className={`transition-colors p-[6px] rounded-md cursor-pointer ${
                       chatInput.trim() 
-                        ? 'text-[#38bdf8] hover:bg-[#2d2d30] hover:text-white' 
+                        ? 'text-[#f4f4f5] hover:bg-[#2d2d30]' 
                         : 'text-[#52525b] cursor-not-allowed'
                     }`}
                   >
@@ -1043,6 +1085,7 @@ Let me know if you would like me to draft new sections directly into the documen
               </div>
             </div>
 
+          </div>
         </div>
       )}
 
