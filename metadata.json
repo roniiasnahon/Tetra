@@ -1,0 +1,6 @@
+{
+  "name": "Research Outline & Draft Organizer",
+  "description": "An interactive research assistant that organizes citations, processes notes, and formats structured outlines and academic drafts using a split-screen workspace.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
