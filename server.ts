@@ -50,6 +50,7 @@ Your responses must consist of:
    - "outline": Propose a structured set of sections (including title, subsections, focal points, draft text suggestions, and cited source IDs mapped from the user's citation collection).
    - "citations": Convert raw notes/citations snippets into clean, standard bibliography objects.
    - "draft_section": Suggest a focused paragraph of highly polished draft markdown text for a specific outline section.
+   - "edit_document": Perform direct inline document edits upating title, adding a paper reference text, or removing a paper reference based on the user's explicit request.
 
 Always match the academic standards: citations should be properly integrated into paragraphs (e.g. MLA "[Author, Page]" or APA "[Author, Year]" style or standard numerical labels if requested), research outlines should flow logically, and content should remain intellectual, rigorous, and clear.`;
 
@@ -67,7 +68,19 @@ const geminiResponseSchema = {
         type: {
           type: Type.STRING,
           description: "Type of suggestion to insert/overwrite",
-          enum: ["outline", "citations", "draft_section"]
+          enum: ["outline", "citations", "draft_section", "edit_document"]
+        },
+        title: {
+          type: Type.STRING,
+          description: "New title for the document if requested to change."
+        },
+        appendContent: {
+          type: Type.STRING,
+          description: "A drafted paragraph or content block to append to the end of the document.",
+        },
+        replaceContent: {
+          type: Type.STRING,
+          description: "Only use this to rewrite or completely replace the document contents if asked."
         },
         outline: {
           type: Type.ARRAY,

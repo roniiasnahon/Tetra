@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
+import TextareaAutosize from 'react-textarea-autosize';
 import { 
   Search, 
   ScanLine, 
-  Bell, 
   X, 
   SendHorizontal, 
   Paperclip, 
@@ -43,7 +43,6 @@ export default function App() {
   const [editorFont, setEditorFont] = useState('font-serif');
   const [editorFontSize, setEditorFontSize] = useState(18);
   const [editorAlign, setEditorAlign] = useState<'left' | 'center' | 'right' | 'justify'>('left');
-  const [isEditMode, setIsEditMode] = useState(false);
   
   // Document Metadata State
   const [documentTitle, setDocumentTitle] = useState('Done and done. Here is a summary of what was set up.');
@@ -113,44 +112,69 @@ export default function App() {
            p.description.toLowerCase().includes(sq);
   });
 
+  const [documentContent, setDocumentContent] = useState(
+    "According to Marzola et al. (2023), neuroplasticity is not restricted to early developmental windows but remains active across the human lifespan. Their comprehensive review illuminates the delicate balance of synaptic remodeling, microglia pruning, and adult neurogenesis.\n\n" +
+    "Graybiel & Grafton (2015) synthesize groundbreaking evidence regarding the striatum's role in chunking actions. During the developmental cycle of any habit or motor skill, cortical representation shifts deeply into the dorsolateral striatum.\n\n" +
+    "Cramer et al. (2011) provide a critical NIH workshop consensus outline for translating neuroplasticity principles into rehabilitation.\n\n" +
+    "Phillips (2017) provides a meticulous analysis of exogenous lifestyle modulators. Chief among them are physical exercise, caloric restriction, and structured cognitive engagement."
+  );
+
   // Intel fallback response generator for offline or key-missing states
-  const getFallbackResponse = (query: string): string => {
+  const getFallbackResponse = (query: string): { text: string; suggestion?: any } => {
     const lowercase = query.toLowerCase();
     
-    if (lowercase.includes('marzola') || lowercase.includes('neurodegeneration') || lowercase.includes('aging')) {
-      return `According to **Marzola et al. (2023)**, neuroplasticity is not restricted to early developmental windows but remains active across the human lifespan. Their comprehensive review illuminates the delicate balance of synaptic remodeling, microglia pruning, and adult neurogenesis (particularly in the dentate gyrus). They suggest that targeting these latent plasticity pathways offers high-potential clinical vectors for combating neurodegenerative conditions like Alzheimer's or Parkinson's. 
+    // Check for inline edits from the user
+    if (lowercase.includes('rename') || lowercase.includes('change title')) {
+      const newTitleMatch = query.match(/(?:rename|change title|title to) ["']?(.+?)["']?$/i);
+      const title = newTitleMatch ? newTitleMatch[1] : `Updated Title - ${new Date().toLocaleTimeString()}`;
+      return {
+        text: `I have updated the document title to "${title}" as you requested.`,
+        suggestion: { type: 'edit_document', title: title }
+      };
+    }
 
-Is there a specific mechanism—such as synaptic density maintenance or neurogenesis factors—you would like me to draft a more detailed synthesis on?`;
+    if (lowercase.includes('remove') || lowercase.includes('delete') || lowercase.includes('clear')) {
+      return {
+        text: `I've cleared out the requested section as directed.`,
+        suggestion: { type: 'edit_document', replaceContent: "Cleared workspace..." }
+      };
+    }
+
+    if (lowercase.includes('add') || lowercase.includes('draft') || lowercase.includes('write')) {
+       return {
+        text: `I have drafted and inserted a new academic synthesis section directly into your document.`,
+        suggestion: {
+          type: 'edit_document',
+          appendContent: "\n\nScholarly consensus indicates that cognitive consolidation is a highly physical, lifestyle-dependent adaptation. It requires both cortical neurodevelopmental responsiveness and striatal automation pathways, which are actively catalyzed by aerobic and cognitive stressors."
+        }
+      };
+    }
+
+    if (lowercase.includes('marzola') || lowercase.includes('neurodegeneration') || lowercase.includes('aging')) {
+      return { text: `According to **Marzola et al. (2023)**, neuroplasticity is not restricted to early developmental windows but remains active across the human lifespan. Their comprehensive review illuminates the delicate balance of synaptic remodeling, microglia pruning, and adult neurogenesis (particularly in the dentate gyrus). They suggest that targeting these latent plasticity pathways offers high-potential clinical vectors for combating neurodegenerative conditions like Alzheimer's or Parkinson's. 
+
+Is there a specific mechanism—such as synaptic density maintenance or neurogenesis factors—you would like me to draft a more detailed synthesis on?`};
     }
     
     if (lowercase.includes('graybiel') || lowercase.includes('habit') || lowercase.includes('striatum') || lowercase.includes('skill')) {
-      return `**Graybiel & Grafton (2015)** synthesize groundbreaking evidence regarding the striatum's role in chunking actions. During the developmental cycle of any habit or motor skill, cortical representation shifts deeply into the dorsolateral striatum. Once deep 'chunking' occurs, the neural firing pattern changes: spiking heavily only at the direct onset and termination of the sequence. This explains why consolidated habits are so neurologically persistent and resistant to conscious suppression.
+      return { text: `**Graybiel & Grafton (2015)** synthesize groundbreaking evidence regarding the striatum's role in chunking actions. During the developmental cycle of any habit or motor skill, cortical representation shifts deeply into the dorsolateral striatum. Once deep 'chunking' occurs, the neural firing pattern changes: spiking heavily only at the direct onset and termination of the sequence. This explains why consolidated habits are so neurologically persistent and resistant to conscious suppression.
 
-Would you like me to generate a comparative analysis paragraph relating Graybiel's habit loops to cognitive learning curves?`;
+Would you like me to generate a comparative analysis paragraph relating Graybiel's habit loops to cognitive learning curves?`};
     }
 
     if (lowercase.includes('cramer') || lowercase.includes('clinical') || lowercase.includes('training')) {
-      return `**Cramer et al. (2011)** provide a critical NIH workshop consensus outline for translating neuroplasticity principles into rehabilitation. They emphasize that therapeutic intervention must rely heavily on specificity, high repetition, and high motivational engagement to drive functional axonal sprouting. Simply performing repetitive actions without task-relevance fails to alter cortical mappings.
+      return { text: `**Cramer et al. (2011)** provide a critical NIH workshop consensus outline for translating neuroplasticity principles into rehabilitation. They emphasize that therapeutic intervention must rely heavily on specificity, high repetition, and high motivational engagement to drive functional axonal sprouting. Simply performing repetitive actions without task-relevance fails to alter cortical mappings.
 
-Would you like me to map out a clinical rehabilitation outline based on Cramer's key parameters?`;
+Would you like me to map out a clinical rehabilitation outline based on Cramer's key parameters?`};
     }
 
     if (lowercase.includes('phillips') || lowercase.includes('lifestyle') || lowercase.includes('diet') || lowercase.includes('exercise')) {
-      return `**Phillips (2017)** provides a meticulous analysis of exogenous lifestyle modulators. Chief among them are physical exercise (which significantly elevates brain-derived neurotrophic factor, or **BDNF**), caloric restriction or healthy nutrition, and structured cognitive engagement. These factors cumulatively enhance cellular resilient states, bolster dendritic branching, and protect the aging cortex from metabolic decline.
+      return { text: `**Phillips (2017)** provides a meticulous analysis of exogenous lifestyle modulators. Chief among them are physical exercise (which significantly elevates brain-derived neurotrophic factor, or **BDNF**), caloric restriction or healthy nutrition, and structured cognitive engagement. These factors cumulatively enhance cellular resilient states, bolster dendritic branching, and protect the aging cortex from metabolic decline.
 
-I can write a draft detailing how exercise synergizes with cognitive training for you. Should I append that directly?`;
+I can write a draft detailing how exercise synergizes with cognitive training for you. Should I append that directly?` };
     }
 
-    if (lowercase.includes('draft') || lowercase.includes('write') || lowercase.includes('summary') || lowercase.includes('synthesis')) {
-      return `I would be glad to draft a academic synthesis for you. Based on your active workspace papers (**Marzola et al., 2023** on neurobiology, **Graybiel & Grafton, 2015** on striatal execution, and **Phillips, 2017** on BDNF upregulation), we can frame learning as a multi-tier network remodel. 
-
-Here is a drafted sentence you can add:
-> *"Scholarly consensus indicates that cognitive consolidation is a highly physical, lifestyle-dependent adaptation. It requires both cortical neurodevelopmental responsiveness (Marzola et al., 2023) and striatal automation pathways (Graybiel & Grafton, 2015), which are actively catalyzed by aerobic and cognitive lifestyle stressors (Phillips, 2017)."*
-
-Feel free to copy this or ask me to expand further!`;
-    }
-
-    return `I have parsed your query against our imported neuroplasticity collection. 
+    return { text: `I have parsed your query against our imported neuroplasticity collection. 
 
 We can look at:
 1. **Marzola et al. (2023)** — Lifespan neuroplasticity & disease.
@@ -158,7 +182,7 @@ We can look at:
 3. **Cramer et al. (2011)** — NIH clinical rehabilitation principles.
 4. **Phillips (2017)** — Exercise, BDNF, and healthy aging buffers.
 
-Let me know if you would like a comparative literature review, APA referencing, or structured drafted sections!`;
+Let me know if you would like me to draft new sections directly into the document, modify existing content, or provide comparative analysis.`};
   };
 
   // Sending chat messages
@@ -203,7 +227,7 @@ Let me know if you would like a comparative literature review, APA referencing, 
               level: 1,
               title: documentTitle,
               points: [folderName, savedNoteName],
-              draftContent: papers.map(p => `${p.author}: ${p.description}`).join('\n\n'),
+              draftContent: documentContent,
               linkedCitations: []
             }]
           }
@@ -236,13 +260,27 @@ Let me know if you would like a comparative literature review, APA referencing, 
             description: c.quoteSnippet || `${c.authors} review on ${c.source}`
           }));
           setPapers(prev => [...prev, ...newPapers]);
+        } else if (data.suggestion.type === 'edit_document') {
+          if (data.suggestion.title) setDocumentTitle(data.suggestion.title);
+          if (data.suggestion.appendContent) setDocumentContent(prev => prev + data.suggestion.appendContent);
+          if (data.suggestion.replaceContent) setDocumentContent(data.suggestion.replaceContent);
         }
       }
 
     } catch (e) {
       console.warn("Express server Gemini API failed, using deep local simulation rules:", e);
       // Fallback safely to our local academic intelligence
-      const simulatedAnswer = getFallbackResponse(textToSend);
+      const fallbackPayload = getFallbackResponse(textToSend);
+      const simulatedAnswer = fallbackPayload.text;
+      
+      if (fallbackPayload.suggestion) {
+        if (fallbackPayload.suggestion.type === 'edit_document') {
+          if (fallbackPayload.suggestion.title) setDocumentTitle(fallbackPayload.suggestion.title);
+          if (fallbackPayload.suggestion.appendContent) setDocumentContent(prev => prev + fallbackPayload.suggestion.appendContent);
+          if (fallbackPayload.suggestion.replaceContent) setDocumentContent(fallbackPayload.suggestion.replaceContent);
+        }
+      }
+
       setTimeout(() => {
         setMessages(prev => [
           ...prev,
@@ -299,400 +337,213 @@ Let me know if you would like a comparative literature review, APA referencing, 
   };
 
   return (
-    <div className="h-screen bg-[#070707] text-[#e4e4e7] font-sans flex flex-col selection:bg-[#262626] overflow-hidden">
+    <div className="h-screen bg-[#070707] text-[#e4e4e7] font-sans flex gap-[2px] p-[2px] selection:bg-[#262626] overflow-hidden">
       
-      {/* Header Bar */}
-      <header className="h-[60px] flex items-center justify-between px-4 shrink-0 border-b border-[#1c1c1e] bg-[#070707]">
-        <button className="text-[#52525b] hover:text-[#e4e4e7] p-2 transition-colors duration-200 cursor-pointer">
-          {/* Custom Folder Icon that is outlined and minimal */}
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/>
-          </svg>
-        </button>
-
-        {/* Search Input Filter */}
-        <div className="flex-1 max-w-[500px] relative mx-4">
-          <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
-            <Search className="w-[15px] h-[15px] text-[#52525b]" />
-          </div>
-          <input 
-            type="text" 
-            placeholder="Filter research, citations, or summaries..." 
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-[#111111] border border-[#27272a] rounded-[10px] py-[7px] pl-9 pr-9 text-[13px] text-[#e4e4e7] placeholder-[#52525b] focus:outline-none focus:border-[#52525b] transition-colors"
-          />
-          {searchQuery && (
-            <button 
-              onClick={() => setSearchQuery('')}
-              className="absolute inset-y-0 right-3 flex items-center text-[#52525b] hover:text-[#e4e4e7] transition-colors cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-
-        {/* Right Header Navigation & Panel Controls */}
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setIsAssistantOpen(!isAssistantOpen)}
-            className={`text-[#52525b] hover:text-[#e4e4e7] relative p-2 transition-colors cursor-pointer rounded-md ${
-              isAssistantOpen ? 'text-[#38bdf8] bg-[#18181b]' : ''
-            }`}
-            title="Toggle Assistant Sidebar"
-          >
-            {isAssistantOpen ? <PanelRightClose className="w-[18px] h-[18px]" /> : <PanelRightOpen className="w-[18px] h-[18px]" />}
-          </button>
-          
-          <div className="w-[30px] h-[30px] rounded-full bg-zinc-800 overflow-hidden border border-[#27272a] flex items-center justify-center shrink-0">
-            <div className="w-full h-full bg-gradient-to-tr from-zinc-700 to-zinc-500 flex items-center justify-center text-[10px] font-bold text-white shadow-inner select-none">U</div>
-          </div>
-          
-          <button className="text-[#52525b] hover:text-[#e4e4e7] relative p-2 transition-colors cursor-pointer rounded-md">
-            <Bell className="w-[18px] h-[18px]" />
-            <span className="absolute top-[9px] right-[9px] w-[5px] h-[5px] bg-[#a1a1aa] rounded-full border border-[#070707]"></span>
-          </button>
-        </div>
-      </header>
-
-      {/* Main Splitted Content */}
-      <main className="flex-1 flex gap-3 p-3 pt-0 overflow-hidden min-h-0">
+      {/* Left Column (Header + Editor) */}
+      <div className="flex-1 flex flex-col min-w-0">
         
-        {/* Left Section - Editor View Component Container */}
-        <div className="flex-1 bg-[#121212] border border-[#262626] rounded-xl flex flex-col overflow-hidden min-w-0 h-full">
+        {/* Header Bar */}
+        <header className="h-[34px] flex items-center justify-between shrink-0 mb-[2px] bg-[#070707] pl-1 pr-1">
+          <button className="text-[#52525b] hover:text-[#e4e4e7] transition-colors duration-200 cursor-pointer">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/>
+            </svg>
+          </button>
+
+          {/* Search Input Filter */}
+          <div className="flex-1 max-w-[500px] relative mx-4">
+            <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+              <Search className="w-[15px] h-[15px] text-[#52525b]" />
+            </div>
+            <input 
+              type="text" 
+              placeholder="Filter research, citations, or summaries..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-[#111111] border border-[#27272a] rounded-[10px] py-[7px] pl-9 pr-9 text-[13px] text-[#e4e4e7] placeholder-[#52525b] focus:outline-none focus:border-[#52525b] transition-colors"
+            />
+            {searchQuery && (
+              <button 
+                onClick={() => setSearchQuery('')}
+                className="absolute inset-y-0 right-3 flex items-center text-[#52525b] hover:text-[#e4e4e7] transition-colors cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Right Header Navigation & Panel Controls */}
+          <div className="flex items-center gap-3">
+            {!isAssistantOpen && (
+              <button 
+                onClick={() => setIsAssistantOpen(true)}
+                className="text-[#52525b] hover:text-[#e4e4e7] relative transition-colors cursor-pointer rounded-md"
+                title="Open Assistant Sidebar"
+              >
+                <PanelRightOpen className="w-[18px] h-[18px]" />
+              </button>
+            )}
+          </div>
+        </header>
+
+        {/* Main Editor Component Container */}
+        <div className="relative flex-1 bg-[#121212] rounded-2xl flex flex-col overflow-hidden min-w-0">
           
-          {/* Google Docs Academic Editor Toolbar */}
-          <div className="h-[48px] shrink-0 border-b border-[#262626] bg-[#161616] rounded-t-xl flex items-center justify-between px-4 text-[12px] text-[#a1a1aa] gap-3 overflow-x-auto scrollbar-none select-none">
+          {/* Floating Pill Formatting Bar */}
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 shadow-2xl text-[12px] text-[#a1a1aa] whitespace-nowrap select-none">
             
-            {/* Toolbar Formatting Options */}
-            <div className="flex items-center gap-2.5 shrink-0">
-              {/* Font Selector */}
+            {/* Font Selector */}
+            <div className="flex items-center">
               <select 
                 value={editorFont}
                 onChange={(e) => setEditorFont(e.target.value)}
-                className="bg-[#242426] border border-[#2a2a2c] text-white rounded px-2.5 py-1 outline-none text-[12px] cursor-pointer"
+                className="bg-transparent border-none text-[#e4e4e7] focus:outline-none pr-1 cursor-pointer font-medium text-[11px]"
               >
-                <option value="font-serif">Lora (Serif)</option>
-                <option value="font-sans">Inter (Sans)</option>
-                <option value="font-mono">JetBrains Mono</option>
+                <option value="font-serif" className="bg-[#121212] text-white">Lora (Serif)</option>
+                <option value="font-sans" className="bg-[#121212] text-white">Inter (Sans)</option>
+                <option value="font-mono" className="bg-[#121212] text-white">JetBrains Mono</option>
               </select>
-
-              <div className="h-4 w-[1px] bg-[#2d2d30]" />
-
-              {/* Font Size Adjusters */}
-              <div className="flex items-center gap-1">
-                <button 
-                  onClick={() => setEditorFontSize(Math.max(12, editorFontSize - 1))}
-                  className="p-1 hover:bg-[#2c2c2e] hover:text-white rounded-md transition-colors text-[11px] font-bold w-6 h-6 flex items-center justify-center"
-                  title="Decrease Font Size"
-                >
-                  -
-                </button>
-                <span className="text-[11.5px] font-mono px-1 w-8 text-center text-[#e4e4e7]">{editorFontSize}px</span>
-                <button 
-                  onClick={() => setEditorFontSize(Math.min(32, editorFontSize + 1))}
-                  className="p-1 hover:bg-[#2c2c2e] hover:text-white rounded-md transition-colors text-[11px] font-bold w-6 h-6 flex items-center justify-center"
-                  title="Increase Font Size"
-                >
-                  +
-                </button>
-              </div>
-
-              <div className="h-4 w-[1px] bg-[#2d2d30]" />
-
-              {/* Text Alignment Picker */}
-              <div className="flex items-center gap-0.5 bg-[#1a1a1c] p-0.5 rounded-lg border border-[#2a2a2c]">
-                <button 
-                  onClick={() => setEditorAlign('left')}
-                  className={`p-1 rounded-md transition-colors ${editorAlign === 'left' ? 'bg-[#2c2c2e] text-[#38bdf8]' : 'hover:text-white hover:bg-[#202022]'}`}
-                  title="Align Left"
-                >
-                  <AlignLeft className="w-3.5 h-3.5" />
-                </button>
-                <button 
-                  onClick={() => setEditorAlign('center')}
-                  className={`p-1 rounded-md transition-colors ${editorAlign === 'center' ? 'bg-[#2c2c2e] text-[#38bdf8]' : 'hover:text-white hover:bg-[#202022]'}`}
-                  title="Align Center"
-                >
-                  <AlignCenter className="w-3.5 h-3.5" />
-                </button>
-                <button 
-                  onClick={() => setEditorAlign('right')}
-                  className={`p-1 rounded-md transition-colors ${editorAlign === 'right' ? 'bg-[#2c2c2e] text-[#38bdf8]' : 'hover:text-white hover:bg-[#202022]'}`}
-                  title="Align Right"
-                >
-                  <AlignRight className="w-3.5 h-3.5" />
-                </button>
-                <button 
-                  onClick={() => setEditorAlign('justify')}
-                  className={`p-1 rounded-md transition-colors ${editorAlign === 'justify' ? 'bg-[#2c2c2e] text-[#38bdf8]' : 'hover:text-white hover:bg-[#202022]'}`}
-                  title="Align Justify"
-                >
-                  <AlignJustify className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              <div className="h-4 w-[1px] bg-[#2d2d30]" />
-
-              {/* Helpful instructions tooltip */}
-              <div className="hidden lg:flex items-center gap-1.5 text-[#52525b]">
-                <FileText className="w-3.5 h-3.5" />
-                <span className="text-[11px]">Academic Document Template</span>
-              </div>
-
             </div>
 
-            {/* Document States / Read and Edit Modes */}
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="text-[11px] text-[#71717a] font-mono whitespace-nowrap">
-                {wordCount} words
-              </span>
-              <span className="h-4 w-[1px] bg-[#2d2d30]" />
-              
+            <div className="h-4 w-[1px] bg-[#2d2d30]" />
+
+            {/* Font Size Adjusters */}
+            <div className="flex items-center gap-1.5">
               <button 
-                onClick={() => setIsEditMode(!isEditMode)}
-                className={`px-3 py-1 text-[11px] font-medium rounded-md transition-colors duration-200 border cursor-pointer ${
-                  isEditMode 
-                    ? 'bg-[#e4e4e7] text-black border-transparent hover:bg-white font-semibold' 
-                    : 'bg-transparent border-[#27272a] text-[#a1a1aa] hover:text-white hover:bg-[#262626]'
-                }`}
-                title="Toggle Google Doc Edit Mode"
+                onClick={() => setEditorFontSize(Math.max(12, editorFontSize - 1))}
+                className="hover:bg-[#2c2c2e] hover:text-white rounded-full transition-colors text-[11px] font-bold w-5 h-5 flex items-center justify-center cursor-pointer"
+                title="Decrease Font Size"
               >
-                {isEditMode ? '✓ Editing Mode' : '✎ Edit Document'}
+                -
+              </button>
+              <span className="text-[11.5px] font-mono w-6 text-center text-[#e4e4e7]">{editorFontSize}px</span>
+              <button 
+                onClick={() => setEditorFontSize(Math.min(32, editorFontSize + 1))}
+                className="hover:bg-[#2c2c2e] hover:text-white rounded-full transition-colors text-[11px] font-bold w-5 h-5 flex items-center justify-center cursor-pointer"
+                title="Increase Font Size"
+              >
+                +
               </button>
             </div>
+
+            <div className="h-4 w-[1px] bg-[#2d2d30]" />
+
+            {/* Text Alignment Picker */}
+            <div className="flex items-center gap-0.5">
+              <button 
+                onClick={() => setEditorAlign('left')}
+                className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'left' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
+                title="Align Left"
+              >
+                <AlignLeft className="w-3.5 h-3.5" />
+              </button>
+              <button 
+                onClick={() => setEditorAlign('center')}
+                className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'center' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
+                title="Align Center"
+              >
+                <AlignCenter className="w-3.5 h-3.5" />
+              </button>
+              <button 
+                onClick={() => setEditorAlign('right')}
+                className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'right' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
+                title="Align Right"
+              >
+                <AlignRight className="w-3.5 h-3.5" />
+              </button>
+              <button 
+                onClick={() => setEditorAlign('justify')}
+                className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'justify' ? 'text-[#38bdf8] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
+                title="Align Justify"
+              >
+                <AlignJustify className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="h-4 w-[1px] bg-[#2d2d30]" />
 
           </div>
 
           {/* Independent Scrollable Document Surface */}
-          <div className="flex-1 overflow-y-auto p-8 md:p-14 lg:p-20 focus:outline-none scroll-smooth">
+          <div className="flex-1 overflow-y-auto p-8 pb-24 md:p-14 md:pb-28 lg:p-20 lg:pb-32 focus:outline-none scroll-smooth">
             <div className={`max-w-[720px] mx-auto xl:mx-0 space-y-[2.2rem] ${editorFont} text-[#d4d4d8]`} style={{ fontSize: `${editorFontSize}px`, textAlign: editorAlign }}>
               
               {/* Main Document Title */}
-              {isEditMode ? (
-                <div className="space-y-1 text-left">
-                  <label className="text-[11px] text-[#52525b] uppercase font-mono block">Document Title</label>
-                  <textarea 
-                    value={documentTitle}
-                    onChange={(e) => setDocumentTitle(e.target.value)}
-                    className="w-full bg-[#18181b] text-[#f4f4f5] border border-[#27272a] rounded-lg p-3 text-[1.8rem] md:text-[2.2rem] leading-[1.3] font-normal focus:outline-none focus:border-[#38bdf8] transition-colors resize-none filter-none"
-                    rows={2}
-                  />
-                </div>
-              ) : (
-                <h1 className="text-[2.2rem] md:text-[2.6rem] leading-[1.25] text-[#f4f4f5] tracking-tight font-normal pb-2 animate-fade-in">
-                  {documentTitle}
-                </h1>
-              )}
+              <TextareaAutosize 
+                value={documentTitle}
+                onChange={(e) => setDocumentTitle(e.target.value)}
+                className="w-full bg-transparent text-[#f4f4f5] tracking-tight font-normal pb-2 resize-none outline-none leading-[1.25] text-[2.2rem] md:text-[2.6rem]"
+              />
               
               {/* Folder Location Meta */}
-              {isEditMode ? (
-                <div className="grid grid-cols-2 gap-4 text-left">
-                  <div className="space-y-1">
-                    <label className="text-[11px] text-[#52525b] uppercase font-mono block">Workspace Folder</label>
-                    <input 
-                      type="text"
-                      value={folderName}
-                      onChange={(e) => setFolderName(e.target.value)}
-                      className="w-full bg-[#18181b] text-white border border-[#27272a] rounded-lg px-3 py-1.5 text-[13.5px] focus:outline-none focus:border-[#38bdf8] transition-colors"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] text-[#52525b] uppercase font-mono block">Note Descriptor</label>
+              <div className="space-y-2 border-l-2 border-[#242426] pl-4 flex flex-col group/meta">
+                <div className="text-[1.35rem] md:text-[1.5rem] text-[#e4e4e7] font-normal flex items-center gap-2">
+                  <span className="text-[#52525b] text-[12px] font-mono select-none">FOLDER</span>
+                  <input 
+                    type="text"
+                    value={folderName}
+                    onChange={(e) => setFolderName(e.target.value)}
+                    className="bg-transparent text-[#38bdf8] outline-none max-w-[200px]"
+                  />
+                </div>
+                <div className="text-[1.05rem] text-[#a1a1aa] font-sans flex items-center">
+                  <span className="select-none">Auto-saved inside path:&nbsp;</span>
+                  <span className="text-[#e4e4e7] flex items-center">
+                    <span className="cursor-default">{folderName}/</span>
                     <input 
                       type="text"
                       value={savedNoteName}
                       onChange={(e) => setSavedNoteName(e.target.value)}
-                      className="w-full bg-[#18181b] text-white border border-[#27272a] rounded-lg px-3 py-1.5 text-[13.5px] focus:outline-none focus:border-[#38bdf8] transition-colors"
+                      className="bg-transparent underline underline-offset-4 outline-none w-auto max-w-[250px]"
                     />
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2 border-l-2 border-[#242426] pl-4">
-                  <h2 className="text-[1.35rem] md:text-[1.5rem] text-[#e4e4e7] font-normal flex items-center gap-2">
-                    <span className="text-[#52525b] text-[12px] font-mono">FOLDER</span>
-                    <span className="text-[#38bdf8]">{folderName}</span>
-                  </h2>
-                  <p className="text-[1.05rem] text-[#a1a1aa] font-sans">
-                    Auto-saved inside path: <span className="text-[#e4e4e7] underline underline-offset-4 cursor-pointer">{folderName}/{savedNoteName}</span>
-                  </p>
-                </div>
-              )}
-              
-              {/* Research Bibliographies Header */}
-              <div className="pt-4 flex items-center justify-between border-t border-[#262626]">
-                <h3 className="text-[1.25rem] md:text-[1.35rem] text-[#f4f4f5] font-normal">
-                  Papers Imported ({papers.length}):
-                </h3>
-                {searchQuery && (
-                  <span className="text-xs bg-[#242426] border border-[#27272a] px-2.5 py-1 rounded-full text-[#38bdf8] font-sans">
-                    Filtered {filteredPapers.length} of {papers.length}
                   </span>
-                )}
+                </div>
               </div>
               
-              {/* Scrollable list inside left workspace content */}
-              <ul className="space-y-[1.8rem] text-[1.05rem] md:text-[1.125rem]">
-                {isEditMode ? (
-                  // Edit Mode Items view
-                  <div className="space-y-4 font-sans text-left">
-                    {filteredPapers.map((p, idx) => (
-                      <div key={idx} className="bg-[#18181b] border border-[#27272a] p-4.5 rounded-lg space-y-3.5 transition-all">
-                        <div className="flex gap-2.5 items-center justify-between">
-                          <input 
-                            type="text"
-                            value={p.author}
-                            onChange={(e) => {
-                              const updated = [...papers];
-                              const actualIdx = papers.indexOf(p);
-                              if (actualIdx !== -1) {
-                                updated[actualIdx].author = e.target.value;
-                                setPapers(updated);
-                              }
-                            }}
-                            className="bg-[#242426] border border-[#27272a] rounded px-3 py-1 font-mono text-[12.5px] text-[#38bdf8] outline-none max-w-[280px]"
-                            placeholder="Author (Year)"
-                          />
-                          <button 
-                            onClick={() => {
-                              const actualIdx = papers.indexOf(p);
-                              if (actualIdx !== -1) {
-                                const updated = papers.filter((_, i) => i !== actualIdx);
-                                setPapers(updated);
-                              }
-                            }}
-                            className="text-red-400 hover:text-red-300 p-2 rounded hover:bg-[#2c2c2e] transition-colors"
-                            title="Delete Source Citation"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                        <input 
-                          type="text"
-                          value={p.title}
-                          onChange={(e) => {
-                            const updated = [...papers];
-                            const actualIdx = papers.indexOf(p);
-                            if (actualIdx !== -1) {
-                              updated[actualIdx].title = e.target.value;
-                              setPapers(updated);
-                            }
-                          }}
-                          className="w-full bg-[#1e1e21] border border-[#27272a] rounded-md px-3 py-1.5 text-[13.5px] outline-none focus:border-[#38bdf8]"
-                          placeholder="Paper Title"
-                        />
-                        <textarea 
-                          value={p.description}
-                          onChange={(e) => {
-                            const updated = [...papers];
-                            const actualIdx = papers.indexOf(p);
-                            if (actualIdx !== -1) {
-                              updated[actualIdx].description = e.target.value;
-                              setPapers(updated);
-                            }
-                          }}
-                          className="w-full bg-[#1e1e21] border border-[#27272a] rounded-md px-3 py-1.5 text-[12.5px] outline-none resize-none h-20 text-[#a1a1aa] leading-relaxed"
-                          placeholder="Summarized ideas/findings..."
-                        />
-                      </div>
-                    ))}
-
-                    <button 
-                      onClick={() => {
-                        const newPaper: PaperItem = {
-                          author: "New Author et al. (2026)",
-                          title: "New Neurobiology Insights",
-                          description: "Enter detailed research insights, paragraphs, or citation summaries."
-                        };
-                        setPapers([...papers, newPaper]);
-                      }}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-[#242426] hover:bg-[#2d2d30] border border-[#2a2a2c] text-white text-[13px] rounded-lg transition-colors cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4" /> Add Academic Paper Reference
-                    </button>
-                  </div>
-                ) : (
-                  // Reading Mode standard beautiful lists
-                  filteredPapers.map((p, idx) => (
-                    <li key={idx} className="flex gap-4 group/item animate-fade-in">
-                      <span className="text-[#52525b] mt-[0.45rem] text-[0.6rem] shrink-0 select-none">●</span>
-                      <div className="leading-[1.65]">
-                        <span className="text-[#f4f4f5] font-semibold">{p.author}</span>
-                        {" — "}
-                        <span className="text-[#e4e4e7] italic inline-block mr-1">{p.title}.</span>
-                        <span className="text-[#a1a1aa]">{p.description}</span>
-                        
-                        {/* Dynamic Suggestion Attachment Hook */}
-                        <div className="mt-2 opacity-0 group-hover/item:opacity-100 transition-all flex items-center gap-3">
-                          <button 
-                            onClick={() => handleSendMessage(`Draft a summary about standard claims of ${p.author}`)}
-                            className="text-[11px] text-[#38bdf8] hover:underline font-mono flex items-center gap-1"
-                          >
-                            <Sparkles className="w-3 h-3" /> Draft synthesis
-                          </button>
-                          <span className="text-[#27272a] text-xs">|</span>
-                          <button 
-                            onClick={() => {
-                              const citationCopy = `${p.author}. "${p.title}." Academic Repository Database, 2026.`;
-                              navigator.clipboard.writeText(citationCopy);
-                              alert("Citation details copied to clipboard!");
-                            }}
-                            className="text-[11px] text-[#a1a1aa] hover:underline font-mono"
-                          >
-                            Copy APA bibliography
-                          </button>
-                        </div>
-                      </div>
-                    </li>
-                  ))
-                )}
-                {filteredPapers.length === 0 && (
-                  <div className="py-12 text-center text-[#52525b] font-sans">
-                    <AlertCircle className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                    <p className="text-[14px]">No sources match your active query.</p>
-                    <button 
-                      onClick={() => setSearchQuery('')}
-                      className="mt-2 text-xs text-[#38bdf8] hover:underline font-mono"
-                    >
-                      Clear search filter
-                    </button>
-                  </div>
-                )}
-              </ul>
-
-              {/* Concluding segment info */}
-              {!isEditMode && (
-                <div className="pt-8 border-t border-[#262626] flex items-center gap-3">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                  <p className="text-[1.125rem] text-[#e4e4e7] font-normal leading-relaxed">
-                    Note created: <span className="font-semibold text-white">{savedNoteName}</span> saved inside the <span className="text-[#38bdf8] font-semibold">{folderName}</span> folder.
-                  </p>
+              {/* Research Bibliographies Header */}
+              {papers.length > 0 && (
+                <div className="pt-4 flex items-center justify-between border-t border-[#262626]">
+                  <h3 className="text-[1.25rem] md:text-[1.35rem] text-[#f4f4f5] font-normal">
+                    Papers Imported ({papers.length}):
+                  </h3>
+                  {searchQuery && (
+                    <span className="text-xs bg-[#242426] border border-[#27272a] px-2.5 py-1 rounded-full text-[#38bdf8] font-sans">
+                      Filtered {filteredPapers.length} of {papers.length}
+                    </span>
+                  )}
                 </div>
               )}
+              
+              {/* Main Document Content Area */}
+              <div className="min-h-[400px]">
+                <TextareaAutosize 
+                  value={documentContent}
+                  onChange={(e) => setDocumentContent(e.target.value)}
+                  placeholder="Start writing your research document here..."
+                  className="w-full bg-transparent text-inherit outline-none resize-none leading-relaxed min-h-[400px]"
+                />
+              </div>
+
+              {/* Concluding segment info */}
+              <div className="pt-8 border-t border-[#262626] flex items-center gap-3">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                <p className="text-[1.125rem] text-[#e4e4e7] font-normal leading-relaxed">
+                  Note created: <span className="font-semibold text-white">{savedNoteName}</span> saved inside the <span className="text-[#38bdf8] font-semibold">{folderName}</span> folder.
+                </p>
+              </div>
 
             </div>
           </div>
           
-          {/* Docs Metadata Status Indicator */}
-          <div className="h-[36px] bg-[#161616] border-t border-[#262626] shrink-0 px-4 flex items-center justify-between text-[11px] text-[#52525b] font-mono select-none">
-            <div className="flex items-center gap-3">
-              <span>STATUS: AUTO-SAVED IN REALTIME</span>
-              <span>•</span>
-              <span className="text-[#38bdf8]">{papers.length} SOURCES ATTACHED</span>
-            </div>
-            <div>
-              <span>UTF-8</span>
-            </div>
-          </div>
-
         </div>
+      </div>
 
-        {/* Right Section - AI Assistant Window Panel */}
-        {isAssistantOpen && (
-          <div className="w-[320px] md:w-[350px] bg-[#121212] border border-[#262626] rounded-xl flex flex-col h-full shrink-0 overflow-hidden shadow-2xl animate-slide-in">
+      {/* Right Section - AI Assistant Window Panel */}
+      {isAssistantOpen && (
+          <div className="w-[320px] md:w-[350px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden shadow-2xl animate-slide-in">
             
             {/* Assistant Header */}
-            <div className="h-[52px] flex items-center justify-between px-5 border-b border-[#262626] shrink-0 bg-[#121212]">
+            <div className="h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212]">
               <div className="flex items-center gap-2">
                 <div className="w-2.5 h-2.5 rounded-full bg-cyan-400" />
                 <h2 className="text-[#e4e4e7] font-medium text-[13.5px]">AI Research Assistant</h2>
@@ -703,28 +554,8 @@ Let me know if you would like a comparative literature review, APA referencing, 
                 aria-label="Close Assistant"
                 title="Collapse Panel"
               >
-                <X className="w-4 h-4" />
+                <PanelRightClose className="w-4 h-4" />
               </button>
-            </div>
-
-            {/* Citations / Sources index panel (Sticky at top of advisor side) */}
-            <div className="p-4 border-b border-[#262626] bg-[#161616] shrink-0">
-              <h3 className="text-[#e4e4e7] text-[12px] mb-2.5 font-normal flex items-center justify-between">
-                <span>Active Research Sources:</span>
-                <span className="text-[10.5px] font-mono text-[#52525b]">Click a pill to prompt</span>
-              </h3>
-              <div className="flex flex-wrap gap-2 max-h-[82px] overflow-y-auto scrollbar-none pr-1">
-                {papers.map((p, idx) => (
-                  <button 
-                    key={idx}
-                    onClick={() => handleSendMessage(`Analyze the claims of ${p.author} and synthesise with our current note.`)}
-                    className="px-2.5 py-1 bg-[#262626] hover:bg-[#343438] hover:text-[#38bdf8] transition-colors border border-transparent rounded-[100px] text-[11.5px] text-[#d4d4d8] cursor-pointer max-w-[150px] truncate text-left"
-                    title={p.title}
-                  >
-                    {p.author}
-                  </button>
-                ))}
-              </div>
             </div>
 
             {/* Scrollable Conversation Stream Pane (Scrollable completely independently from Left Editor view) */}
@@ -771,7 +602,7 @@ Let me know if you would like a comparative literature review, APA referencing, 
             </div>
 
             {/* Workspace Assistant Prompt Input Bar (Fixed at layout bottom) */}
-            <div className="p-3.5 shrink-0 bg-[#121212] border-t border-[#262626]">
+            <div className="p-3.5 shrink-0 bg-[#121212]">
               {selectedFileLabel && (
                 <div className="bg-[#18181b] border border-[#27272a] rounded px-2.5 py-1.5 text-xs text-[#a1a1aa] mb-2 flex items-center justify-between animate-fade-in">
                   <span className="truncate">Attaching: {selectedFileLabel}</span>
@@ -820,21 +651,7 @@ Let me know if you would like a comparative literature review, APA referencing, 
               </div>
             </div>
 
-          </div>
-        )}
-
-      </main>
-
-      {/* Floating Panel Re-opener handle (Visible only if user closed the sidebar) */}
-      {!isAssistantOpen && (
-        <button 
-          onClick={() => setIsAssistantOpen(true)}
-          className="absolute right-4 bottom-5 px-3 py-2 bg-[#222222] border border-[#2d2d30] hover:border-[#38bdf8] hover:text-[#38bdf8] text-[#a1a1aa] rounded-full text-xs font-mono transition-all flex items-center gap-1.5 shadow-xl select-none cursor-pointer duration-200"
-          title="Open AI Research Assistant"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-[#38bdf8]" />
-          <span>Open Advisor</span>
-        </button>
+        </div>
       )}
 
     </div>
