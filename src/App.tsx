@@ -3,45 +3,7 @@ import TextareaAutosize from 'react-textarea-autosize';
 import ReactMarkdown from 'react-markdown';
 import { marked } from 'marked';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Search, 
-  ScanLine, 
-  X, 
-  SendHorizontal, 
-  Paperclip, 
-  PanelRightClose, 
-  PanelRightOpen,
-  Sparkles,
-  Plus,
-  Trash2,
-  FileText,
-  Check,
-  AlertCircle,
-  HelpCircle,
-  Bold,
-  Italic,
-  Underline as UnderlineIcon,
-  Strikethrough,
-  List,
-  ListOrdered,
-  Minus,
-  Eraser,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
-  AlignJustify,
-  Undo,
-  Redo,
-  Subscript,
-  Superscript,
-  Highlighter,
-  Palette,
-  PanelLeft,
-  Home,
-  FileSignature,
-  ChevronDown,
-  Folder
-} from 'lucide-react';
+import { Icon } from '@iconify/react';
 
 interface PaperItem {
   author: string;
@@ -63,36 +25,178 @@ interface ChatMessage {
   timestamp: number;
 }
 
-const TypewriterMarkdown = ({ content, timestamp }: { content: string, timestamp: number }) => {
+const TypewriterMarkdown = ({ content, timestamp, isStreaming }: { content: string, timestamp: number, isStreaming?: boolean }) => {
   const [displayedContent, setDisplayedContent] = useState('');
+  const contentRef = useRef(content);
   const shouldAnimate = useRef(Date.now() - timestamp < 2000);
 
   useEffect(() => {
+    contentRef.current = content;
     if (!shouldAnimate.current) {
-      setDisplayedContent(content);
+       setDisplayedContent(content);
+    }
+  }, [content]);
+
+  useEffect(() => {
+    if (!shouldAnimate.current) {
+      setDisplayedContent(contentRef.current);
       return;
     }
 
-    let currentIndex = 0;
     const interval = setInterval(() => {
-      currentIndex += 5; // characters per tick
-      if (currentIndex >= content.length) {
-        clearInterval(interval);
-        setDisplayedContent(content);
-      } else {
-        setDisplayedContent(content.substring(0, currentIndex));
-      }
+      setDisplayedContent(prev => {
+        const target = contentRef.current;
+        if (prev.length < target.length) {
+          return target.substring(0, prev.length + 5);
+        }
+        
+        // If we caught up, and no longer streaming overall, we can stop the interval
+        if (prev.length >= target.length && !isStreaming) {
+          clearInterval(interval);
+          return target;
+        }
+
+        return prev;
+      });
     }, 15);
 
     return () => clearInterval(interval);
-  }, [content]);
+  }, [timestamp, isStreaming]);
 
   return <ReactMarkdown>{displayedContent}</ReactMarkdown>;
+};
+
+const parseAssistantResponse = (text: string) => {
+  let thought = "";
+  let chat = "";
+  let title = "";
+  let replaceContent = "";
+
+  const lowerText = text.toLowerCase();
+
+  const thoughtStartTagIdx = lowerText.indexOf("<thought>");
+  let thoughtStartIdx = thoughtStartTagIdx !== -1 ? thoughtStartTagIdx + 9 : -1;
+  if (thoughtStartIdx === -1 && lowerText.trim().length > 0) {
+    const firstTagIdx = Math.min(
+      lowerText.indexOf("<chat>") !== -1 ? lowerText.indexOf("<chat>") : Infinity,
+      lowerText.indexOf("<title>") !== -1 ? lowerText.indexOf("<title>") : Infinity,
+      lowerText.indexOf("<replacecontent>") !== -1 ? lowerText.indexOf("<replacecontent>") : Infinity
+    );
+    if (firstTagIdx > 0 && firstTagIdx !== Infinity) {
+      thoughtStartIdx = 0;
+    } else if (firstTagIdx === Infinity) {
+      thoughtStartIdx = 0;
+    }
+  }
+
+  let thoughtEndIdx = -1;
+  let chatStartSearchIdx = 0;
+
+  if (thoughtStartIdx !== -1) {
+    const thoughtEndTagIdx = lowerText.indexOf("</thought>", thoughtStartIdx);
+    if (thoughtEndTagIdx !== -1) {
+      thoughtEndIdx = thoughtEndTagIdx;
+      chatStartSearchIdx = thoughtEndTagIdx + 10;
+    } else {
+      const chatTagIdx = lowerText.indexOf("<chat>", thoughtStartIdx);
+      if (chatTagIdx !== -1) {
+        thoughtEndIdx = chatTagIdx;
+        chatStartSearchIdx = chatTagIdx;
+      }
+    }
+
+    if (thoughtEndIdx !== -1) {
+      thought = text.substring(thoughtStartIdx, thoughtEndIdx).trim();
+    } else {
+      thought = text.substring(thoughtStartIdx).trim();
+    }
+  }
+
+  const chatStartTagIdx = lowerText.indexOf("<chat>", chatStartSearchIdx);
+  let chatStartIdx = chatStartTagIdx !== -1 ? chatStartTagIdx + 6 : -1;
+
+  if (chatStartIdx === -1 && chatStartSearchIdx > 0) {
+    const nextTagIdx = Math.min(
+      lowerText.indexOf("<title>", chatStartSearchIdx) !== -1 ? lowerText.indexOf("<title>", chatStartSearchIdx) : Infinity,
+      lowerText.indexOf("<replacecontent>", chatStartSearchIdx) !== -1 ? lowerText.indexOf("<replacecontent>", chatStartSearchIdx) : Infinity
+    );
+    if (nextTagIdx !== Infinity && nextTagIdx > chatStartSearchIdx) {
+      chatStartIdx = chatStartSearchIdx;
+    } else if (nextTagIdx === Infinity) {
+      chatStartIdx = chatStartSearchIdx;
+    }
+  }
+
+  let chatEndIdx = -1;
+  let titleStartSearchIdx = chatStartSearchIdx;
+
+  if (chatStartIdx !== -1) {
+    const chatEndTagIdx = lowerText.indexOf("</chat>", chatStartIdx);
+    if (chatEndTagIdx !== -1) {
+      chatEndIdx = chatEndTagIdx;
+      titleStartSearchIdx = chatEndTagIdx + 7;
+    } else {
+      const nextStructuralTagIdx = Math.min(
+        lowerText.indexOf("<title>", chatStartIdx) !== -1 ? lowerText.indexOf("<title>", chatStartIdx) : Infinity,
+        lowerText.indexOf("<replacecontent>", chatStartIdx) !== -1 ? lowerText.indexOf("<replacecontent>", chatStartIdx) : Infinity
+      );
+      if (nextStructuralTagIdx !== Infinity) {
+        chatEndIdx = nextStructuralTagIdx;
+        titleStartSearchIdx = nextStructuralTagIdx;
+      }
+    }
+
+    if (chatEndIdx !== -1) {
+      chat = text.substring(chatStartIdx, chatEndIdx).trim();
+    } else {
+      chat = text.substring(chatStartIdx).trim();
+    }
+  }
+
+  const titleStartTagIdx = lowerText.indexOf("<title>", titleStartSearchIdx);
+  const titleStartIdx = titleStartTagIdx !== -1 ? titleStartTagIdx + 7 : -1;
+  
+  let titleEndIdx = -1;
+  let contentStartSearchIdx = titleStartSearchIdx;
+
+  if (titleStartIdx !== -1) {
+    const titleEndTagIdx = lowerText.indexOf("</title>", titleStartIdx);
+    if (titleEndTagIdx !== -1) {
+      titleEndIdx = titleEndTagIdx;
+      contentStartSearchIdx = titleEndTagIdx + 8;
+    } else {
+      const contentTagIdx = lowerText.indexOf("<replacecontent>", titleStartIdx);
+      if (contentTagIdx !== -1) {
+        titleEndIdx = contentTagIdx;
+        contentStartSearchIdx = contentTagIdx;
+      }
+    }
+
+    if (titleEndIdx !== -1) {
+      title = text.substring(titleStartIdx, titleEndIdx).trim();
+    } else {
+      title = text.substring(titleStartIdx).trim();
+    }
+  }
+
+  const contentStartTagIdx = lowerText.indexOf("<replacecontent>", contentStartSearchIdx);
+  const contentStartIdx = contentStartTagIdx !== -1 ? contentStartTagIdx + 16 : -1;
+  if (contentStartIdx !== -1) {
+    const contentEndTagIdx = lowerText.indexOf("</replacecontent>", contentStartIdx);
+    if (contentEndTagIdx !== -1) {
+      replaceContent = text.substring(contentStartIdx, contentEndTagIdx).trim();
+    } else {
+      replaceContent = text.substring(contentStartIdx).trim();
+    }
+  }
+
+  return { thought, chat, title, replaceContent };
 };
 
 export default function App() {
   const [isAssistantOpen, setIsAssistantOpen] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [sidebarView, setSidebarView] = useState<'files' | 'chats' | 'search' | 'library'>('files');
   
   // Tab Management
   const [tabs, setTabs] = useState<Tab[]>([
@@ -108,6 +212,8 @@ export default function App() {
   const [editorFontSize, setEditorFontSize] = useState(18);
   const [currentSelectionSize, setCurrentSelectionSize] = useState(18);
   const [editorAlign, setEditorAlign] = useState<'left' | 'center' | 'right' | 'justify'>('left');
+  const [isFontDropdownOpen, setIsFontDropdownOpen] = useState(false);
+  const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
 
   const editorRef = useRef<HTMLDivElement>(null);
   const lastContentRef = useRef('');
@@ -188,14 +294,20 @@ export default function App() {
     }
   };
 
-  const handleFormat = (command: string) => {
-    document.execCommand(command, false);
+  const handleFormat = (command: string, value?: string) => {
+    document.execCommand(command, false, value);
     if (editorRef.current) {
       const html = editorRef.current.innerHTML;
       lastContentRef.current = html;
       setDocumentContent(html);
     }
   };
+
+  useEffect(() => {
+    if (editorRef.current) {
+      editorRef.current.style.textAlign = editorAlign;
+    }
+  }, [editorAlign]);
   
   // Document Metadata State
   const [documentTitle, setDocumentTitle] = useState('');
@@ -204,6 +316,56 @@ export default function App() {
   
   // Research Papers Data
   const [papers, setPapers] = useState<PaperItem[]>([]);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [synthesis, setSynthesis] = useState<string | null>(null);
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
+
+  const handleSearchPapers = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!searchQuery.trim()) return;
+
+    setIsSearching(true);
+    setSynthesis(null);
+    try {
+      const resp = await fetch(`/api/research/papers?q=${encodeURIComponent(searchQuery)}`);
+      const data = await resp.json();
+      setSearchResults(data);
+    } catch (err) {
+      console.error("Search failed:", err);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSynthesize = async () => {
+    if (searchResults.length === 0) return;
+    setIsSynthesizing(true);
+    try {
+      const resp = await fetch('/api/research/synthesize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ papers: searchResults, userQuery: searchQuery })
+      });
+      const data = await resp.json();
+      setSynthesis(data.synthesis);
+    } catch (err) {
+      console.error("Synthesis failed:", err);
+    } finally {
+      setIsSynthesizing(false);
+    }
+  };
+
+  const addPaperToLibrary = (paper: any) => {
+    const authors = paper.authors?.map((a: any) => a.name).join(', ') || 'Unknown Author';
+    const newPaper: PaperItem = {
+      author: `${authors} (${paper.year || 'N/A'})`,
+      title: paper.title,
+      description: paper.abstract || `Paper from ${paper.venue || 'Academic Repository'}`
+    };
+    setPapers(prev => [...prev, newPaper]);
+  };
 
   // AI Assistant Chat Messages
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -257,9 +419,12 @@ export default function App() {
 
   // Helper to convert Markdown to HTML for the editor
   const markdownToHtml = (markdown: string) => {
+    if (!markdown) return "";
     try {
-      // Use marked to parse, but clean it up to avoid top-level double paragraphs etc if needed
-      return marked.parse(markdown, { gfm: true, breaks: true }) as string;
+      // Trim outer whitespace so that heading tags (like ## Introduction) 
+      // placed at the start/ends are parsed as actual headings, not inline text.
+      const trimmedMarkdown = markdown.trim();
+      return marked.parse(trimmedMarkdown, { gfm: true, breaks: true }) as string;
     } catch (e) {
       console.error("Markdown conversion failed", e);
       return markdown;
@@ -370,53 +535,98 @@ Once you have content, I can help you draft sections, summarize findings, or for
         throw new Error('API server returned status ' + response.status);
       }
 
-      const data = await response.json();
-      
-      // Append answer
+      const assistantMessageId = String(Date.now() + 1);
       setMessages(prev => [
         ...prev,
         {
-          id: String(Date.now() + 1),
+          id: assistantMessageId,
           role: 'assistant',
-          content: data.content || "I have analyzed your workspace papers and summarized the response.",
-          thought: data.thought,
+          content: '',
+          thought: '',
           timestamp: Date.now()
         }
       ]);
 
-      // If Gemini/Mistral returned structured citations or outline drafts, we can handle them!
-      if (data.suggestion) {
-        // Automatically switch to document view if AI is editing/suggesting content
-        const docTab = tabs.find(t => t.type === 'document');
-        if (docTab) {
-          setActiveTabId(docTab.id);
-        }
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedText = "";
+      let hasSwitchedToDoc = false;
+      let streamBuffer = "";
 
-        // Robust check: even if type isn't 'edit_document', if we have content blocks, we should process them
-        const isEditAction = data.suggestion.type === 'edit_document' || 
-                           data.suggestion.replaceContent || 
-                           data.suggestion.appendContent || 
-                           data.suggestion.title;
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          streamBuffer += decoder.decode(value, { stream: true });
+          const lines = streamBuffer.split('\n');
+          // Keep the last incomplete line in the buffer
+          streamBuffer = lines.pop() || "";
 
-        if (data.suggestion.type === 'citations' && data.suggestion.citations) {
-          const newPapers: PaperItem[] = data.suggestion.citations.map((c: any) => ({
-            author: `${c.authors} (${c.year})`,
-            title: c.title,
-            description: c.quoteSnippet || `${c.authors} review on ${c.source}`
-          }));
-          setPapers(prev => [...prev, ...newPapers]);
-        } else if (isEditAction) {
-          if (data.suggestion.title) setDocumentTitle(data.suggestion.title);
-          if (data.suggestion.appendContent) {
-            const htmlContent = markdownToHtml(data.suggestion.appendContent);
-            setDocumentContent(prev => prev + htmlContent);
-          }
-          if (data.suggestion.replaceContent) {
-            const htmlContent = markdownToHtml(data.suggestion.replaceContent);
-            setDocumentContent(htmlContent);
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (!trimmedLine) continue;
+            if (trimmedLine.startsWith('data: ')) {
+               const data = trimmedLine.slice(6).trim();
+               if (data === '[DONE]') break;
+               try {
+                 const parsed = JSON.parse(data);
+                 if (parsed.text) {
+                   accumulatedText += parsed.text;
+
+                   // Extract <chat>
+                   const { thought, chat, title: parsedTitle, replaceContent: parsedContent } = parseAssistantResponse(accumulatedText);
+
+                   if (chat !== undefined) {
+                     setMessages(prev => prev.map(m => m.id === assistantMessageId ? { ...m, content: chat } : m));
+                   }
+
+                   if (thought !== undefined) {
+                     setMessages(prev => prev.map(m => m.id === assistantMessageId ? { ...m, thought: thought } : m));
+                   }
+
+                   if (parsedTitle) {
+                     setDocumentTitle(parsedTitle);
+                   }
+
+                   if (parsedContent) {
+                      if (!hasSwitchedToDoc) {
+                        hasSwitchedToDoc = true;
+                        setTabs(prev => {
+                          const docTab = prev.find(t => t.type === 'document');
+                          if (docTab) setActiveTabId(docTab.id);
+                          return prev;
+                        });
+                      }
+                      let rawContent = parsedContent;
+
+                      // Strip conversational prologue before the first markdown header
+                      const headingIndex = rawContent.indexOf('## ');
+                      const h1Index = rawContent.indexOf('# ');
+                      let firstValidIndex = -1;
+                      if (headingIndex !== -1 && h1Index !== -1) firstValidIndex = Math.min(headingIndex, h1Index);
+                      else firstValidIndex = Math.max(headingIndex, h1Index);
+                      
+                      if (firstValidIndex > 0) {
+                        const introPart = rawContent.substring(0, firstValidIndex);
+                        if (/((?:Awesome)|(?:Sure)|(?:I've)|(?:I’ve)|(?:I’ll)|(?:I'll)|(?:Here)|(?:Got it)|(?:chat message))/i.test(introPart)) {
+                          rawContent = rawContent.substring(firstValidIndex);
+                        }
+                      }
+
+                      rawContent = rawContent.trim();
+                      const htmlContent = markdownToHtml(rawContent);
+                      setDocumentContent(htmlContent);
+                   }
+                 }
+               } catch (e) {
+                 // ignore partial JSON parse errors just in case
+               }
+            }
           }
         }
       }
+
+      setIsAiTyping(false);
 
     } catch (e) {
       console.warn("Express server Gemini API failed, using deep local simulation rules:", e);
@@ -507,64 +717,238 @@ Once you have content, I can help you draft sections, summarize findings, or for
             className="flex flex-col h-full shrink-0 overflow-hidden bg-[#070707] font-jakarta"
           >
             {/* User Profile Header */}
-            <div className="p-3 mb-1">
-              <button className="w-full flex items-center gap-2.5 text-[#f4f4f5] text-[12px] hover:bg-[#1a1a1a] p-1.5 rounded-lg transition-colors group">
+            <div className="p-3 mb-1 relative">
+              <button 
+                onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
+                className="w-full flex items-center gap-2.5 text-[#f4f4f5] text-[12px] hover:bg-[#1a1a1a] p-1.5 rounded-lg transition-colors group cursor-pointer"
+              >
                 <div className="w-6 h-6 rounded-full bg-[#27272a] flex-shrink-0 flex items-center justify-center overflow-hidden border border-[#3f3f46]">
                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Ron" alt="Avatar" className="w-full h-full object-cover" />
                 </div>
                 <span className="truncate font-medium flex-1 text-left">Asnahon, Ron Niño Miguel L....</span>
-                <ChevronDown className="w-3.5 h-3.5 text-[#71717a] group-hover:text-[#f4f4f5] shrink-0" />
+                <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 text-[#71717a] group-hover:text-[#f4f4f5] shrink-0 transition-transform duration-200 ${isProfileDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
+
+              <AnimatePresence>
+                {isProfileDropdownOpen && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-30" 
+                      onClick={() => setIsProfileDropdownOpen(false)} 
+                    />
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute left-3 right-3 top-full mt-1 z-40 bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 shadow-2xl overflow-hidden"
+                    >
+                      <div className="px-3 py-2 border-bottom border-[#2d2d30] mb-1">
+                        <p className="text-[10px] text-[#52525b] uppercase font-bold tracking-wider">Account</p>
+                        <p className="text-[12px] text-[#e4e4e7] truncate">asnahonron@gmail.com</p>
+                      </div>
+                      <button className="w-full text-left px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7] transition-colors flex items-center gap-2">
+                        <Icon icon="ph:user" className="w-3.5 h-3.5" />
+                        Settings
+                      </button>
+                      <button className="w-full text-left px-3 py-1.5 text-[12px] text-red-400 hover:bg-red-950/20 transition-colors flex items-center gap-2">
+                        <Icon icon="ph:sign-out" className="w-3.5 h-3.5" />
+                        Log out
+                      </button>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
             </div>
             
             {/* Primary Navigation Grid */}
             <nav className="px-3 grid grid-cols-4 gap-2 mb-6">
               {[
-                { icon: FileSignature, label: 'Create' },
-                { icon: Home, label: 'Home', active: true },
-                { icon: List, label: 'Library' },
-                { icon: Search, label: 'Search' }
+                { icon: 'ph:pencil-line', label: 'Create', onClick: () => {
+                  const newId = `doc-${Date.now()}`;
+                  setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled' }]);
+                  setActiveTabId(newId);
+                  setSidebarView('files');
+                }},
+                { icon: 'ph:house', label: 'Home', onClick: () => {
+                  const homeTab = tabs.find(t => t.type === 'home');
+                  if (homeTab) setActiveTabId(homeTab.id);
+                  setSidebarView('files');
+                }, active: activeTab.type === 'home' && sidebarView === 'files' },
+                { icon: 'ph:books', label: 'Library', onClick: () => setSidebarView('library'), active: sidebarView === 'library' },
+                { icon: 'ph:magnifying-glass', label: 'Search', onClick: () => setSidebarView('search'), active: sidebarView === 'search' }
               ].map((item) => (
                 <button 
                   key={item.label} 
-                  className={`flex flex-col items-center justify-center gap-1.5 py-2.5 rounded-lg transition-colors ${
+                  onClick={item.onClick}
+                  className={`flex flex-col items-center justify-center gap-1.5 py-2.5 rounded-lg transition-all duration-300 cursor-pointer ${
                     item.active 
-                      ? 'bg-[#1a1a1a] text-[#f4f4f5]' 
-                      : 'text-[#52525b] hover:bg-[#1a1a1a] hover:text-[#a1a1aa]'
+                      ? 'text-[#f4f4f5] scale-105' 
+                      : 'text-[#3f3f46] hover:text-[#a1a1aa]'
                   }`}
                 >
-                  <item.icon className="w-4 h-4 shrink-0" />
+                  <Icon icon={item.icon} className="w-4 h-4 shrink-0" />
                   <span className="text-[10px] font-medium">{item.label}</span>
                 </button>
               ))}
             </nav>
 
-            {/* Files/Chats Toggle Tabs */}
-            <div className="mx-3 mb-4 p-1 bg-[#111111] rounded-lg flex items-center gap-1">
-              <button className="flex-1 py-1 text-[#f4f4f5] text-[11px] font-medium bg-[#27272a] rounded-[6px] shadow-sm transition-all">
-                Files
-              </button>
-              <button className="flex-1 py-1 text-[#71717a] text-[11px] font-medium hover:text-[#a1a1aa] transition-colors">
-                Chats
-              </button>
-            </div>
+            {/* Files/Chats Toggle Tabs (Only shown when in files/chats mode) */}
+            {(sidebarView === 'files' || sidebarView === 'chats') && (
+              <div className="mx-3 mb-4 p-1 bg-[#111111] rounded-lg flex items-center gap-1">
+                <button 
+                  onClick={() => setSidebarView('files')}
+                  className={`flex-1 py-1 text-[11px] font-medium rounded-[6px] transition-all ${sidebarView === 'files' ? 'text-[#f4f4f5] bg-[#27272a] shadow-sm' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
+                >
+                  Files
+                </button>
+                <button 
+                  onClick={() => setSidebarView('chats')}
+                  className={`flex-1 py-1 text-[11px] font-medium rounded-[6px] transition-all ${sidebarView === 'chats' ? 'text-[#f4f4f5] bg-[#27272a] shadow-sm' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
+                >
+                  Chats
+                </button>
+              </div>
+            )}
             
             <div className="flex-1 overflow-y-auto px-3">
-              {/* Folder List */}
-              <div className="space-y-0.5">
-                 <button className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-[#1a1a1a] transition-all group">
-                    <div className="w-4 h-4 flex items-center justify-center shrink-0">
-                       <Folder className="w-4 h-4 text-[#71717a] group-hover:text-[#f4f4f5]" />
+              {sidebarView === 'files' && (
+                <div className="space-y-0.5">
+                   <button className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-[#1a1a1a] transition-all group">
+                      <div className="w-4 h-4 flex items-center justify-center shrink-0">
+                         <Icon icon="ph:folder" className="w-4 h-4 text-[#71717a] group-hover:text-[#f4f4f5]" />
+                      </div>
+                      <span className="text-[#a1a1aa] text-[12.5px] font-medium truncate group-hover:text-[#f4f4f5]">My Research</span>
+                   </button>
+                </div>
+              )}
+
+              {sidebarView === 'chats' && (
+                <div className="text-center py-10">
+                  <Icon icon="ph:chat-circle-dots" className="w-8 h-8 text-[#27272a] mx-auto mb-2" />
+                  <p className="text-[11px] text-[#52525b]">No recent chats</p>
+                </div>
+              )}
+
+              {sidebarView === 'library' && (
+                <div className="space-y-3">
+                  <h3 className="text-[10px] text-[#52525b] uppercase font-bold tracking-wider px-2">Citations ({papers.length})</h3>
+                  {papers.length === 0 ? (
+                    <div className="px-2 py-4 border border-dashed border-[#27272a] rounded-xl text-center">
+                      <p className="text-[11px] text-[#52525b]">Library is empty</p>
                     </div>
-                    <span className="text-[#a1a1aa] text-[12.5px] font-medium truncate group-hover:text-[#f4f4f5]">My Research</span>
-                 </button>
-              </div>
+                  ) : (
+                    papers.map((paper, idx) => (
+                      <div key={idx} className="p-2.5 bg-[#161616] border border-[#27272a] rounded-xl hover:border-[#3f3f46] transition-colors group">
+                        <p className="text-[11.5px] text-[#f4f4f5] font-medium leading-tight mb-1">{paper.title}</p>
+                        <p className="text-[10px] text-[#71717a] truncate mb-1.5">{paper.author}</p>
+                        <button 
+                          onClick={() => {
+                            const citation = `\n\n> *Citation: ${paper.title} - ${paper.author}*`;
+                            setDocumentContent(prev => prev + citation);
+                          }}
+                          className="text-[9px] text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity hover:underline"
+                        >
+                          Cite this paper
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {sidebarView === 'search' && (
+                <div className="space-y-4">
+                  <form onSubmit={handleSearchPapers} className="relative">
+                    <input 
+                      autoFocus
+                      placeholder="Search Semantic Scholar..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full bg-[#161616] border border-[#27272a] focus:border-blue-500 rounded-xl px-9 py-2 text-[12px] text-[#f4f4f5] placeholder-[#52525b] outline-none transition-all"
+                    />
+                    <Icon icon="ph:magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#52525b]" />
+                    {isSearching && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <Icon icon="svg-spinners:ring-resize" className="w-4 h-4 text-blue-500" />
+                      </div>
+                    )}
+                  </form>
+
+                  {searchResults.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between px-1">
+                        <h3 className="text-[10px] text-[#52525b] uppercase font-bold tracking-wider">Results</h3>
+                        <button 
+                          onClick={handleSynthesize}
+                          disabled={isSynthesizing}
+                          className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-50"
+                        >
+                          {isSynthesizing ? (
+                             <Icon icon="svg-spinners:ring-resize" className="w-3 h-3" />
+                          ) : (
+                             <Icon icon="ph:sparkle" className="w-3 h-3" />
+                          )}
+                          Synthesize
+                        </button>
+                      </div>
+
+                      {synthesis && (
+                        <motion.div 
+                          initial={{ opacity: 0, scale: 0.98 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-xl mb-4"
+                        >
+                          <p className="text-[10px] text-blue-400 font-bold mb-1.5 uppercase flex items-center gap-1">
+                            <Icon icon="ph:brain" className="w-3 h-3" />
+                            LLM Synthesis
+                          </p>
+                          <div className="text-[11px] text-[#e4e4e7] leading-relaxed italic prose prose-invert">
+                            <ReactMarkdown>{synthesis}</ReactMarkdown>
+                          </div>
+                        </motion.div>
+                      )}
+                      
+                      <div className="space-y-2">
+                        {searchResults.map((paper, idx) => (
+                          <div key={idx} className="p-2.5 bg-[#161616] border border-[#27272a] rounded-xl group hover:border-[#3f3f46] transition-all">
+                            <p className="text-[11px] text-[#f4f4f5] font-medium leading-tight mb-1">{paper.title}</p>
+                            <p className="text-[9.5px] text-[#71717a] mb-2">
+                              {paper.authors?.slice(0, 2).map((a: any) => a.name).join(', ')}
+                              {paper.authors?.length > 2 ? ' et al.' : ''} 
+                              {paper.year ? ` • ${paper.year}` : ''}
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={() => addPaperToLibrary(paper)}
+                                className="px-2 py-1 bg-[#27272a] hover:bg-[#3f3f46] text-[9.5px] font-medium text-[#e4e4e7] rounded-md transition-colors"
+                              >
+                                Save to Library
+                              </button>
+                              {paper.url && (
+                                <a 
+                                  href={paper.url} 
+                                  target="_blank" 
+                                  rel="noreferrer"
+                                  className="text-[9.5px] text-[#52525b] hover:text-[#a1a1aa] transition-colors"
+                                >
+                                  View Source
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Bottom Section */}
             <div className="mt-auto p-3">
               <button className="w-full flex items-center gap-2 px-2 py-2 text-[#71717a] hover:text-[#a1a1aa] text-[12px] font-medium transition-colors">
-                <HelpCircle className="w-3.5 h-3.5" />
+                <Icon icon="ph:question" className="w-3.5 h-3.5" />
                 <span>Support</span>
               </button>
             </div>
@@ -584,7 +968,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
               className={`transition-all duration-300 cursor-pointer p-1 rounded-md ${isSidebarOpen ? 'opacity-0 group-hover:opacity-100 bg-[#1a1a1a] text-[#f4f4f5]' : 'text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1a1a1a]'}`}
               title={isSidebarOpen ? "Close Sidebar" : "Open Sidebar"}
             >
-              <PanelLeft className="w-[18px] h-[18px]" />
+              <Icon icon="ph:sidebar-simple" className="w-[18px] h-[18px]" />
             </button>
           </div>
 
@@ -601,9 +985,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
         }`}
       >
         {tab.type === 'home' ? (
-          <Home className="w-3.5 h-3.5" />
+          <Icon icon="ph:house" className="w-3.5 h-3.5" />
         ) : (
-          <FileSignature className="w-3.5 h-3.5" />
+          <Icon icon="ph:pencil-line" className="w-3.5 h-3.5" />
         )}
         <span className="truncate max-w-[130px]">
           {tab.type === 'home' ? 'Home' : (documentTitle || 'Untitled')}
@@ -620,7 +1004,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
             }}
             className="ml-2 hover:text-white p-0.5 rounded-sm hover:bg-white/10"
           >
-            <X className="w-3 h-3" />
+            <Icon icon="ph:x" className="w-3 h-3" />
           </button>
         )}
       </div>
@@ -635,7 +1019,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
       }}
       className="flex items-center justify-center p-2 mb-0.5 ml-1 rounded-md hover:bg-[#1a1a1a] text-[#86868b] hover:text-[#e4e4e7] transition-colors cursor-pointer"
     >
-      <Plus className="w-4 h-4" />
+      <Icon icon="ph:plus-circle" className="w-4 h-4" />
     </div>
   </div>
 
@@ -646,10 +1030,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
             {!isAssistantOpen && (
               <button 
                 onClick={() => setIsAssistantOpen(true)}
-                className="text-[#52525b] hover:text-[#e4e4e7] relative transition-colors cursor-pointer rounded-md"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#222222] hover:border-[#3f3f46] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98]"
                 title="Open Assistant Sidebar"
               >
-                <PanelRightOpen className="w-[18px] h-[18px]" />
+                <Icon icon="ph:sparkle" className="w-3.5 h-3.5" />
+                <span>Agent</span>
               </button>
             )}
           </div>
@@ -669,12 +1054,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       const docTab = tabs.find(t => t.type === 'document');
                       if (docTab) {
                         setActiveTabId(docTab.id);
+                      } else {
+                        const newId = `doc-${Date.now()}`;
+                        setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled' }]);
+                        setActiveTabId(newId);
                       }
                     }}
-                    className="flex items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-colors rounded-xl text-left cursor-pointer group"
+                    className="flex items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-colors rounded-3xl text-left cursor-pointer group"
                   >
-                    <div className="w-10 h-10 bg-[#27272a] rounded-lg flex items-center justify-center mr-4 group-hover:scale-105 transition-transform">
-                      <FileSignature className="w-5 h-5 text-[#f4f4f5]" />
+                    <div className="mr-5 group-hover:scale-110 transition-transform duration-300">
+                      <Icon icon="ph:pencil-line" className="w-7 h-7 text-[#f4f4f5]" />
                     </div>
                     <div>
                       <h3 className="text-[#e4e4e7] font-medium text-sm">Resume Document</h3>
@@ -682,9 +1071,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </div>
                   </button>
                   
-                  <button className="flex items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-colors rounded-xl text-left cursor-pointer group">
-                    <div className="w-10 h-10 bg-[#27272a] rounded-lg flex items-center justify-center mr-4 group-hover:scale-105 transition-transform">
-                      <Plus className="w-5 h-5 text-[#e4e4e7]" />
+                  <button 
+                    onClick={() => {
+                      const newId = `doc-${Date.now()}`;
+                      setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled' }]);
+                      setActiveTabId(newId);
+                    }}
+                    className="flex items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-colors rounded-3xl text-left cursor-pointer group"
+                  >
+                    <div className="mr-5 group-hover:scale-110 transition-transform duration-300">
+                      <Icon icon="ph:plus-circle" className="w-7 h-7 text-[#e4e4e7]" />
                     </div>
                     <div>
                       <h3 className="text-[#e4e4e7] font-medium text-sm">Create New</h3>
@@ -712,21 +1108,58 @@ Once you have content, I can help you draft sections, summarize findings, or for
           ) : (
             <>
               {/* Floating Pill Formatting Bar */}
-              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 shadow-2xl text-[12px] text-[#a1a1aa] whitespace-nowrap select-none max-w-[calc(100%-2rem)] overflow-x-auto no-scrollbar">
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 shadow-2xl text-[12px] text-[#a1a1aa] whitespace-nowrap select-none">
                 
                 {/* Font Selector */}
-                <div className="flex items-center relative gap-1">
-                  <select 
-                    value={editorFont}
-                    onChange={(e) => setEditorFont(e.target.value)}
-                    className="bg-transparent border-none focus:ring-0 outline-none text-[#e4e4e7] pr-4 cursor-pointer font-medium text-[11px] appearance-none"
+                <div className="flex items-center relative h-full">
+                  <button 
+                    onClick={() => setIsFontDropdownOpen(!isFontDropdownOpen)}
+                    className="flex items-center gap-1.5 px-2.5 h-8 hover:bg-[#2c2c2e] transition-colors rounded-lg text-[#e4e4e7] cursor-pointer"
                   >
-                    <option value="font-jakarta" className="bg-[#121212] text-white">Plus Jakarta</option>
-                    <option value="font-serif" className="bg-[#121212] text-white">Lora (Serif)</option>
-                    <option value="font-sans" className="bg-[#121212] text-white">Inter (Sans)</option>
-                    <option value="font-mono" className="bg-[#121212] text-white">JetBrains Mono</option>
-                  </select>
-                  <ChevronDown className="w-3 h-3 absolute right-0 pointer-events-none text-[#52525b]" />
+                    <span className="font-medium text-[11px] min-w-[70px] text-left">
+                      {editorFont === 'font-jakarta' ? 'Plus Jakarta' : 
+                       editorFont === 'font-serif' ? 'Lora (Serif)' :
+                       editorFont === 'font-sans' ? 'Inter (Sans)' : 'JetBrains Mono'}
+                    </span>
+                    <Icon icon="ph:caret-down" className={`w-3 h-3 text-[#71717a] transition-transform duration-200 ${isFontDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  <AnimatePresence>
+                    {isFontDropdownOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: -8, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        transition={{ duration: 0.15, ease: "easeOut" }}
+                        className="absolute left-0 bottom-full mb-2 z-50 bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 shadow-2xl min-w-[140px] overflow-hidden"
+                      >
+                        {[
+                          { value: 'font-jakarta', label: 'Plus Jakarta' },
+                          { value: 'font-serif', label: 'Lora (Serif)' },
+                          { value: 'font-sans', label: 'Inter (Sans)' },
+                          { value: 'font-mono', label: 'JetBrains Mono' }
+                        ].map((font) => (
+                          <button
+                            key={font.value}
+                            onClick={() => {
+                              setEditorFont(font.value);
+                              setIsFontDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-2 text-[11px] transition-colors flex items-center justify-between group cursor-pointer ${
+                              editorFont === font.value 
+                                ? 'bg-[#2c2c2e] text-[#f4f4f5]' 
+                                : 'text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7]'
+                            }`}
+                          >
+                            <span className={font.value}>{font.label}</span>
+                            {editorFont === font.value && (
+                              <Icon icon="ph:check" className="w-3 h-3 text-blue-400" />
+                            )}
+                          </button>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
 
                 <div className="h-4 w-[1px] bg-[#2d2d30]" />
@@ -736,16 +1169,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => changeSelectedFontSize(false)}
-                    className="hover:bg-[#2c2c2e] hover:text-white rounded-full transition-colors text-[11px] font-bold w-5 h-5 flex items-center justify-center cursor-pointer"
+                    className="hover:bg-[#2c2c2e] hover:text-white rounded-lg transition-colors text-[13px] font-medium w-7 h-7 flex items-center justify-center cursor-pointer"
                     title="Decrease Selection Font Size"
                   >
                     -
                   </button>
-                  <span className="text-[11.5px] font-mono w-6 text-center text-[#e4e4e7]">{currentSelectionSize}px</span>
+                  <span className="text-[11.5px] font-mono w-8 text-center text-[#e4e4e7]">{currentSelectionSize}px</span>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => changeSelectedFontSize(true)}
-                    className="hover:bg-[#2c2c2e] hover:text-white rounded-full transition-colors text-[11px] font-bold w-5 h-5 flex items-center justify-center cursor-pointer"
+                    className="hover:bg-[#2c2c2e] hover:text-white rounded-lg transition-colors text-[13px] font-medium w-7 h-7 flex items-center justify-center cursor-pointer"
                     title="Increase Selection Font Size"
                   >
                     +
@@ -762,7 +1195,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Undo"
                   >
-                    <Undo className="w-3.5 h-3.5" />
+                    <Icon icon="ph:arrow-u-up-left" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
@@ -770,7 +1203,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Redo"
                   >
-                    <Redo className="w-3.5 h-3.5" />
+                    <Icon icon="ph:arrow-u-up-right" className="w-4 h-4" />
                   </button>
                 </div>
 
@@ -783,7 +1216,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Bold Selection"
                   >
-                    <Bold className="w-3.5 h-3.5" />
+                    <Icon icon="ph:text-b" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
@@ -791,7 +1224,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Italic Selection"
                   >
-                    <Italic className="w-3.5 h-3.5" />
+                    <Icon icon="ph:text-italic" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
@@ -799,7 +1232,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Underline Selection"
                   >
-                    <UnderlineIcon className="w-3.5 h-3.5" />
+                    <Icon icon="ph:text-underline" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
@@ -807,7 +1240,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Strikethrough Selection"
                   >
-                    <Strikethrough className="w-3.5 h-3.5" />
+                    <Icon icon="ph:text-strikethrough" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
@@ -815,7 +1248,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Subscript"
                   >
-                    <Subscript className="w-3.5 h-3.5" />
+                    <Icon icon="ph:text-subscript" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
@@ -823,23 +1256,29 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Superscript"
                   >
-                    <Superscript className="w-3.5 h-3.5" />
+                    <Icon icon="ph:text-superscript" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleFormat('hiliteColor')}
+                    onClick={() => {
+                      const color = prompt('Enter color (e.g. yellow, #ff0000):', 'yellow');
+                      if (color) handleFormat('hiliteColor', color);
+                    }}
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Highlight Selection"
                   >
-                    <Highlighter className="w-3.5 h-3.5" />
+                    <Icon icon="ph:highlighter" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleFormat('foreColor')}
+                    onClick={() => {
+                      const color = prompt('Enter text color (e.g. blue, red):', '#ffffff');
+                      if (color) handleFormat('foreColor', color);
+                    }}
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Change Text Color"
                   >
-                    <Palette className="w-3.5 h-3.5" />
+                    <Icon icon="ph:palette" className="w-4 h-4" />
                   </button>
                 </div>
 
@@ -853,7 +1292,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Bullet List"
                   >
-                    <List className="w-3.5 h-3.5" />
+                    <Icon icon="ph:list-bullets" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
@@ -861,7 +1300,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Numbered List"
                   >
-                    <ListOrdered className="w-3.5 h-3.5" />
+                    <Icon icon="ph:list-numbers" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
@@ -869,7 +1308,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Horizontal Rule"
                   >
-                    <Minus className="w-3.5 h-3.5" />
+                    <Icon icon="ph:minus" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
@@ -877,7 +1316,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                     title="Clear Formatting"
                   >
-                    <Eraser className="w-3.5 h-3.5" />
+                    <Icon icon="ph:eraser" className="w-4 h-4" />
                   </button>
                 </div>
 
@@ -887,35 +1326,47 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <div className="flex items-center gap-0.5">
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => setEditorAlign('left')}
+                    onClick={() => {
+                      setEditorAlign('left');
+                      handleFormat('justifyLeft');
+                    }}
                     className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'left' ? 'text-[#f4f4f5] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
                     title="Align Left"
                   >
-                    <AlignLeft className="w-3.5 h-3.5" />
+                    <Icon icon="ph:text-align-left" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => setEditorAlign('center')}
+                    onClick={() => {
+                      setEditorAlign('center');
+                      handleFormat('justifyCenter');
+                    }}
                     className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'center' ? 'text-[#f4f4f5] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
                     title="Align Center"
                   >
-                    <AlignCenter className="w-3.5 h-3.5" />
+                    <Icon icon="ph:text-align-center" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => setEditorAlign('right')}
+                    onClick={() => {
+                      setEditorAlign('right');
+                      handleFormat('justifyRight');
+                    }}
                     className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'right' ? 'text-[#f4f4f5] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
                     title="Align Right"
                   >
-                    <AlignRight className="w-3.5 h-3.5" />
+                    <Icon icon="ph:text-align-right" className="w-4 h-4" />
                   </button>
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => setEditorAlign('justify')}
+                    onClick={() => {
+                      setEditorAlign('justify');
+                      handleFormat('justifyFull');
+                    }}
                     className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'justify' ? 'text-[#f4f4f5] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
                     title="Align Justify"
                   >
-                    <AlignJustify className="w-3.5 h-3.5" />
+                    <Icon icon="ph:text-align-justify" className="w-4 h-4" />
                   </button>
                 </div>
 
@@ -984,7 +1435,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 aria-label="Close Assistant"
                 title="Collapse Panel"
               >
-                <PanelRightClose className="w-4 h-4" />
+                <Icon icon="ph:caret-double-right" className="w-4 h-4" />
               </button>
             </div>
 
@@ -1018,7 +1469,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     {m.role === 'user' ? (
                       m.content
                     ) : (
-                      <TypewriterMarkdown content={m.content} timestamp={m.timestamp} />
+                      <TypewriterMarkdown 
+                        content={m.content} 
+                        timestamp={m.timestamp} 
+                        isStreaming={isAiTyping && m.id === messages[messages.length - 1]?.id} 
+                      />
                     )}
                   </div>
                 </div>
@@ -1041,7 +1496,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <div className="bg-[#18181b] border border-[#27272a] rounded px-2.5 py-1.5 text-xs text-[#a1a1aa] mb-2 flex items-center justify-between animate-fade-in">
                   <span className="truncate">Attaching: {selectedFileLabel}</span>
                   <button onClick={() => setSelectedFileLabel(null)} className="text-red-400 hover:text-red-300">
-                    <X className="w-3.5 h-3.5" />
+                    <Icon icon="ph:x" className="w-3.5 h-3.5" />
                   </button>
                 </div>
               )}
@@ -1067,7 +1522,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#2d2d30] transition-colors p-[6px] rounded-md cursor-pointer"
                     title="Upload Academic Reference PDF / Text Note"
                   >
-                    <Paperclip className="w-[18px] h-[18px]" />
+                    <Icon icon="ph:paperclip" className="w-[18px] h-[18px]" />
                   </button>
 
                   <button 
@@ -1079,7 +1534,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         : 'text-[#52525b] cursor-not-allowed'
                     }`}
                   >
-                    <SendHorizontal className="w-[18px] h-[18px] -rotate-45 -mt-0.5 ml-0.5" />
+                    <Icon icon="ph:paper-plane-right" className="w-5 h-5" />
                   </button>
                 </div>
               </div>
