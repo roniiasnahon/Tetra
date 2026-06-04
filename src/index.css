@@ -40,9 +40,12 @@ body {
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
-  .no-scrollbar {
+  .no-scrollbar, .scrollbar-hide {
     -ms-overflow-style: none;
     scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
   }
 }
 
@@ -121,6 +124,58 @@ body {
   padding: 0.2em 0.4em;
   border-radius: 3px;
   font-size: 0.85em;
+}
+
+.markdown-body a {
+  color: #60a5fa;
+  text-decoration: underline;
+  cursor: pointer;
+  transition: color 0.15s ease-in-out;
+}
+
+.markdown-body a:hover {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+/* Academic Table Styles */
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 2em;
+  font-size: 0.95em;
+  border: 1px solid #27272a;
+}
+
+.markdown-body th {
+  background: #1a1a1a;
+  color: #f4f4f5;
+  font-weight: 600;
+  text-align: left;
+  padding: 12px;
+  border-bottom: 2px solid #27272a;
+  border-right: 1px solid #27272a;
+}
+
+.markdown-body td {
+  padding: 12px;
+  border: 1px solid #27272a;
+  color: #d4d4d8;
+  line-height: 1.5;
+}
+
+.markdown-body tr:nth-child(even) {
+  background: #0f0f10;
+}
+
+.markdown-body tr:hover {
+  background: #18181b;
+}
+
+.markdown-body hr {
+  border: 0;
+  border-top: 1px solid #27272a;
+  margin: 2.5em 0;
 }
 
 

@@ -3,11 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
-import dotenv from "dotenv";
+import multer from "multer";
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -19,8 +22,6 @@ const ai = new GoogleGenAI({
 });
 
 import OpenAI from "openai";
-
-dotenv.config();
 
 // Port must be 3000
 const PORT = 3000;
@@ -43,6 +44,16 @@ function getBasetenClient(): OpenAI {
   return openaiClient;
 }
 
+function extractTextFromHtml(html: string): string {
+  let text = html;
+  text = text.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, "");
+  text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
+  text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
+  text = text.replace(/<[^>]+>/g, " ");
+  text = text.replace(/\s+/g, " ").trim();
+  return text.substring(0, 15000);
+}
+
 const systemInstruction = `You are an AI Student Success Mentor. Your job is to help the user write, organize, and research their document while keeping them motivated and on track! You are exceptionally enthusiastic, relatable, and encouraging—think of yourself as a helpful senior student or a cool academic coach. You love deep-diving into topics and providing comprehensive, high-quality drafts.
 
 You are given the current research context of the user workspace:
@@ -52,29 +63,32 @@ You are given the current research context of the user workspace:
 
 TONE & BEHAVIOR:
 - **Relatable & Student-Friendly**: Use an engaging, warm, and supportive tone. Use phrases like "Let's crush this!", "Great progress so far!", or "That's a brilliant angle."
-- **Smart Editor**: Only provide draft edits if the user specifically asks for writing/editing, OR if their input clearly implies a need for document improvement. If the user is just saying "hi," "hello," or chatting casually, DO NOT include document editing tags.
+- **Smart Editor**: ONLY provide draft edits if the user explicitly asks for writing, editing, generating, or rewriting. If the user is just saying "hi", "thanks", "that's nice", or chatting casually, YOU MUST NOT include document editing tags (<replaceContent> or <title>).
+- **Interactive PDF Mapping**: When you refer to content from a mapped PDF in the "Citations" list, you MUST include an interactive citation in your chat response using the following format: '[[page:NUMBER|SOURCE_TITLE]]' (e.g., "The results show an increase in velocity [[page:4|Abstract_Physics.pdf]]"). This allows the user to click and jump directly to that page.
 - **Academic Excellence**: When you do write, never sacrifice quality. Provide multi-paragraph, detailed, and highly polished content.
 - **Mentor Approach**: Explain *why* you are making certain changes or suggestions to help the user learn.
 
 OUTPUT FORMATTING REQUIREMENTS:
-You MUST output your ENTIRE response using exactly the following XML-style tags. 
-DO NOT output any plain text outside of these tags. DO NOT explain what the tags do. Start your output directly with the <thought> tag.
+You MUST output your ENTIRE response using exactly the following XML-style tags IN THIS EXACT ORDER.
+DO NOT output any plain text outside of these tags. DO NOT explain what the tags do.
 
-Always start with your internal reasoning process wrapped in <thought>:
-<thought>Your detailed, step-by-step reasoning and academic planning.</thought>
+<thought>
+Your detailed, step-by-step reasoning and academic planning.
+</thought>
+<chat>
+Your warm, encouraging mentor-style conversational response here. This is where your conversational chat, explanations of changes, and helpful greetings belong.
+</chat>
 
-Follow immediately with your friendly conversational message wrapped in <chat>:
-<chat>Your warm, encouraging mentor-style conversational response here. This is where your conversational chat, explanations of changes, and helpful greetings belong.</chat>
+CRITICAL RULE ABOUT DOCUMENT EDITING:
+If AND ONLY IF the user EXPLICITLY asks you to "write an essay", "create a document", "draft a text", "generate an outline", or similar commands, YOU MUST append the following two tags after your <chat> tag:
 
-If and only if the user requested a document draft, outline, edit, or writing help, include these tags at the end of your response to update their document in the workspace. Otherwise, OMIT them completely:
-<title>A compelling, short academic title for their paper (e.g., "Sapolsky (2018) Analysis")</title>
-<replaceContent>The full, polished, multi-paragraph markdown content of the academic draft/essay.
+<title>A compelling, short academic title</title>
+<replaceContent>The full, polished, multi-paragraph markdown content of the academic draft/essay.</replaceContent>
 
 CRITICAL PROTOCOLS FOR <replaceContent>:
-1. **NO CHAT OR CONVERSATION INTERNALLY**: The content inside <replaceContent> must be 100% clean academic or research text. It MUST NOT contain any greetings, chat transitions, chat headers, commentary, helpful notes to the user (such as "I have updated...", "Sure, here is...", "Awesome! I've put together...", "Happy studying! 🚀", or "I'll also include..."). Keep all conversational talk inside the <chat> tags.
-2. **HEADING FORMATTING**: ALWAYS ensure that every heading in the markdown content starts on a brand-new line and is preceded by exactly two blank lines (e.g., \n\n## Introduction\n\n). Do not bunch headings up with normal paragraph text, or the parser will fail to render them as HTML headers.
-3. **NO TITLE REPETITION**: Do NOT repeat the document title as an H1 or H2 header at the start of the <replaceContent> block. The <title> tag already sets the document title. Start directly with the first section header (e.g., ## Introduction).
-</replaceContent>
+1. **NO CHAT OR CONVERSATION INTERNALLY**: The content inside <replaceContent> must be 100% clean academic or research text.
+2. **HEADING FORMATTING**: ALWAYS ensure that every heading in the markdown content starts on a brand-new line and is preceded by exactly two blank lines (e.g., \n\n## Introduction\n\n). Do not bunch headings up with normal paragraph text.
+3. **NO TITLE REPETITION**: Do NOT repeat the document title as an H1 or H2 header at the start of the <replaceContent> block. Start directly with the first section header (e.g., ## Introduction).
 `;
 
 const geminiResponseSchema = {
@@ -135,7 +149,62 @@ const geminiResponseSchema = {
 async function startServer() {
   const app = express();
 
+  // Request logger middleware
+  app.use((req, res, next) => {
+    console.log(`[HTTP] ${req.method} ${req.url}`);
+    next();
+  });
+
   app.use(express.json({ limit: "15mb" }));
+
+  const upload = multer({ 
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 15 * 1024 * 1024 } // 15MB limit
+  });
+
+  // In-memory file registry
+  const uploadedFiles = new Map<string, { buffer: Buffer, mimetype: string, originalname: string }>();
+
+  // Safe upload route using standard multer middleware
+  app.post("/api/upload", upload.single("file"), (req, res) => {
+    try {
+      if (!req.file) {
+        console.warn("[UPLOAD] No file was found in req.file");
+        return res.status(400).json({ success: false, error: "No file uploaded" });
+      }
+      
+      console.log(`[UPLOAD] Processing file: ${req.file.originalname} (${req.file.mimetype}, ${req.file.size} bytes)`);
+      
+      const fileId = `file-${Date.now()}`;
+      uploadedFiles.set(fileId, {
+        buffer: req.file.buffer,
+        mimetype: req.file.mimetype || "application/octet-stream",
+        originalname: req.file.originalname,
+      });
+
+      console.log(`[UPLOAD] File registered successfully with ID: ${fileId}`);
+      
+      res.json({ 
+        success: true, 
+        fileId, 
+        fileName: req.file.originalname, 
+        mimetype: req.file.mimetype 
+      });
+    } catch (routeErr: any) {
+      console.error("[UPLOAD] Route handler error:", routeErr);
+      res.status(500).json({ success: false, error: routeErr.message || "Internal server error during final upload processing." });
+    }
+  });
+
+  app.get("/api/files/:id", (req, res) => {
+    const file = uploadedFiles.get(req.params.id);
+    if (!file) {
+      return res.status(404).send("File not found");
+    }
+    res.setHeader("Content-Type", file.mimetype);
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.originalname)}"`);
+    res.send(file.buffer);
+  });
 
   // API Check Enpoint
   app.get("/api/health", (req, res) => {
@@ -208,6 +277,219 @@ Use a professional, encouraging tone. Do not use markdown headers; use bolding f
     } catch (error: any) {
       console.error("Synthesis Error:", error);
       res.status(500).json({ error: "Failed to synthesize findings using the primary LLM." });
+    }
+  });
+
+  // AI-powered Link, Public URL, YT, Google Doc summarization endpoint
+  app.post("/api/research/summarize-url", async (req, res) => {
+    let { url, type } = req.body;
+
+    if (!url) {
+      return res.status(400).json({ error: "URL is required" });
+    }
+
+    try {
+      let docText = "";
+      let sourceMetaData = { title: "", author: "" };
+
+      // Helper function to fetch with a timeout
+      const fetchWithTimeout = async (resource: string, options = {}, timeout = 12000) => {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeout);
+        try {
+          const response = await fetch(resource, {
+            ...options,
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+              ...((options as any).headers || {})
+            }
+          });
+          clearTimeout(id);
+          return response;
+        } catch (error) {
+          clearTimeout(id);
+          throw error;
+        }
+      };
+
+      // 1. YouTube specialized scraper/oembed
+      if (type === "youtube" || url.includes("youtube.com") || url.includes("youtu.be")) {
+        let videoId = "";
+        const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+        const match = url.match(regExp);
+        if (match && match[2] && match[2].length === 11) {
+          videoId = match[2];
+        }
+
+        if (videoId) {
+          try {
+            // Fetch public oembed info
+            const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+            const oembedResponse = await fetchWithTimeout(oembedUrl);
+            if (oembedResponse.ok) {
+              const oembedData = await oembedResponse.json();
+              sourceMetaData.title = oembedData.title || `YouTube Video (${videoId})`;
+              sourceMetaData.author = oembedData.author_name || "YouTube";
+              docText = `YouTube Video from channel: ${oembedData.author_name || 'unknown'}. Title: ${oembedData.title || ''}. URL: ${url}. Please summarize its likely concepts, themes, and educational/academic context.`;
+            }
+          } catch (embedErr) {
+            console.error("YouTube oembed fetch failed:", embedErr);
+          }
+        }
+        
+        if (!docText) {
+          sourceMetaData.title = "YouTube Video Reference";
+          sourceMetaData.author = "YouTube Video";
+          docText = `A YouTube video reference from URL: ${url}. Please synthesize information and academic worth of this topic based on the URL context.`;
+        }
+      } 
+      // 2. Google Doc URL Conversion
+      else if (type === "gdoc" || url.includes("docs.google.com/document/")) {
+        const docIdMatch = url.match(/\/document\/d\/([a-zA-Z0-9-_]+)/);
+        let exportUrl = url;
+        if (docIdMatch && docIdMatch[1]) {
+          exportUrl = `https://docs.google.com/document/d/${docIdMatch[1]}/export?format=txt`;
+        }
+
+        try {
+          const docResponse = await fetchWithTimeout(exportUrl);
+          if (docResponse.ok) {
+            const rawText = await docResponse.text();
+            docText = rawText.substring(0, 15000);
+            sourceMetaData.title = "Imported Google Doc";
+            sourceMetaData.author = "Google Workspace User";
+          } else {
+            throw new Error(`Google Doc fetch returned HTTP status ${docResponse.status}`);
+          }
+        } catch (gdocErr: any) {
+          console.error("GDoc Fetch Error:", gdocErr);
+          throw new Error("This Google Document seems private or restricted. Please ensure you have set the file's share permission to 'Anyone with the link' as Viewer.");
+        }
+      } 
+      // 3. Regular Public Web URL
+      else {
+        try {
+          const webResponse = await fetchWithTimeout(url);
+          if (!webResponse.ok) {
+            throw new Error(`Public URL fetch status ${webResponse.status}`);
+          }
+          const htmlContent = await webResponse.text();
+          docText = extractTextFromHtml(htmlContent);
+          
+          // Try to search for HTML title
+          const titleMatch = htmlContent.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+          if (titleMatch && titleMatch[1]) {
+            sourceMetaData.title = titleMatch[1].trim();
+          } else {
+            sourceMetaData.title = new URL(url).hostname || "Web Reference";
+          }
+          sourceMetaData.author = new URL(url).hostname.replace("www.", "") || "Web Article";
+        } catch (webErr: any) {
+          console.error("Public URL Fetch Direct Error:", webErr);
+          throw new Error(`Failed to access the public link: ${webErr.message || webErr}. Please double check that the URL is public and online.`);
+        }
+      }
+
+      // Now we have docText and meta content, feed to gemini-3.5-flash for structured summarization
+      const geminiPrompt = `You are a world-class academic research bot. Please read and analyze the following extracted text snippet from a research source/URL (${url}). 
+Generated from source named: "${sourceMetaData.title || 'Unknown Source'}" by author/publisher: "${sourceMetaData.author || 'Unknown'}".
+
+CONTENT STREAM:
+"""
+${docText}
+"""
+
+Please synthesize this content and create a highly detailed academic research summary.
+Deliver your synthesis exactly according to the strict JSON schema provided.
+
+The generated "summary" field should contain a complete, beautifully structured 3-Paragraph academic literature summary detailing:
+Paragraph 1: Core Summary description and overall context of the website reference or document/theme.
+Paragraph 2: Academic relevance & synthesis (empirical findings, methodology discussed, or theoretical arguments).
+Paragraph 3: Practical incorporation value (how the researcher can use this resource to augment drafting on student-success/neuroplasticity/literature review topics).
+
+Return EXACTLY a JSON output containing the structural properties: 'title', 'author', 'summary', and 'fileType'.
+Keep the 'fileType' as either 'Note' or 'Document'.`;
+
+      const aiResponse = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: geminiPrompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING, description: "A clean academic title refined from the webpage description." },
+              author: { type: Type.STRING, description: "The author/organization or publisher domain name." },
+              summary: { type: Type.STRING, description: "Highly comprehensive 3-paragraph literature summary with double newlines between paragraphs." },
+              fileType: { type: Type.STRING, enum: ["Note", "Document"] }
+            },
+            required: ["title", "author", "summary", "fileType"]
+          }
+        }
+      });
+
+      const responseText = aiResponse.text;
+      if (!responseText) {
+        throw new Error("Empty response from AI summarization engine.");
+      }
+
+      const parsedJSON = JSON.parse(responseText.trim());
+      res.json({
+        success: true,
+        data: {
+          title: parsedJSON.title || sourceMetaData.title,
+          author: parsedJSON.author || sourceMetaData.author,
+          description: parsedJSON.summary.substring(0, 100) + "...",
+          summary: parsedJSON.summary, // store full text in summary property
+          fileType: parsedJSON.fileType || "Note",
+          added: "Today",
+          fullTextStatus: "Available",
+          viewed: "Just now",
+          url: url
+        }
+      });
+
+    } catch (e: any) {
+      console.error("Summarization API error:", e);
+      res.status(500).json({ error: e.message || "An error occurred while generating synthesis for the provided link." });
+    }
+  });
+
+  // Short 2-4 word Chat Title Generator Endpoint
+  app.post("/api/research/generate-title", async (req, res) => {
+    try {
+      const { userQuery } = req.body;
+      if (!userQuery) {
+        return res.status(400).json({ error: "userQuery is required" });
+      }
+
+      try {
+        const client = getBasetenClient();
+        const completion = await client.chat.completions.create({
+          model: "openai/gpt-oss-120b",
+          messages: [
+            {
+              role: "system",
+              content: "You are an assistant that summarizes chat queries. Speak ONLY in a 2-4 word theme representing the query, without any surrounding punctuation or quotes."
+            },
+            {
+              role: "user",
+              content: `Summarize this chat query into a short 2-4 word theme: "${userQuery}"`
+            }
+          ],
+          temperature: 0.5,
+        });
+
+        const title = completion.choices[0].message.content?.replace(/['"“”]/g, "").trim() || "Untitled Chat";
+        res.json({ title });
+      } catch (innerError: any) {
+        console.error("Inner generate title LLM call failed, returning fallback", innerError);
+        res.json({ title: userQuery.split(" ").slice(0, 3).join(" ") + "..." });
+      }
+    } catch (error: any) {
+      console.error("Generate Title Error:", error);
+      res.status(500).json({ error: "Failed to generate title." });
     }
   });
 
@@ -314,6 +596,16 @@ ${researchContext}
         res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
         res.end();
       }
+    }
+  });
+
+  // Global API error handler
+  app.use("/api", (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("[SERVER Error] API routing error caught:", err);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: err?.message || "Internal server error." });
+    } else {
+      next(err);
     }
   });
 

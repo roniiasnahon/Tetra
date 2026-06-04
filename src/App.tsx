@@ -1,20 +1,40 @@
 import React, { useState, useEffect, useRef } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { marked } from 'marked';
 import { motion, AnimatePresence } from 'motion/react';
 import { Icon } from '@iconify/react';
+import { Edit2, ExternalLink, Unlink, Link as LinkIcon } from 'lucide-react';
+import { Document, Page, pdfjs } from 'react-pdf';
+import 'react-pdf/dist/Page/AnnotationLayer.css';
+import 'react-pdf/dist/Page/TextLayer.css';
+
+pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 interface PaperItem {
   author: string;
   title: string;
   description: string;
+  url?: string;
+  added?: string;
+  fullTextStatus?: string;
+  viewed?: string;
+  fileType?: string;
+  summary?: string;
+  fileId?: string;
+  mimetype?: string;
+  extractedText?: string;
 }
 
 interface Tab {
   id: string;
-  type: 'home' | 'document';
+  type: 'home' | 'document' | 'library' | 'chat';
   title: string;
+  content?: string;
+  fileId?: string;
+  mimetype?: string;
+  messages?: ChatMessage[];
 }
 
 interface ChatMessage {
@@ -25,7 +45,64 @@ interface ChatMessage {
   timestamp: number;
 }
 
-const TypewriterMarkdown = ({ content, timestamp, isStreaming }: { content: string, timestamp: number, isStreaming?: boolean }) => {
+const linkifyHtml = (html: string): string => {
+  if (!html) return "";
+  const tokens = html.split(/(<[^>]+>)/);
+  let insideAnchor = false;
+  
+  const urlPattern = /(\b(?:https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|]|\bwww\.[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+  
+  const processedTokens = tokens.map((token, index) => {
+    if (index % 2 === 1) {
+      const lowerToken = token.toLowerCase();
+      if (lowerToken.slice(0, 3) === "<a " || lowerToken.slice(0, 3) === "<a>") {
+        insideAnchor = true;
+      } else if (lowerToken === "</a>") {
+        insideAnchor = false;
+      }
+      return token;
+    }
+    
+    if (insideAnchor) {
+      return token;
+    }
+    
+    return token.replace(urlPattern, (url) => {
+      const href = url.toLowerCase().startsWith('www.') ? `http://${url}` : url;
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline cursor-pointer">${url}</a>`;
+    });
+  });
+  
+  return processedTokens.join("");
+};
+
+const renderLinkifiedText = (text: string) => {
+  if (!text) return "";
+  const urlPattern = /(\b(?:https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|]|\bwww\.[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+  const parts = text.split(urlPattern);
+  
+  if (parts.length === 1) return text;
+  
+  return parts.map((part, index) => {
+    if (urlPattern.test(part)) {
+      const href = part.toLowerCase().startsWith('www.') ? `http://${part}` : part;
+      return (
+        <a 
+          key={index} 
+          href={href} 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="text-blue-400 hover:underline cursor-pointer break-all"
+        >
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+};
+
+const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationClick, isStreaming }: { content: string, timestamp: number, onCitationClick?: (page: number, title: string) => void, isStreaming?: boolean }) => {
   const [displayedContent, setDisplayedContent] = useState('');
   const contentRef = useRef(content);
   const shouldAnimate = useRef(Date.now() - timestamp < 2000);
@@ -50,7 +127,6 @@ const TypewriterMarkdown = ({ content, timestamp, isStreaming }: { content: stri
           return target.substring(0, prev.length + 5);
         }
         
-        // If we caught up, and no longer streaming overall, we can stop the interval
         if (prev.length >= target.length && !isStreaming) {
           clearInterval(interval);
           return target;
@@ -63,8 +139,61 @@ const TypewriterMarkdown = ({ content, timestamp, isStreaming }: { content: stri
     return () => clearInterval(interval);
   }, [timestamp, isStreaming]);
 
-  return <ReactMarkdown>{displayedContent}</ReactMarkdown>;
-};
+  // Transform custom syntax [[page:N|Title]] into markdown links with special prefix
+  // We use encodeURIComponent for the title to handle spaces and special chars in the hash URL
+  const processedContent = displayedContent.replace(/\[\[page:(\d+)\|(.+?)\]\]/g, (_, p, t) => {
+    // Escape potentially breaking characters in title label for markdown
+    const safeTitle = t.replace(/\]/g, '\\]');
+    return `[${safeTitle} (p. ${p})](#cite-page-${p}-${encodeURIComponent(t)})`;
+  });
+
+  return (
+    <ReactMarkdown 
+      remarkPlugins={[remarkGfm]}
+      components={{
+        a: ({ href, children, ...props }) => {
+          if (href?.startsWith('#cite-page-')) {
+            // Remove the prefix
+            const dataStr = href.replace('#cite-page-', '');
+            // Split by the first hyphen (which separates page from title)
+            const firstHyphen = dataStr.indexOf('-');
+            if (firstHyphen === -1) return <a href={href} {...props}>{children}</a>;
+            
+            const page = parseInt(dataStr.substring(0, firstHyphen));
+            const encodedTitle = dataStr.substring(firstHyphen + 1);
+            try {
+              const title = decodeURIComponent(encodedTitle);
+              return (
+                <button 
+                  onClick={() => onCitationClick?.(page, title)}
+                  className="inline-flex items-center gap-1 bg-zinc-800 hover:bg-zinc-700 text-blue-400 px-1.5 py-0.5 rounded text-[11px] font-mono border border-zinc-700 transition-colors mx-0.5 cursor-pointer align-middle"
+                >
+                  <Icon icon="ph:bookmark-simple-fill" className="w-3 h-3" />
+                  {children}
+                </button>
+              );
+            } catch (e) {
+              return <a href={href} {...props}>{children}</a>;
+            }
+          }
+          return <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>;
+        },
+        table: ({ children }) => (
+          <div className="overflow-x-auto my-4 scrollbar-hide">
+            <table className="w-full border-collapse border border-zinc-800 text-[12px] leading-snug">
+              {children}
+            </table>
+          </div>
+        ),
+        thead: ({ children }) => <thead className="bg-zinc-900/50">{children}</thead>,
+        th: ({ children }) => <th className="border border-zinc-800 p-2 text-left font-bold text-zinc-100">{children}</th>,
+        td: ({ children }) => <td className="border border-zinc-800 p-2 text-zinc-300">{children}</td>,
+      }}
+    >
+      {processedContent}
+    </ReactMarkdown>
+  );
+});
 
 const parseAssistantResponse = (text: string) => {
   let thought = "";
@@ -193,6 +322,31 @@ const parseAssistantResponse = (text: string) => {
   return { thought, chat, title, replaceContent };
 };
 
+const extractTextFromPdf = async (url: string): Promise<string> => {
+  try {
+    const loadingTask = pdfjs.getDocument({
+      url,
+      cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
+      cMapPacked: true,
+    });
+    const pdfDoc = await loadingTask.promise;
+    let fullText = "";
+    const numPagesToParse = Math.min(pdfDoc.numPages, 15);
+    for (let pageNum = 1; pageNum <= numPagesToParse; pageNum++) {
+      const page = await pdfDoc.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map((item: any) => item.str || "")
+        .join(" ");
+      fullText += `--- Page ${pageNum} of ${pdfDoc.numPages} ---\n${pageText}\n\n`;
+    }
+    return fullText;
+  } catch (error) {
+    console.error("Error extracting PDF text:", error);
+    return "";
+  }
+};
+
 export default function App() {
   const [isAssistantOpen, setIsAssistantOpen] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -204,8 +358,19 @@ export default function App() {
     { id: 'initial-doc', type: 'document', title: 'Untitled' }
   ]);
   const [activeTabId, setActiveTabId] = useState('initial-doc');
+  const ignoreNextTabSyncRef = useRef(false);
+  const loadedTabIdRef = useRef<string>('initial-doc');
+  const activeTabIdRef = useRef(activeTabId);
+  const tabsRef = useRef(tabs);
+  const activeTab = React.useMemo(() => tabs.find(t => t.id === activeTabId) || tabs[0], [tabs, activeTabId]);
 
-  const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+  useEffect(() => {
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
+
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
   
   // Editor Styles and Customizations
   const [editorFont, setEditorFont] = useState('font-jakarta');
@@ -214,6 +379,125 @@ export default function App() {
   const [editorAlign, setEditorAlign] = useState<'left' | 'center' | 'right' | 'justify'>('left');
   const [isFontDropdownOpen, setIsFontDropdownOpen] = useState(false);
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
+
+  // Link context menu and rename modal state
+  const [linkContextMenu, setLinkContextMenu] = useState<{ x: number; y: number; target: HTMLAnchorElement } | null>(null);
+  const [showLinkRenameModal, setShowLinkRenameModal] = useState(false);
+  const [linkToRename, setLinkToRename] = useState<{ target: HTMLAnchorElement; initialText: string; initialUrl: string } | null>(null);
+  const [renameText, setRenameText] = useState("");
+  const [renameUrl, setRenameUrl] = useState("");
+
+  // Library toolbar and interaction states
+  const [selectedPapers, setSelectedPapers] = useState<string[]>([]);
+  const [displayDensity, setDisplayDensity] = useState<'comfortable' | 'compact'>('comfortable');
+  const [sortBy, setSortBy] = useState<'title' | 'added' | 'viewed'>('title');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [filterType, setFilterType] = useState<string>('all');
+  const [searchFilter, setSearchFilter] = useState('');
+  const [isDisplayDropdownOpen, setIsDisplayDropdownOpen] = useState(false);
+  const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
+  const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
+  const [isHomeCreateDropdownOpen, setIsHomeCreateDropdownOpen] = useState(false);
+  const [isCreateDropdownOpen, setIsCreateDropdownOpen] = useState(false);
+  const [isChatDropdownOpen, setIsChatDropdownOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [pdfNumPages, setPdfNumPages] = useState<number | null>(null);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [isInviteSuccess, setIsInviteSuccess] = useState(false);
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [isAddDropdownOpen, setIsAddDropdownOpen] = useState(false);
+  const [addDropdownNested, setAddDropdownNested] = useState<string | null>(null);
+  const [newPaperTitle, setNewPaperTitle] = useState('');
+  const [newPaperAuthors, setNewPaperAuthors] = useState('');
+  const [newPaperType, setNewPaperType] = useState<'Note' | 'Document'>('Document');
+  const [newPaperDescription, setNewPaperDescription] = useState('');
+
+  // Link summarizer states
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importType, setImportType] = useState<'url' | 'gdoc' | 'youtube' | null>(null);
+  const [importUrl, setImportUrl] = useState('');
+  const [isAnalyzingLink, setIsAnalyzingLink] = useState(false);
+  const [linkAnalyzeStatus, setLinkAnalyzeStatus] = useState('');
+  const [linkAnalyzeError, setLinkAnalyzeError] = useState('');
+  const [activeViewingPaper, setActiveViewingPaper] = useState<PaperItem | null>(null);
+
+  const handleLinkImportSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importUrl.trim()) return;
+
+    setIsAnalyzingLink(true);
+    setLinkAnalyzeError('');
+    setLinkAnalyzeStatus('Locating source address and resolving hostname...');
+
+    const step1 = setTimeout(() => {
+      setLinkAnalyzeStatus('Fetching public content and stripping raw templates...');
+    }, 1500);
+
+    const step2 = setTimeout(() => {
+      setLinkAnalyzeStatus('Sending text stream to Gemini API for literature review synthesis...');
+    }, 4500);
+
+    try {
+      const response = await fetch('/api/research/summarize-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: importUrl, type: importType })
+      });
+
+      clearTimeout(step1);
+      clearTimeout(step2);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to analyze that URL.');
+      }
+
+      const resData = await response.json();
+      if (resData.success && resData.data) {
+        setPapers(prev => [resData.data, ...prev]);
+        setImportModalOpen(false);
+        setImportUrl('');
+        setLinkAnalyzeStatus('');
+        setActiveViewingPaper(resData.data);
+
+        // Auto-create and switch to a new document tab with the synthesized content
+        const newTabId = `link-${Date.now()}`;
+        const initialContent = markdownToHtml(resData.data.summary || resData.data.description || '');
+        setTabs(prev => [
+          ...prev,
+          {
+            id: newTabId,
+            type: 'document',
+            title: resData.data.title,
+            content: initialContent
+          }
+        ]);
+        setActiveTabId(newTabId);
+      } else {
+        throw new Error('Link parsing completed, but returned empty synthesis data.');
+      }
+    } catch (err: any) {
+      console.error(err);
+      clearTimeout(step1);
+      clearTimeout(step2);
+      setLinkAnalyzeError(err.message || 'An unexpected failure occurred while analyzing this link.');
+    } finally {
+      setIsAnalyzingLink(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleOutsideClick = () => {
+      setLinkContextMenu(null);
+      setIsCreateDropdownOpen(false);
+      setIsHomeCreateDropdownOpen(false);
+    };
+    window.addEventListener('click', handleOutsideClick);
+    return () => {
+      window.removeEventListener('click', handleOutsideClick);
+    };
+  }, []);
 
   const editorRef = useRef<HTMLDivElement>(null);
   const lastContentRef = useRef('');
@@ -291,6 +575,7 @@ export default function App() {
       const html = editorRef.current.innerHTML;
       lastContentRef.current = html;
       setDocumentContent(html);
+      setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, content: html } : t));
     }
   };
 
@@ -300,6 +585,7 @@ export default function App() {
       const html = editorRef.current.innerHTML;
       lastContentRef.current = html;
       setDocumentContent(html);
+      setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, content: html } : t));
     }
   };
 
@@ -360,25 +646,54 @@ export default function App() {
   const addPaperToLibrary = (paper: any) => {
     const authors = paper.authors?.map((a: any) => a.name).join(', ') || 'Unknown Author';
     const newPaper: PaperItem = {
-      author: `${authors} (${paper.year || 'N/A'})`,
+      author: authors,
       title: paper.title,
-      description: paper.abstract || `Paper from ${paper.venue || 'Academic Repository'}`
+      description: paper.abstract || `Paper from ${paper.venue || 'Academic Repository'}`,
+      added: "Today",
+      fullTextStatus: "Available",
+      viewed: "Just now",
+      fileType: "Document",
+      summary: ""
     };
-    setPapers(prev => [...prev, newPaper]);
+    setPapers(prev => [newPaper, ...prev]);
+
+    // Auto-create and switch to a new document tab with the added document's content
+    const newTabId = `added-${Date.now()}`;
+    setTabs(prev => [
+      ...prev,
+      {
+        id: newTabId,
+        type: 'document',
+        title: paper.title,
+        content: `<h3>${paper.title}</h3><p><em>${authors}</em></p><p>${newPaper.description}</p>`
+      }
+    ]);
+    setActiveTabId(newTabId);
   };
 
   // AI Assistant Chat Messages
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome-msg',
-      role: 'assistant',
-      content: "Hello! I am your AI Student Success Mentor. I'm here to help you research, draft, and polish your academic work. You can upload PDFs as sources, ask me to summarize complex topics, or help you structure your next big essay. What are we working on today?",
-      timestamp: Date.now() - 60000
-    }
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
+  const aiWritingTabIdRef = useRef<string | null>(null);
+  const [isChatSuggestionsDismissed, setIsChatSuggestionsDismissed] = useState(false);
   const [selectedFileLabel, setSelectedFileLabel] = useState<string | null>(null);
+
+  const updateChatMessages = (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+    setMessages(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      let targetTabId = activeTabIdRef.current;
+      const currentTab = tabsRef.current.find(t => t.id === targetTabId);
+      if (!currentTab || currentTab.type !== 'chat') {
+        const firstChat = tabsRef.current.find(t => t.type === 'chat');
+        if (firstChat) {
+          targetTabId = firstChat.id;
+        }
+      }
+      setTabs(prevTabs => prevTabs.map(t => t.id === targetTabId ? { ...t, messages: next } : t));
+      return next;
+    });
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -399,23 +714,35 @@ export default function App() {
     return "";
   });
 
+  // When activeTabId changes, pull the corresponding tab's values and title into states and the editor
   useEffect(() => {
-    // If activeTab is document, make sure initial content is populated
-    if (activeTab.type === 'document' && editorRef.current) {
-      if (editorRef.current.innerHTML !== documentContent) {
-        editorRef.current.innerHTML = documentContent;
-        lastContentRef.current = documentContent;
+    if (ignoreNextTabSyncRef.current) {
+      ignoreNextTabSyncRef.current = false;
+      loadedTabIdRef.current = activeTabId;
+      return;
+    }
+    const targetTab = tabs.find(t => t.id === activeTabId);
+    if (targetTab && targetTab.type === 'document' && !targetTab.fileId) {
+      setDocumentTitle(targetTab.title || 'Untitled');
+      setDocumentContent(targetTab.content || '');
+      if (editorRef.current) {
+        editorRef.current.innerHTML = targetTab.content || '';
+        lastContentRef.current = targetTab.content || '';
+      }
+    } else if (targetTab && targetTab.type === 'chat') {
+      setMessages(targetTab.messages || []);
+    } else {
+      if (activeTabId !== 'initial-home') {
+        setDocumentTitle('Untitled');
+        setDocumentContent('');
+        if (editorRef.current) {
+          editorRef.current.innerHTML = '';
+          lastContentRef.current = '';
+        }
       }
     }
-  }, [activeTab]);
-
-  useEffect(() => {
-    // Keep editor sync if external changes occur (like AI editing)
-    if (editorRef.current && documentContent !== lastContentRef.current) {
-      editorRef.current.innerHTML = documentContent;
-      lastContentRef.current = documentContent;
-    }
-  }, [documentContent]);
+    loadedTabIdRef.current = activeTabId;
+  }, [activeTabId]);
 
   // Helper to convert Markdown to HTML for the editor
   const markdownToHtml = (markdown: string) => {
@@ -424,15 +751,16 @@ export default function App() {
       // Trim outer whitespace so that heading tags (like ## Introduction) 
       // placed at the start/ends are parsed as actual headings, not inline text.
       const trimmedMarkdown = markdown.trim();
-      return marked.parse(trimmedMarkdown, { gfm: true, breaks: true }) as string;
+      const htmlText = marked.parse(trimmedMarkdown, { gfm: true, breaks: true }) as string;
+      return linkifyHtml(htmlText);
     } catch (e) {
       console.error("Markdown conversion failed", e);
-      return markdown;
+      return linkifyHtml(markdown);
     }
   };
 
-  // Intel fallback response generator for offline or key-missing states
-  const getFallbackResponse = (query: string): { text: string; suggestion?: any } => {
+  // intel fallback response generator for offline or key-missing states
+  const getFallbackResponse = React.useCallback((query: string): { text: string; suggestion?: any } => {
     const lowercase = query.toLowerCase();
     
     // Check for inline edits from the user
@@ -476,11 +804,29 @@ What's on your mind?`
     }
 
     return { text: `I'm all set to help you with your project!
-
+ 
 You haven't added any sources to this workspace yet. Feel free to upload your research papers or drop some notes in the "Notes" section. 
-
+ 
 Once you have content, I can help you draft sections, summarize findings, or format your bibliography in APA, MLA, or Chicago style.`};
-  };
+  }, []);
+
+  const handleCitationClick = React.useCallback((page: number, title: string) => {
+    // 1. Find the tab that matches the title
+    const targetTab = tabs.find(t => t.title && t.title.toLowerCase().includes(title.toLowerCase()));
+    if (targetTab) {
+      if (activeTabId !== targetTab.id) {
+        setActiveTabId(targetTab.id);
+      }
+      
+      // 2. Wait for tab to switch then scroll
+      setTimeout(() => {
+        const pageEl = document.getElementById(`pdf-page-${page}`);
+        if (pageEl) {
+          pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 500);
+    }
+  }, [tabs, activeTabId]);
 
   // Sending chat messages
   const handleSendMessage = async (customText?: string) => {
@@ -494,7 +840,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
       timestamp: Date.now()
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    updateChatMessages(prev => [...prev, userMessage]);
     if (!customText) {
       setChatInput('');
     }
@@ -517,7 +863,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
               authors: p.author,
               source: "Academic Import Database",
               year: p.author.match(/\d{4}/)?.[0] || '2023',
-              format: 'APA'
+              format: 'APA',
+              fullText: p.extractedText || p.summary || ""
             })),
             outline: [{
               id: "sec-main",
@@ -536,7 +883,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
       }
 
       const assistantMessageId = String(Date.now() + 1);
-      setMessages(prev => [
+      updateChatMessages(prev => [
         ...prev,
         {
           id: assistantMessageId,
@@ -551,7 +898,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
       const decoder = new TextDecoder();
       let accumulatedText = "";
       let hasSwitchedToDoc = false;
+      let targetTabIdForAi: string | undefined;
       let streamBuffer = "";
+      
+      aiWritingTabIdRef.current = null;
 
       if (reader) {
         while (true) {
@@ -577,26 +927,55 @@ Once you have content, I can help you draft sections, summarize findings, or for
                    const { thought, chat, title: parsedTitle, replaceContent: parsedContent } = parseAssistantResponse(accumulatedText);
 
                    if (chat !== undefined) {
-                     setMessages(prev => prev.map(m => m.id === assistantMessageId ? { ...m, content: chat } : m));
+                     updateChatMessages(prev => prev.map(m => m.id === assistantMessageId ? { ...m, content: chat } : m));
                    }
 
                    if (thought !== undefined) {
-                     setMessages(prev => prev.map(m => m.id === assistantMessageId ? { ...m, thought: thought } : m));
+                     updateChatMessages(prev => prev.map(m => m.id === assistantMessageId ? { ...m, thought: thought } : m));
                    }
 
                    if (parsedTitle) {
                      setDocumentTitle(parsedTitle);
                    }
 
-                   if (parsedContent) {
+                    if (parsedContent && parsedContent.length > 5 && !parsedContent.trim().startsWith("</") && !parsedContent.trim().startsWith(">")) {
                       if (!hasSwitchedToDoc) {
                         hasSwitchedToDoc = true;
+                        
+                        // Determine the target tab ID synchronously to avoid closure lag issues
+                        const currentActive = tabs.find(t => t.id === activeTabId);
+                        const emptyDocTab = tabs.find(t => t.type === 'document' && !t.fileId && (!t.content || t.content.trim() === '' || t.content.trim() === '<p><br></p>'));
+
+                        if (currentActive && currentActive.type === 'document' && !currentActive.fileId && (!currentActive.content || currentActive.content.trim() === '' || currentActive.content.trim() === '<p><br></p>')) {
+                          targetTabIdForAi = currentActive.id;
+                        } else if (emptyDocTab) {
+                          targetTabIdForAi = emptyDocTab.id;
+                        } else {
+                          targetTabIdForAi = 'doc-' + Date.now();
+                        }
+                        
+                        aiWritingTabIdRef.current = targetTabIdForAi;
+
                         setTabs(prev => {
-                          const docTab = prev.find(t => t.type === 'document');
-                          if (docTab) setActiveTabId(docTab.id);
-                          return prev;
+                          const exists = prev.find(t => t.id === targetTabIdForAi);
+                          if (exists) return prev;
+                          return [...prev, {
+                              id: targetTabIdForAi!,
+                              type: 'document',
+                              title: parsedTitle || 'Untitled Document',
+                              content: ''
+                          }];
                         });
+
+                        // Set active tab ID outside of the setTabs functional update
+                        setTimeout(() => {
+                           if (targetTabIdForAi) {
+                             ignoreNextTabSyncRef.current = true;
+                             setActiveTabId(targetTabIdForAi);
+                           }
+                        }, 0);
                       }
+                      
                       let rawContent = parsedContent;
 
                       // Strip conversational prologue before the first markdown header
@@ -615,20 +994,71 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                       rawContent = rawContent.trim();
                       const htmlContent = markdownToHtml(rawContent);
-                      setDocumentContent(htmlContent);
-                   }
-                 }
-               } catch (e) {
-                 // ignore partial JSON parse errors just in case
-               }
+                      
+                      // Update the tabs array directly to ensure it preserves across navigation
+                      if (targetTabIdForAi) {
+                         setTabs(prev => prev.map(t => t.id === targetTabIdForAi ? { ...t, content: htmlContent, title: parsedTitle || t.title } : t));
+                         
+                         // If this tab is currently being viewed, update the active editor state too
+                         // We compare against the latest activeTabId from the closure-wrapped state or better yet, check current activeTabId
+                         // Note: in effects/handlers, state might be stale if not careful, but usually handlers use the latest state if they are closure-wrapped
+                         // To be safe, we can use a ref or check window state, but usually activeTabId is fresh enough in the async loop
+                         // Wait, in a while loop, activeTabId value is captured at the start of the function.
+                         // We should use an functional update or check a Ref for the LATEST active ID.
+                         if (activeTabIdRef.current === targetTabIdForAi) {
+                            setDocumentContent(htmlContent);
+                            if (editorRef.current) {
+                              editorRef.current.innerHTML = htmlContent;
+                              lastContentRef.current = htmlContent;
+                            }
+                            if (parsedTitle) setDocumentTitle(parsedTitle);
+                         }
+                      } else {
+                         // Fallback if no target tab was identified
+                         setDocumentContent(htmlContent);
+                         if (editorRef.current) {
+                            editorRef.current.innerHTML = htmlContent;
+                            lastContentRef.current = htmlContent;
+                         }
+                         if (parsedTitle) setDocumentTitle(parsedTitle);
+                      }
+                    }
+                  }
+                } catch (e) {
+                  // ignore partial JSON parse errors just in case
+                }
+             }
+           }
+         }
+       }
+
+      // Generate a title for this chat session if it's currently "Untitled" or "New chat"
+      const currentTab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
+      if (currentTab && currentTab.type === 'chat' && (currentTab.title === 'Untitled' || currentTab.title === 'New chat')) {
+        try {
+          const titleResponse = await fetch('/api/research/generate-title', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ userQuery: textToSend })
+          });
+          if (titleResponse.ok) {
+            const titleData = await titleResponse.json();
+            if (titleData?.title) {
+              setTabs(prev => prev.map(t => t.id === currentTab.id ? { ...t, title: titleData.title } : t));
             }
           }
+        } catch (errTitle) {
+          console.error("Failed to generate title", errTitle);
         }
       }
 
       setIsAiTyping(false);
-
+      aiWritingTabIdRef.current = null;
     } catch (e) {
+      setIsAiTyping(false);
+      aiWritingTabIdRef.current = null;
       console.warn("Express server Gemini API failed, using deep local simulation rules:", e);
       // Fallback safely to our local academic intelligence
       const fallbackPayload = getFallbackResponse(textToSend);
@@ -636,20 +1066,37 @@ Once you have content, I can help you draft sections, summarize findings, or for
       
       if (fallbackPayload.suggestion) {
         if (fallbackPayload.suggestion.type === 'edit_document') {
-          if (fallbackPayload.suggestion.title) setDocumentTitle(fallbackPayload.suggestion.title);
+          if (fallbackPayload.suggestion.title) {
+            const newTitle = fallbackPayload.suggestion.title;
+            setDocumentTitle(newTitle);
+            setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, title: newTitle } : t));
+          }
           if (fallbackPayload.suggestion.appendContent) {
             const htmlContent = markdownToHtml(fallbackPayload.suggestion.appendContent);
-            setDocumentContent(prev => prev + htmlContent);
+            setDocumentContent(prev => {
+              const newContent = prev + htmlContent;
+              setTabs(prevTabs => prevTabs.map(t => t.id === activeTabId ? { ...t, content: newContent } : t));
+              if (editorRef.current) {
+                editorRef.current.innerHTML = newContent;
+                lastContentRef.current = newContent;
+              }
+              return newContent;
+            });
           }
           if (fallbackPayload.suggestion.replaceContent) {
             const htmlContent = markdownToHtml(fallbackPayload.suggestion.replaceContent);
             setDocumentContent(htmlContent);
+            setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, content: htmlContent } : t));
+            if (editorRef.current) {
+              editorRef.current.innerHTML = htmlContent;
+              lastContentRef.current = htmlContent;
+            }
           }
         }
       }
 
       setTimeout(() => {
-        setMessages(prev => [
+        updateChatMessages(prev => [
           ...prev,
           {
             id: String(Date.now() + 1),
@@ -658,6 +1105,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
             timestamp: Date.now()
           }
         ]);
+        
+        // Generate fallback title
+        const currentTab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
+        if (currentTab && currentTab.type === 'chat' && (currentTab.title === 'Untitled' || currentTab.title === 'New chat')) {
+          const generatedFallbackTitle = textToSend.split(" ").slice(0, 3).join(" ") + "...";
+          setTabs(prev => prev.map(t => t.id === currentTab.id ? { ...t, title: generatedFallbackTitle } : t));
+        }
+
         setIsAiTyping(false);
       }, 1000);
       return;
@@ -666,45 +1121,190 @@ Once you have content, I can help you draft sections, summarize findings, or for
     }
   };
 
-  // Paperclip mock file trigger
+  // Paperclip file click trigger
   const handlePaperclipClick = () => {
-    const fileLabel = prompt("Enter the name of a research PDF or text file to upload as a source (e.g. 'Sapolsky et al. (2018).pdf'):");
-    if (fileLabel && fileLabel.trim()) {
-      setSelectedFileLabel(fileLabel.trim());
-      // Prompt user option
-      const importOption = confirm(`Would you like to import '${fileLabel}' into your sources database automatically?`);
-      if (importOption) {
-        const titlePlaceholder = fileLabel.replace(/\.[^/.]+$/, "");
-        setPapers(prev => [
-          ...prev,
-          {
-            author: fileLabel.includes("(") ? fileLabel.substring(0, fileLabel.indexOf(")") + 1) : "Unknown Author (2025)",
-            title: titlePlaceholder,
-            description: `Imported research document. Click 'Edit Mode' to supplement detailed finding summaries.`
-          }
-        ]);
-        
-        // Let AI acknowledge
-        setIsAiTyping(true);
-        setTimeout(() => {
-          setMessages(prev => [
-            ...prev,
-            {
-              id: String(Date.now()),
-              role: 'assistant',
-              content: `Successfully uploaded and ingested scientific reference: **${fileLabel}**. I have appended it directly to your sources workspace. Feel free to ask me questions specifically about its claims!`,
-              timestamp: Date.now()
-            }
-          ]);
-          setIsAiTyping(false);
-          setSelectedFileLabel(null);
-        }, 1100);
+    fileInputRef.current?.click();
+  };
+
+  // Dynamic sort and filter logic
+  const allLibraryItems = [...papers];
+  const existingTitles = new Set(papers.map(p => p.title));
+  
+  tabs.forEach(t => {
+    if (t.type === 'document' && !t.fileId && !existingTitles.has(t.title)) {
+      if ((t.content && t.content.length > 5) || (t.title && t.title !== 'Untitled')) {
+        allLibraryItems.push({
+          author: "You",
+          title: t.title || "Untitled Draft",
+          description: t.content && t.content.length > 5 ? "Workspace draft / essay" : "Empty document",
+          added: "Just now",
+          fileType: "Document",
+          fullTextStatus: "Available",
+          summary: t.content ? (t.content.substring(0, 80).replace(/<[^>]+>/g, '') + '...') : ''
+        });
+        existingTitles.add(t.title || "Untitled Draft");
       }
     }
-  };
+  });
+
+  const filteredPapers = allLibraryItems.filter(p => {
+    const matchesSearch = searchFilter ? (
+      p.title.toLowerCase().includes(searchFilter.toLowerCase()) ||
+      (p.author && p.author.toLowerCase().includes(searchFilter.toLowerCase())) ||
+      (p.summary && p.summary.toLowerCase().includes(searchFilter.toLowerCase()))
+    ) : true;
+
+    const matchesType = filterType === 'all' ? true : p.fileType === filterType;
+    return matchesSearch && matchesType;
+  });
+
+  const sortedPapers = [...filteredPapers].sort((a, b) => {
+    let valA = '';
+    let valB = '';
+
+    if (sortBy === 'title') {
+      valA = a.title || '';
+      valB = b.title || '';
+    } else if (sortBy === 'added') {
+      valA = a.added || '';
+      valB = b.added || '';
+    } else if (sortBy === 'viewed') {
+      valA = a.viewed || '';
+      valB = b.viewed || '';
+    }
+
+    const orderMultiplier = sortOrder === 'asc' ? 1 : -1;
+    return valA.localeCompare(valB) * orderMultiplier;
+  });
 
   return (
     <div className="h-screen bg-[#070707] text-[#e4e4e7] font-sans flex selection:bg-[#262626] overflow-hidden">
+      <input
+        type="file"
+        ref={fileInputRef}
+        className="hidden"
+        accept=".pdf,.doc,.docx"
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            const formData = new FormData();
+            formData.append("file", file);
+            try {
+              const response = await fetch("/api/upload", {
+                method: "POST",
+                body: formData,
+              });
+
+              if (!response.ok) {
+                const errorText = await response.text();
+                let errMsg = "Server responded with status " + response.status;
+                try {
+                  const errJson = JSON.parse(errorText);
+                  if (errJson && (errJson.error || errJson.message)) {
+                    errMsg = errJson.error || errJson.message;
+                  }
+                } catch {
+                  if (errorText && errorText.length < 200) {
+                    errMsg = errorText;
+                  }
+                }
+                throw new Error(errMsg);
+              }
+
+              const data = await response.json();
+              if (data.success) {
+                const fileLabel = data.fileName;
+                const titlePlaceholder = fileLabel.replace(/\.[^/.]+$/, "");
+                
+                let extractedText = "";
+                let summaryInfo = `This academic resource was uploaded and incorporated into your workspace. Select 'Ask Assistant' to summarize patterns or find citations.`;
+                let pagesCountString = "";
+                
+                if (fileLabel.toLowerCase().endsWith('.pdf')) {
+                  try {
+                    extractedText = await extractTextFromPdf(`/api/files/${data.fileId}`);
+                    if (extractedText) {
+                      summaryInfo = `This PDF document is parsed and indexed successfully. You can write essays or ask questions about its exact contents.`;
+                      // Count pages mapped
+                      const pagesMatch = extractedText.match(/--- Page \d+ of \d+ ---/g);
+                      if (pagesMatch) {
+                        pagesCountString = ` (${pagesMatch.length} pages mapped)`;
+                      }
+                    }
+                  } catch (pdfErr) {
+                    console.error("PDF mapping failed", pdfErr);
+                  }
+                }
+
+                const parsedPaper: PaperItem = {
+                  author: "Unknown Author",
+                  title: titlePlaceholder,
+                  description: `Uploaded draft document: ${fileLabel}`,
+                  added: "Today",
+                  fullTextStatus: "Available",
+                  viewed: "Just now",
+                  fileType: "Document",
+                  summary: summaryInfo,
+                  fileId: data.fileId,
+                  mimetype: data.mimetype,
+                  extractedText: extractedText
+                };
+                setPapers(prev => [parsedPaper, ...prev]);
+
+                const newId = `doc-${Date.now()}`;
+                setTabs(prev => [
+                  ...prev,
+                  {
+                    id: newId,
+                    type: 'document',
+                    title: titlePlaceholder,
+                    content: `<div class="p-6 text-zinc-300 max-w-3xl mx-auto">
+                      <h1 class="text-3xl font-medium tracking-tight mb-2 text-white">${titlePlaceholder}</h1>
+                      <p class="text-sm font-mono text-zinc-500 mb-6 uppercase tracking-wider">Document File: ${fileLabel}${pagesCountString}</p>
+                      <div class="h-[1px] bg-zinc-800 mb-6"></div>
+                      <p class="mb-4 leading-relaxed">The file has been uploaded securely and mapped. You can start synthesizing your notes, analyzing findings, and asking the Assistant specifically about its claims.</p>
+                    </div>`,
+                    fileId: data.fileId,
+                    mimetype: data.mimetype
+                  }
+                ]);
+                setActiveTabId(newId);
+                setSidebarView('files');
+                setIsCreateDropdownOpen(false);
+
+                // Let AI Assistant acknowledge nicely with mapping stats
+                setIsAiTyping(true);
+                setTimeout(() => {
+                  setMessages(prev => [
+                    ...prev,
+                    {
+                      id: String(Date.now()),
+                      role: 'assistant',
+                      content: `Successfully uploaded and mapped scientific reference: **${fileLabel}**${pagesCountString}. I have indexed its content and appended it to your workspace. Feel free to ask me questions or draft essays specifically based on its claims!`,
+                      timestamp: Date.now()
+                    }
+                  ]);
+                  setIsAiTyping(false);
+                }, 1000);
+              }
+            } catch (err: any) {
+              console.error("Upload failed", err);
+              // Inform the user via assistant message nicely
+              setMessages(prev => [
+                ...prev,
+                {
+                  id: String(Date.now()),
+                  role: 'assistant',
+                  content: `⚠️ **Upload failed**: ${err?.message || 'The server returned an unexpected error format.'}\n\n*Make sure the file is a valid PDF, DOC, or DOCX, and is under 15MB.*`,
+                  timestamp: Date.now()
+                }
+              ]);
+            } finally {
+              e.target.value = '';
+            }
+          }
+        }}
+      />
       
       {/* Left Sidebar */}
       <AnimatePresence>
@@ -716,81 +1316,102 @@ Once you have content, I can help you draft sections, summarize findings, or for
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
             className="flex flex-col h-full shrink-0 overflow-hidden bg-[#070707] font-jakarta"
           >
-            {/* User Profile Header */}
-            <div className="p-3 mb-1 relative">
-              <button 
-                onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
-                className="w-full flex items-center gap-2.5 text-[#f4f4f5] text-[12px] hover:bg-[#1a1a1a] p-1.5 rounded-lg transition-colors group cursor-pointer"
-              >
-                <div className="w-6 h-6 rounded-full bg-[#27272a] flex-shrink-0 flex items-center justify-center overflow-hidden border border-[#3f3f46]">
-                   <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Ron" alt="Avatar" className="w-full h-full object-cover" />
-                </div>
-                <span className="truncate font-medium flex-1 text-left">Asnahon, Ron Niño Miguel L....</span>
-                <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 text-[#71717a] group-hover:text-[#f4f4f5] shrink-0 transition-transform duration-200 ${isProfileDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              <AnimatePresence>
-                {isProfileDropdownOpen && (
-                  <>
-                    <div 
-                      className="fixed inset-0 z-30" 
-                      onClick={() => setIsProfileDropdownOpen(false)} 
-                    />
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95, y: -10 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                      transition={{ duration: 0.15 }}
-                      className="absolute left-3 right-3 top-full mt-1 z-40 bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 shadow-2xl overflow-hidden"
-                    >
-                      <div className="px-3 py-2 border-bottom border-[#2d2d30] mb-1">
-                        <p className="text-[10px] text-[#52525b] uppercase font-bold tracking-wider">Account</p>
-                        <p className="text-[12px] text-[#e4e4e7] truncate">asnahonron@gmail.com</p>
-                      </div>
-                      <button className="w-full text-left px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7] transition-colors flex items-center gap-2">
-                        <Icon icon="ph:user" className="w-3.5 h-3.5" />
-                        Settings
-                      </button>
-                      <button className="w-full text-left px-3 py-1.5 text-[12px] text-red-400 hover:bg-red-950/20 transition-colors flex items-center gap-2">
-                        <Icon icon="ph:sign-out" className="w-3.5 h-3.5" />
-                        Log out
-                      </button>
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
-            </div>
-            
             {/* Primary Navigation Grid */}
-            <nav className="px-3 grid grid-cols-4 gap-2 mb-6">
+            <nav className="px-3 grid grid-cols-4 gap-2 mb-6 relative">
               {[
-                { icon: 'ph:pencil-line', label: 'Create', onClick: () => {
-                  const newId = `doc-${Date.now()}`;
-                  setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled' }]);
-                  setActiveTabId(newId);
-                  setSidebarView('files');
-                }},
+                { icon: 'ph:pencil-line', label: 'Create', onClick: (e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  setIsCreateDropdownOpen(!isCreateDropdownOpen);
+                }, active: isCreateDropdownOpen },
                 { icon: 'ph:house', label: 'Home', onClick: () => {
                   const homeTab = tabs.find(t => t.type === 'home');
                   if (homeTab) setActiveTabId(homeTab.id);
                   setSidebarView('files');
                 }, active: activeTab.type === 'home' && sidebarView === 'files' },
-                { icon: 'ph:books', label: 'Library', onClick: () => setSidebarView('library'), active: sidebarView === 'library' },
+                { icon: 'ph:books', label: 'Library', onClick: () => {
+                  const libTab = tabs.find(t => t.type === 'library');
+                  if (libTab) {
+                    setActiveTabId(libTab.id);
+                  } else {
+                    const newId = `lib-${Date.now()}`;
+                    setTabs([...tabs, { id: newId, type: 'library', title: 'Library' }]);
+                    setActiveTabId(newId);
+                  }
+                }, active: activeTab.type === 'library' },
                 { icon: 'ph:magnifying-glass', label: 'Search', onClick: () => setSidebarView('search'), active: sidebarView === 'search' }
               ].map((item) => (
                 <button 
                   key={item.label} 
                   onClick={item.onClick}
-                  className={`flex flex-col items-center justify-center gap-1.5 py-2.5 rounded-lg transition-all duration-300 cursor-pointer ${
+                  className={`flex flex-col items-center justify-center gap-1.5 py-2.5 transition-all duration-300 cursor-pointer ${
                     item.active 
-                      ? 'text-[#f4f4f5] scale-105' 
-                      : 'text-[#3f3f46] hover:text-[#a1a1aa]'
+                      ? 'text-white scale-105' 
+                      : 'text-[#3f3f46] hover:text-[#a1a1aa] hover:bg-[#111111]'
                   }`}
                 >
                   <Icon icon={item.icon} className="w-4 h-4 shrink-0" />
                   <span className="text-[10px] font-medium">{item.label}</span>
                 </button>
               ))}
+
+              {/* Create Dropdown */}
+              <AnimatePresence>
+                {isCreateDropdownOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 5, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute top-full left-3 w-48 bg-[#18181b] border border-[#27272a] rounded-xl py-1.5 z-[70]"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button 
+                      onClick={() => {
+                        const newId = `doc-${Date.now()}`;
+                        setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled', content: '' }]);
+                        setActiveTabId(newId);
+                        setSidebarView('files');
+                        setIsCreateDropdownOpen(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                    >
+                      <Icon icon="ph:file-text" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
+                      <span className="font-medium">New Document</span>
+                    </button>
+                    <button 
+                      onClick={() => {
+                        const newId = `chat-${Date.now()}`;
+                        setTabs([...tabs, { id: newId, type: 'chat', title: 'Untitled' }]);
+                        setActiveTabId(newId);
+                        setIsCreateDropdownOpen(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                    >
+                      <Icon icon="ph:chat-circle" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
+                      <span className="font-medium">New Chat</span>
+                    </button>
+                    <button 
+                      onClick={() => {
+                        const newFolderName = prompt('Enter folder name:');
+                        if (newFolderName) {
+                          setFolderName(newFolderName);
+                        }
+                        setIsCreateDropdownOpen(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                    >
+                      <Icon icon="ph:folder-simple-plus" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
+                      <span className="font-medium">New Folder</span>
+                    </button>
+                    <button 
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                    >
+                      <Icon icon="ph:upload-simple" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
+                      <span className="font-medium">Upload File</span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </nav>
 
             {/* Files/Chats Toggle Tabs (Only shown when in files/chats mode) */}
@@ -824,9 +1445,73 @@ Once you have content, I can help you draft sections, summarize findings, or for
               )}
 
               {sidebarView === 'chats' && (
-                <div className="text-center py-10">
-                  <Icon icon="ph:chat-circle-dots" className="w-8 h-8 text-[#27272a] mx-auto mb-2" />
-                  <p className="text-[11px] text-[#52525b]">No recent chats</p>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between px-2 mb-1">
+                    <span className="text-[10px] text-[#71717a] uppercase font-bold tracking-wider">Recent Chats</span>
+                    <button 
+                      onClick={() => {
+                        const newId = `chat-${Date.now()}`;
+                        setTabs([...tabs, { id: newId, type: 'chat', title: 'Untitled' }]);
+                        setActiveTabId(newId);
+                      }}
+                      className="p-1 hover:bg-[#27272a] rounded text-[#71717a] hover:text-[#f4f4f5] transition-colors cursor-pointer"
+                      title="New Chat"
+                    >
+                      <Icon icon="ph:plus" className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {tabs.filter(t => t.type === 'chat').length === 0 ? (
+                    <div className="text-center py-10 border border-dashed border-[#27272a] rounded-xl">
+                      <Icon icon="ph:chat-circle-dots" className="w-8 h-8 text-[#27272a] mx-auto mb-2" />
+                      <p className="text-[11px] text-[#52525b]">No recent chats</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {tabs.filter(t => t.type === 'chat').map((chatTab) => {
+                        const isCurrent = chatTab.id === activeTabId;
+                        return (
+                          <div 
+                            key={chatTab.id}
+                            className={`group flex items-center justify-between px-2 py-1.5 rounded-lg transition-all ${
+                              isCurrent 
+                                ? 'bg-[#27272a]/50 text-white' 
+                                : 'hover:bg-[#161616] text-[#a1a1aa] hover:text-[#f4f4f5]'
+                            }`}
+                          >
+                            <button
+                              onClick={() => setActiveTabId(chatTab.id)}
+                              className="flex-1 flex items-center gap-2 min-w-0 text-left cursor-pointer"
+                            >
+                              <Icon 
+                                icon="ph:chat-circle" 
+                                className={`w-3.5 h-3.5 shrink-0 ${isCurrent ? 'text-zinc-300' : 'text-[#71717a] group-hover:text-zinc-400'}`} 
+                              />
+                              <span className="text-xs truncate font-medium">
+                                {chatTab.title}
+                              </span>
+                            </button>
+                            {tabs.filter(t => t.type === 'chat').length > 1 && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const filtered = tabs.filter(t => t.id !== chatTab.id);
+                                  setTabs(filtered);
+                                  if (isCurrent) {
+                                    const sibling = filtered.find(t => t.type === 'chat') || filtered[0];
+                                    setActiveTabId(sibling.id);
+                                  }
+                                }}
+                                className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#27272a] hover:text-[#ef4444] rounded transition-all cursor-pointer"
+                                title="Delete Chat"
+                              >
+                                <Icon icon="ph:trash" className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -945,12 +1630,58 @@ Once you have content, I can help you draft sections, summarize findings, or for
               )}
             </div>
 
+
             {/* Bottom Section */}
             <div className="mt-auto p-3">
               <button className="w-full flex items-center gap-2 px-2 py-2 text-[#71717a] hover:text-[#a1a1aa] text-[12px] font-medium transition-colors">
                 <Icon icon="ph:question" className="w-3.5 h-3.5" />
                 <span>Support</span>
               </button>
+
+              {/* User Profile Header */}
+              <div className="p-1 mt-2 relative">
+                <button 
+                  onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
+                  className="w-full flex items-center gap-2.5 text-[#f4f4f5] text-[12px] hover:bg-[#1a1a1a] p-1.5 rounded-lg transition-colors group cursor-pointer"
+                >
+                  <div className="w-6 h-6 rounded-full bg-[#27272a] flex-shrink-0 flex items-center justify-center overflow-hidden border border-[#3f3f46]">
+                     <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Ron" alt="Avatar" className="w-full h-full object-cover" />
+                  </div>
+                  <span className="truncate font-medium flex-1 text-left">Asnahon, Ron Niño Miguel L....</span>
+                  <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 text-[#71717a] group-hover:text-[#f4f4f5] shrink-0 transition-transform duration-200 ${isProfileDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                <AnimatePresence>
+                  {isProfileDropdownOpen && (
+                    <>
+                      <div 
+                        className="fixed inset-0 z-30" 
+                        onClick={() => setIsProfileDropdownOpen(false)} 
+                      />
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute left-3 right-3 bottom-full mb-1 z-40 bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 overflow-hidden"
+                      >
+                        <div className="px-3 py-2 border-bottom border-[#2d2d30] mb-1">
+                          <p className="text-[10px] text-[#52525b] uppercase font-bold tracking-wider">Account</p>
+                          <p className="text-[12px] text-[#e4e4e7] truncate">asnahonron@gmail.com</p>
+                        </div>
+                        <button className="w-full text-left px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7] transition-colors flex items-center gap-2">
+                          <Icon icon="ph:user" className="w-3.5 h-3.5" />
+                          Settings
+                        </button>
+                        <button className="w-full text-left px-3 py-1.5 text-[12px] text-red-400 hover:bg-red-950/20 transition-colors flex items-center gap-2">
+                          <Icon icon="ph:sign-out" className="w-3.5 h-3.5" />
+                          Log out
+                        </button>
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
           </motion.div>
         )}
@@ -986,11 +1717,15 @@ Once you have content, I can help you draft sections, summarize findings, or for
       >
         {tab.type === 'home' ? (
           <Icon icon="ph:house" className="w-3.5 h-3.5" />
+        ) : tab.type === 'library' ? (
+          <Icon icon="ph:books" className="w-3.5 h-3.5" />
+        ) : tab.type === 'chat' ? (
+          <Icon icon="ph:chat-circle" className="w-3.5 h-3.5" />
         ) : (
           <Icon icon="ph:pencil-line" className="w-3.5 h-3.5" />
         )}
         <span className="truncate max-w-[130px]">
-          {tab.type === 'home' ? 'Home' : (documentTitle || 'Untitled')}
+          {tab.type === 'home' ? 'Home' : tab.type === 'library' ? 'Library' : (tab.id === activeTabId && tab.type === 'document' && !tab.fileId ? documentTitle : tab.title) || 'Untitled'}
         </span>
         {tabs.length > 1 && (
           <button 
@@ -1041,7 +1776,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
         </header>
 
         {/* Main Editor Component Container */}
-        <div className="relative flex-1 bg-[#121212] rounded-2xl flex flex-col overflow-hidden min-w-0">
+        <div className="relative flex-1 bg-[#121212] rounded-2xl flex flex-col overflow-hidden min-w-0 transition-all">
           
           {activeTab.type === 'home' ? (
             <div className="flex-1 overflow-y-auto focus:outline-none scroll-smooth">
@@ -1067,48 +1802,1057 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </div>
                     <div>
                       <h3 className="text-[#e4e4e7] font-medium text-sm">Resume Document</h3>
-                      <p className="text-[#a1a1aa] text-xs mt-0.5 truncate max-w-[200px]">{documentTitle || 'Untitled Document'}</p>
+                      <p className="text-[#a1a1aa] text-xs mt-0.5 truncate max-w-[200px]">{tabs.find(t => t.type === 'document' && !t.fileId)?.title || 'Untitled Document'}</p>
                     </div>
                   </button>
                   
-                  <button 
-                    onClick={() => {
-                      const newId = `doc-${Date.now()}`;
-                      setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled' }]);
-                      setActiveTabId(newId);
-                    }}
-                    className="flex items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-colors rounded-3xl text-left cursor-pointer group"
-                  >
-                    <div className="mr-5 group-hover:scale-110 transition-transform duration-300">
-                      <Icon icon="ph:plus-circle" className="w-7 h-7 text-[#e4e4e7]" />
-                    </div>
-                    <div>
-                      <h3 className="text-[#e4e4e7] font-medium text-sm">Create New</h3>
-                      <p className="text-[#a1a1aa] text-xs mt-0.5">Start a blank hypothesis</p>
-                    </div>
-                  </button>
+                  <div className="relative">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsHomeCreateDropdownOpen(!isHomeCreateDropdownOpen);
+                      }}
+                      className={`flex w-full items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-all rounded-3xl text-left cursor-pointer group ${isHomeCreateDropdownOpen ? 'ring-1 ring-zinc-500 bg-[#222222]' : ''}`}
+                    >
+                      <div className="mr-5 group-hover:scale-110 transition-transform duration-300">
+                        <Icon icon="ph:plus-circle" className={`w-7 h-7 text-[#e4e4e7] transition-transform ${isHomeCreateDropdownOpen ? 'rotate-45' : ''}`} />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-[#e4e4e7] font-medium text-sm">Create New</h3>
+                        <p className="text-[#a1a1aa] text-xs mt-0.5">Start a blank hypothesis</p>
+                      </div>
+                      <Icon icon="ph:caret-down" className={`w-4 h-4 text-[#71717a] transition-transform ${isHomeCreateDropdownOpen ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    <AnimatePresence>
+                      {isHomeCreateDropdownOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 8, scale: 1 }}
+                          exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                          className="absolute top-full left-0 w-56 bg-[#18181b] border border-[#27272a] rounded-2xl py-2 z-[70] overflow-hidden"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button 
+                            onClick={() => {
+                              const newId = `doc-${Date.now()}`;
+                              setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled', content: '' }]);
+                              setActiveTabId(newId);
+                              setIsHomeCreateDropdownOpen(false);
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                          >
+                            <Icon icon="ph:file-text" className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
+                            <div className="text-left">
+                              <div className="font-medium text-xs">New Document</div>
+                              <div className="text-[10px] text-zinc-500">Start drafting with your research</div>
+                            </div>
+                          </button>
+
+                          <button 
+                            onClick={() => {
+                              const newId = `chat-${Date.now()}`;
+                              setTabs([...tabs, { id: newId, type: 'chat', title: 'Untitled' }]);
+                              setActiveTabId(newId);
+                              setIsHomeCreateDropdownOpen(false);
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                          >
+                            <Icon icon="ph:chat-circle" className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
+                            <div className="text-left">
+                              <div className="font-medium text-xs">Assistant Chat</div>
+                              <div className="text-[10px] text-zinc-500">Ask your mentor anything</div>
+                            </div>
+                          </button>
+
+                          <div className="h-[1px] bg-[#27272a] mx-4 my-1" />
+
+                          <button 
+                            onClick={() => {
+                              const name = prompt('Enter folder name:');
+                              if (name) setFolderName(name);
+                              setIsHomeCreateDropdownOpen(false);
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                          >
+                            <Icon icon="ph:folder-simple-plus" className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
+                            <div className="text-left">
+                              <div className="font-medium text-xs">New Folder</div>
+                              <div className="text-[10px] text-zinc-500">Organize your workspace</div>
+                            </div>
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 </div>
 
-                <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wider mb-4">Recent Folders</h2>
-                <div className="space-y-2">
-                  {[folderName || 'My Research', 'Semester Projects', 'Workshops', 'Archived Drafts'].map((folder, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-3 px-4 rounded-lg hover:bg-[#1a1a1a] transition-colors cursor-pointer border border-transparent hover:border-[#27272a]">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-[#18181b] flex items-center justify-center">
-                          <span className="text-[#52525b] text-[10px] font-mono select-none">DIR</span>
+                <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wider mb-6">Recent Folders</h2>
+                <div className="relative group/carousel">
+                  <div 
+                    className="flex overflow-x-auto gap-4 pb-6 scrollbar-hide no-scrollbar scroll-smooth"
+                    style={{
+                      WebkitMaskImage: 'linear-gradient(to right, rgba(0,0,0,1) 82%, rgba(0,0,0,0) 98%)',
+                      maskImage: 'linear-gradient(to right, rgba(0,0,0,1) 82%, rgba(0,0,0,0) 98%)'
+                    }}
+                  >
+                    {[folderName || 'My Research', 'Semester Projects', 'Workshops', 'Archived Drafts', 'Shared Resources', 'Media Assets'].map((folder, idx) => (
+                      <button 
+                        key={idx} 
+                        className="flex flex-col items-start p-6 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-all duration-300 rounded-[28px] text-left cursor-pointer group min-w-[240px] shrink-0"
+                      >
+                        <div className="mb-4 group-hover:scale-105 transition-transform duration-300">
+                          <Icon icon="ph:folder-user" className="w-10 h-10 text-[#f4f4f5]" />
                         </div>
-                        <span className="text-[#e4e4e7] text-sm">{folder}</span>
-                      </div>
-                      <span className="text-[#52525b] text-xs font-mono">{idx === 0 ? 'Active' : 'Last week'}</span>
-                    </div>
-                  ))}
+                        <div className="min-w-0">
+                          <h3 className="text-[#e4e4e7] font-medium text-base truncate mb-1">{folder}</h3>
+                          <p className="text-[#71717a] text-xs">{idx === 0 ? 'Active research' : 'Updated last week'}</p>
+                        </div>
+                      </button>
+                    ))}
+                    {/* Spacer for right padding in overflow */}
+                    <div className="min-w-[40px] shrink-0 h-full" />
+                  </div>
                 </div>
               </div>
             </div>
+          ) : activeTab.type === 'chat' ? (
+            <div className="flex-1 flex flex-col bg-[#121212] relative overflow-hidden">
+               {/* Chat Header */}
+               <header className="h-[52px] flex items-center justify-between px-4 shrink-0 relative border-b border-[#1c1c1f] z-45">
+                 <div className="relative">
+                   <button 
+                     onClick={() => setIsChatDropdownOpen(!isChatDropdownOpen)}
+                     className="flex items-center gap-1.5 text-[#e4e4e7] hover:bg-[#1a1a1a] px-3 py-1.5 rounded-xl transition-colors cursor-pointer group"
+                   >
+                     <span className="font-medium text-[13px]">{activeTab.title}</span>
+                     <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 text-zinc-500 group-hover:text-zinc-300 transition-transform ${isChatDropdownOpen ? 'rotate-180' : ''}`} />
+                   </button>
+
+                   {isChatDropdownOpen && (
+                     <>
+                       <div 
+                         className="fixed inset-0 z-40" 
+                         onClick={() => setIsChatDropdownOpen(false)}
+                       />
+                       <div className="absolute top-full left-0 mt-1.5 w-64 bg-[#1a1a1a] border border-[#2d2d30] rounded-xl shadow-2xl z-50 p-1.5 flex flex-col gap-0.5 max-h-72 overflow-y-auto">
+                         <div className="px-2.5 py-1.5 text-[10px] text-zinc-500 font-bold uppercase tracking-wider select-none">
+                           All Chats
+                         </div>
+                         {tabs.filter(t => t.type === 'chat').map((chatTab) => (
+                           <button
+                             key={chatTab.id}
+                             onClick={() => {
+                               setActiveTabId(chatTab.id);
+                               setIsChatDropdownOpen(false);
+                             }}
+                             className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-all cursor-pointer ${
+                               chatTab.id === activeTabId 
+                                 ? 'bg-[#27272a] text-white' 
+                                 : 'text-zinc-400 hover:text-white hover:bg-[#222222]'
+                             }`}
+                           >
+                             <Icon icon="ph:chat-circle" className="w-4 h-4 shrink-0 text-zinc-500" />
+                             <span className="text-xs font-medium truncate">{chatTab.title}</span>
+                           </button>
+                         ))}
+                         <div className="border-t border-[#2d2d30] my-1" />
+                         <button
+                           onClick={() => {
+                             const newId = `chat-${Date.now()}`;
+                             setTabs([...tabs, { id: newId, type: 'chat', title: 'Untitled' }]);
+                             setActiveTabId(newId);
+                             setIsChatDropdownOpen(false);
+                           }}
+                           className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-[#222222] transition-colors cursor-pointer"
+                         >
+                           <Icon icon="ph:plus" className="w-4 h-4 shrink-0 text-zinc-500" />
+                           <span className="text-xs font-semibold">New Chat</span>
+                         </button>
+                       </div>
+                     </>
+                   )}
+                 </div>
+
+                 <div className="flex items-center gap-1.5">
+                   <button 
+                     onClick={() => {
+                       const newId = `chat-${Date.now()}`;
+                       setTabs([...tabs, { id: newId, type: 'chat', title: 'Untitled' }]);
+                       setActiveTabId(newId);
+                     }}
+                     className="p-2 text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#1a1a1a] rounded-xl transition-colors cursor-pointer"
+                     title="New Chat"
+                   >
+                     <Icon icon="ph:plus" className="w-4 h-4" />
+                   </button>
+                   <button className="p-2 text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#1a1a1a] rounded-xl transition-colors cursor-pointer">
+                     <Icon icon="ph:dots-three-outline-fill" className="w-4 h-4" />
+                   </button>
+                 </div>
+               </header>
+
+              {/* Chat Content Area */}
+              <div className="flex-1 overflow-y-auto flex flex-col">
+                <div className="flex-1 flex flex-col items-center justify-center py-6 px-6">
+                  {messages.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center w-full max-w-3xl">
+                      <img src="/cosmi.png" alt="Cosmi Logo" className="w-48 h-48 md:w-64 md:h-64 opacity-40 select-none grayscale invert" />
+                    </div>
+                  ) : (
+                    <div className="w-full max-w-3xl flex flex-col gap-8 pb-32">
+                       {messages.map((m) => (
+                        <div 
+                          key={m.id} 
+                          className={`flex flex-col ${
+                            m.role === 'user' 
+                              ? 'items-end' 
+                              : 'items-start'
+                          } w-full`}
+                        >
+                          <div className={`max-w-[85%] ${
+                            m.role === 'user' 
+                              ? 'bg-[#1a1a1a] text-white rounded-2xl px-5 py-3.5 border border-[#27272a]' 
+                              : 'w-full text-[#d4d4d8] py-2'
+                          } text-[15px] leading-[1.6]`}>
+                            {m.role === 'assistant' && m.thought && (
+                              <details className="mb-3 group">
+                                <summary className="text-[11px] font-medium text-[#71717a] hover:text-[#a1a1aa] cursor-pointer transition-colors list-none outline-none inline-flex items-center gap-1.5 font-jakarta uppercase tracking-widest select-none">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-[#71717a] group-hover:bg-[#a1a1aa] transition-colors" />
+                                  Thought Process
+                                </summary>
+                                <div className="mt-3 text-[13.5px] text-[#a1a1aa] pb-4 leading-relaxed font-jakarta">
+                                  {m.thought}
+                                </div>
+                              </details>
+                            )}
+                            <div className={`select-text break-words ${m.role === 'user' ? 'whitespace-pre-wrap' : 'markdown-body text-[#d4d4d8]'}`}>
+                              {m.role === 'user' ? (
+                                renderLinkifiedText(m.content)
+                              ) : (
+                                <TypewriterMarkdown 
+                                  content={m.content} 
+                                  timestamp={m.timestamp} 
+                                  onCitationClick={handleCitationClick}
+                                  isStreaming={isAiTyping && m.id === messages[messages.length - 1]?.id} 
+                                />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {isAiTyping && (
+                        <div className="self-start py-2 max-w-full text-[14px] leading-relaxed select-none">
+                          <span className="shimmer-text font-medium text-zinc-500">Processing input...</span>
+                        </div>
+                      )}
+                      <div ref={messagesEndRef} />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Chat Input Dock with Suggestions Above */}
+              <div className="shrink-0 p-6 flex flex-col items-center gap-4">
+                <div className="w-full max-w-3xl bg-[#1a1a1a] border border-[#2d2d30] rounded-[28px] p-1.5 flex flex-col transition-all focus-within:border-zinc-700">
+                  <TextareaAutosize 
+                    placeholder="Ask about anything, / for skills, @ for context..."
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage();
+                      }
+                    }}
+                    className="w-full bg-transparent text-[15px] text-[#e4e4e7] placeholder-[#52525b] py-3 px-4 resize-none focus:outline-none min-h-[52px] max-h-[300px] leading-relaxed"
+                  />
+                  
+                  <div className="flex items-center justify-between px-2 pb-2 pt-1">
+                    <div className="flex items-center gap-1">
+                      <button className="flex items-center gap-1 px-2.5 py-1.5 hover:bg-[#222222] rounded-xl transition-colors text-[13px] text-[#71717a] hover:text-[#e4e4e7] cursor-pointer">
+                        <span className="font-medium">Auto</span>
+                        <Icon icon="ph:caret-down" className="w-3 h-3" />
+                      </button>
+                      <button className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-[#222222] rounded-xl transition-colors text-[13px] text-[#71717a] hover:text-[#e4e4e7] cursor-pointer font-medium">
+                        <Icon icon="ph:books" className="w-4 h-4" />
+                        <span>Library</span>
+                      </button>
+                      <button className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-[#222222] rounded-xl transition-colors text-[13px] text-[#71717a] hover:text-[#e4e4e7] cursor-pointer font-medium">
+                        <Icon icon="ph:globe" className="w-4 h-4" />
+                        <span>Web</span>
+                      </button>
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                       <button 
+                        onClick={handlePaperclipClick}
+                        className="p-2.5 text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#222222] rounded-full transition-colors cursor-pointer"
+                       >
+                         <Icon icon="ph:plus" className="w-5 h-5" />
+                       </button>
+                       <button 
+                         onClick={() => handleSendMessage()}
+                         disabled={!chatInput.trim()}
+                         className={`p-2 bg-white text-zinc-950 rounded-full transition-all flex items-center justify-center w-9 h-9 ${
+                           chatInput.trim() 
+                             ? 'opacity-100 hover:bg-zinc-200 cursor-pointer' 
+                             : 'opacity-40 cursor-not-allowed'
+                         }`}
+                       >
+                         <Icon icon="ph:arrow-up-bold" className="w-5 h-5" />
+                       </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : activeTab.type === 'library' ? (
+            <div className="flex-1 overflow-y-auto focus:outline-none bg-[#121212] flex flex-col">
+              <div className="w-full px-[1px] py-6 flex-1 flex flex-col">
+                
+                {/* Header section - Millimeter margin from edge */}
+                <div className="flex items-center justify-between mb-8 px-4">
+                  <div>
+                    <h1 className="text-2xl text-[#f4f4f5] font-medium tracking-tight">Library</h1>
+                    <p className="text-[#71717a] text-[11px] mt-1">Files, research assets, and citation repository</p>
+                  </div>
+                  
+                  <div className="relative w-64">
+                    <Icon icon="ph:magnifying-glass" className="absolute left-3 top-2.5 w-4 h-4 text-zinc-500" />
+                    <input
+                      type="text"
+                      placeholder="Search collection..."
+                      value={searchFilter}
+                      onChange={(e) => setSearchFilter(e.target.value)}
+                      className="w-full bg-[#1a1a1a] border border-[#27272a] rounded-lg pl-9 pr-3 py-1.5 text-zinc-200 text-xs focus:border-zinc-400 focus:outline-none placeholder:text-zinc-600 outline-none transition-colors"
+                    />
+                  </div>
+                </div>
+
+                {/* Toolbar - Aligned precisely with table edge */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 mb-2 select-none relative px-4 text-zinc-400">
+                  <div className="flex items-center gap-2">
+                    <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1a1a1a] hover:bg-[#222222] border border-[#27272a] rounded-lg text-[11px] font-medium text-[#e4e4e7] transition-all cursor-pointer">
+                      <Icon icon="ph:rows" className="w-3.5 h-3.5" />
+                      <span>Display</span>
+                    </button>
+                    <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1a1a1a] hover:bg-[#222222] border border-[#27272a] rounded-lg text-[11px] font-medium text-[#e4e4e7] transition-all cursor-pointer">
+                      <Icon icon="ph:arrows-down-up" className="w-3.5 h-3.5" />
+                      <span>Sort</span>
+                    </button>
+                    <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1a1a1a] hover:bg-[#222222] border border-[#27272a] rounded-lg text-[11px] font-medium text-[#e4e4e7] transition-all cursor-pointer">
+                      <Icon icon="ph:sliders-horizontal" className="w-3.5 h-3.5" />
+                      <span>Filter</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-3 ml-auto text-xs">
+                    <span className="text-[#71717a] text-[11px] font-medium mr-1 select-none">
+                      {sortedPapers.length} files in library
+                    </span>
+                    <button onClick={() => setInviteModalOpen(true)} className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#252528] rounded-xl text-zinc-200 transition-all cursor-pointer">
+                      <Icon icon="ph:user-plus" className="w-3.5 h-3.5 text-zinc-400" />
+                      <span className="font-medium text-[11px]">Invite</span>
+                    </button>
+                    <div className="relative">
+                      <button 
+                        onClick={() => {
+                          setIsAddDropdownOpen(!isAddDropdownOpen);
+                          setAddDropdownNested(null);
+                        }} 
+                        className={`flex items-center gap-1.5 px-4 py-1.5 font-semibold rounded-xl transition-all cursor-pointer ${isAddDropdownOpen ? 'bg-white text-zinc-950' : 'bg-zinc-200 hover:bg-white text-zinc-950'}`}
+                      >
+                        <span className="text-[11px]">Add</span>
+                        <Icon icon="ph:caret-down" className={`w-3 h-3 transition-transform ${isAddDropdownOpen ? 'rotate-180' : ''}`} />
+                      </button>
+
+                      <AnimatePresence>
+                        {isAddDropdownOpen && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                            className="absolute right-0 mt-2 w-52 bg-[#18181b] border border-[#27272a] rounded-xl py-1.5 z-[60]"
+                          >
+                            <button
+                              onClick={() => {
+                                const newId = `doc-${Date.now()}`;
+                                setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled', content: '' }]);
+                                setActiveTabId(newId);
+                                setIsAddDropdownOpen(false);
+                              }}
+                              className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                            >
+                              <Icon icon="ph:file-plus" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
+                              <span className="font-medium">New document</span>
+                            </button>
+                            
+                            <button
+                              onClick={() => {
+                                handlePaperclipClick();
+                                setIsAddDropdownOpen(false);
+                              }}
+                              className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                            >
+                              <Icon icon="ph:upload-simple" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
+                              <span className="font-medium">File upload</span>
+                            </button>
+
+                            <div className="h-[1px] bg-[#27272a] my-1 mx-2" />
+
+                            <div className="relative">
+                              <button
+                                onMouseEnter={() => setAddDropdownNested('import')}
+                                className={`w-full flex items-center justify-between px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group ${addDropdownNested === 'import' ? 'bg-[#27272a] text-white' : ''}`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <Icon icon="ph:download-simple" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
+                                  <span className="font-medium">Import</span>
+                                </div>
+                                <Icon icon="ph:caret-right" className="w-3 h-3 text-zinc-500" />
+                              </button>
+
+                              <AnimatePresence>
+                                {addDropdownNested === 'import' && (
+                                  <motion.div 
+                                    initial={{ opacity: 0, x: -8 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: -8 }}
+                                    className="absolute right-full top-0 mr-1 w-48 bg-[#18181b] border border-[#27272a] rounded-xl py-1.5 z-[70]"
+                                    onMouseLeave={() => setAddDropdownNested(null)}
+                                  >
+                                    <button 
+                                      onClick={() => {
+                                        setImportType('url');
+                                        setImportModalOpen(true);
+                                        setImportUrl('');
+                                        setLinkAnalyzeError('');
+                                        setLinkAnalyzeStatus('');
+                                        setIsAddDropdownOpen(false);
+                                        setAddDropdownNested(null);
+                                      }}
+                                      className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                                    >
+                                      <Icon icon="ph:link" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
+                                      <span className="font-medium">Public URL</span>
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        setImportType('gdoc');
+                                        setImportModalOpen(true);
+                                        setImportUrl('');
+                                        setLinkAnalyzeError('');
+                                        setLinkAnalyzeStatus('');
+                                        setIsAddDropdownOpen(false);
+                                        setAddDropdownNested(null);
+                                      }}
+                                      className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                                    >
+                                      <Icon icon="ph:google-logo" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
+                                      <span className="font-medium">Google Docs</span>
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        setImportType('youtube');
+                                        setImportModalOpen(true);
+                                        setImportUrl('');
+                                        setLinkAnalyzeError('');
+                                        setLinkAnalyzeStatus('');
+                                        setIsAddDropdownOpen(false);
+                                        setAddDropdownNested(null);
+                                      }}
+                                      className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                                    >
+                                      <Icon icon="ph:youtube-logo" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
+                                      <span className="font-medium">YouTube</span>
+                                    </button>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Table Interface - Unified background and edge-to-edge */}
+                {sortedPapers.length === 0 ? (
+                  <div className="py-20 text-center mx-4 border border-dashed border-[#27272a] rounded-xl bg-[#161616]/20">
+                    <Icon icon="ph:books" className="w-10 h-10 text-[#3a3a3c] mx-auto mb-4" />
+                    <h3 className="text-[#e4e4e7] text-sm">Empty Repository</h3>
+                  </div>
+                ) : (
+                  <div className="bg-[#121212] overflow-x-auto select-none border-t border-[#27272a] flex-1">
+                    <table className="w-full text-left border-collapse min-w-[950px]">
+                      <thead>
+                        <tr className="border-b border-[#27272a]/60 text-[#71717a] text-[10.5px] font-mono tracking-wider uppercase">
+                          <th className="w-[44px] pl-4 py-3">
+                            <button 
+                              onClick={() => {
+                                if (selectedPapers.length === sortedPapers.length) {
+                                  setSelectedPapers([]);
+                                } else {
+                                  setSelectedPapers(sortedPapers.map(p => p.title));
+                                }
+                              }}
+                              className="w-3.5 h-3.5 rounded-sm border border-[#27272a] bg-[#1a1a1a] flex items-center justify-center hover:border-zinc-500 transition-colors cursor-pointer"
+                            >
+                              {selectedPapers.length === sortedPapers.length && sortedPapers.length > 0 && (
+                                <div className="w-1.5 h-1.5 bg-zinc-200 rounded-[1px]" />
+                              )}
+                              {selectedPapers.length > 0 && selectedPapers.length < sortedPapers.length && (
+                                <div className="w-1.5 h-[1px] bg-zinc-400" />
+                              )}
+                            </button>
+                          </th>
+                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">Title</th>
+                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">Authors</th>
+                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">Added</th>
+                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">Full text</th>
+                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">Viewed</th>
+                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">File type</th>
+                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">Summary</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#1e1e20] text-xs">
+                        {sortedPapers.map((paper, idx) => {
+                          const isChecked = selectedPapers.includes(paper.title);
+                          return (
+                            <tr 
+                              key={idx} 
+                              onClick={() => {
+                                const existingTab = tabs.find(t => t.title === paper.title);
+                                if (existingTab) {
+                                  setActiveTabId(existingTab.id);
+                                } else {
+                                  const newTabId = `view-${Date.now()}`;
+                                  setTabs(prev => [...prev, {
+                                    id: newTabId,
+                                    type: 'document',
+                                    title: paper.title,
+                                    content: markdownToHtml(paper.summary || paper.description || ''),
+                                    fileId: paper.fileId,
+                                    mimetype: paper.mimetype
+                                  }]);
+                                  setActiveTabId(newTabId);
+                                }
+                              }} 
+                              className={`hover:bg-[#1a1a1a]/40 transition-colors group cursor-pointer ${isChecked ? 'bg-[#1a1a1a]/25' : ''}`}
+                            >
+                              <td 
+                                className="w-[44px] pl-4 py-3.5"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (isChecked) {
+                                    setSelectedPapers(selectedPapers.filter(t => t !== paper.title));
+                                  } else {
+                                    setSelectedPapers([...selectedPapers, paper.title]);
+                                  }
+                                }}
+                              >
+                                <div className={`w-3.5 h-3.5 rounded-sm border border-[#27272a] flex items-center justify-center transition-colors ${isChecked ? 'bg-zinc-200 border-zinc-200' : 'bg-[#1a1a1a]'}`}>
+                                  {isChecked && <Icon icon="ph:check" className="w-2.5 h-2.5 text-[#121212]" />}
+                                </div>
+                              </td>
+                              <td className={`px-3 ${displayDensity === 'compact' ? 'py-2' : 'py-3.5'} font-medium`}>
+                                <div className="flex items-center gap-2.5">
+                                  {paper.fileType === 'Note' ? <Icon icon="ph:file-text" className="w-4 h-4 text-zinc-400" /> : <Icon icon="ph:article" className="w-4 h-4 text-zinc-300" />}
+                                  <span className="text-[#f4f4f5] truncate max-w-[280px]">{paper.title}</span>
+                                </div>
+                              </td>
+                              <td className="px-3 text-zinc-400">{paper.author || '—'}</td>
+                              <td className="px-3 text-zinc-500">{paper.added || '—'}</td>
+                              <td className="px-3">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {paper.fullTextStatus === 'Available' ? (
+                                    <span className="text-[#e4e4e7] bg-[#1a1a1a] px-2 py-0.5 rounded text-[10px] border border-[#27272a]">
+                                      Available
+                                    </span>
+                                  ) : (
+                                    <span className="text-zinc-600">Unavailable</span>
+                                  )}
+                                  {paper.extractedText && (
+                                    <span className="text-emerald-400 bg-emerald-950/45 px-1.5 py-0.5 rounded text-[10px] border border-emerald-900/60 font-mono">
+                                      Mapped
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-3 text-zinc-500">{paper.viewed || '—'}</td>
+                              <td className="px-3 text-zinc-400 capitalize">{paper.fileType || '—'}</td>
+                              <td className="px-3 text-zinc-500">
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveViewingPaper(paper);
+                                  }}
+                                  className="px-2.5 py-1 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-zinc-300 hover:text-white font-sans text-[11px] rounded-lg transition cursor-pointer flex items-center gap-1.5 font-medium select-none"
+                                >
+                                  <Icon icon="ph:eye" className="w-3.5 h-3.5" />
+                                  <span>View Summary</span>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Floating Selection Pill based on screenshot */}
+                <AnimatePresence>
+                  {selectedPapers.length > 0 && (
+                    <motion.div 
+                      initial={{ y: 20, x: '-50%', opacity: 0 }}
+                      animate={{ y: 0, x: '-50%', opacity: 1 }}
+                      exit={{ y: 20, x: '-50%', opacity: 0 }}
+                      transition={{ type: "spring", damping: 25, stiffness: 350 }}
+                      className="fixed bottom-10 left-1/2 z-50 flex items-center gap-6 px-6 py-3 bg-[#111112] border border-[#27272a] rounded-full select-none font-jakarta"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-4 h-4 bg-[#0070f3] rounded flex items-center justify-center">
+                          <Icon icon="ph:check-bold" className="w-2.5 h-2.5 text-white" />
+                        </div>
+                        <span className="text-sm text-white whitespace-nowrap">
+                          {selectedPapers.length} {selectedPapers.length === 1 ? 'file' : 'files'} selected
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        {selectedPapers.length === 1 && (
+                          <button 
+                            onClick={() => {
+                              const match = papers.find(p => p.title === selectedPapers[0]);
+                              if (match) {
+                                setActiveViewingPaper(match);
+                              }
+                            }}
+                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-[#1a1a1a] rounded-lg text-white text-[13px] transition-colors cursor-pointer"
+                          >
+                            <Icon icon="ph:eye" className="w-4 h-4 text-zinc-400" />
+                            <span>View Summary</span>
+                          </button>
+                        )}
+                         <button className="flex items-center gap-2 px-3 py-1.5 hover:bg-[#1a1a1a] rounded-lg text-white text-[13px] transition-colors cursor-pointer">
+                            <Icon icon="ph:folder" className="w-4 h-4" />
+                            <span>Add to folder</span>
+                         </button>
+
+                         <button 
+                          onClick={() => {
+                            setPapers(prev => prev.filter(p => !selectedPapers.includes(p.title)));
+                            setSelectedPapers([]);
+                          }}
+                          className="flex items-center gap-2 px-3 py-1.5 hover:bg-[#1a1a1a] rounded-lg text-white text-[13px] transition-colors cursor-pointer"
+                         >
+                            <span>Delete selection</span>
+                         </button>
+
+                         <button className="flex items-center gap-2 px-3 py-1.5 hover:bg-[#1a1a1a] rounded-lg text-white text-[13px] transition-colors cursor-pointer">
+                            <Icon icon="ph:download-simple" className="w-4 h-4" />
+                            <span>Export</span>
+                         </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Zero-Glow Invite Popover Modal */}
+              {inviteModalOpen && (
+                <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
+                  <div className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-md p-6 relative animate-scale-up">
+                    <button 
+                      onClick={() => setInviteModalOpen(false)}
+                      className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                    >
+                      <Icon icon="ph:x" className="w-5 h-5" />
+                    </button>
+                    
+                    <h3 className="text-[#f4f4f5] text-lg font-medium mb-1">Invite Collaborators</h3>
+                    <p className="text-[#71717a] text-xs mb-4">Grant access key approvals so peer authors can review or annotate together</p>
+                    
+                    {isInviteSuccess ? (
+                      <div className="text-center py-6">
+                        <Icon icon="ph:check-circle" className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+                        <h4 className="text-[#e4e4e7] font-semibold text-sm">Invitation Sent</h4>
+                        <p className="text-[#71717a] text-xs mt-1">An approval link has been issued to <span className="text-slate-300 font-mono">{inviteEmail}</span></p>
+                        <button
+                          onClick={() => setInviteModalOpen(false)}
+                          className="mt-5 w-full py-2 bg-[#27272a] hover:bg-[#333336] rounded-xl text-zinc-200 text-xs font-semibold cursor-pointer"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    ) : (
+                      <form onSubmit={(e) => {
+                        e.preventDefault();
+                        if (inviteEmail.trim()) {
+                          setIsInviteSuccess(true);
+                        }
+                      }}>
+                        <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-2">Peer email address</label>
+                        <input
+                          type="email"
+                          required
+                          value={inviteEmail}
+                          onChange={(e) => setInviteEmail(e.target.value)}
+                          placeholder="e.g. peer.reviewer@academic.edu"
+                          className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2.5 text-zinc-200 text-xs mb-4 focus:border-zinc-500 focus:outline-none placeholder:text-zinc-600 transition-colors"
+                        />
+                        <button
+                          type="submit"
+                          className="w-full py-2.5 bg-zinc-200 hover:bg-white text-zinc-950 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                        >
+                          Send Collaboration Account Link
+                        </button>
+                      </form>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Zero-Glow Import Link Modal */}
+              {importModalOpen && (
+                <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/75 z-40 flex items-center justify-center p-4">
+                  <div className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-lg p-6 relative animate-scale-up text-zinc-300">
+                    <button 
+                      onClick={() => {
+                        if (!isAnalyzingLink) {
+                          setImportModalOpen(false);
+                        }
+                      }}
+                      className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer disabled:opacity-50"
+                      disabled={isAnalyzingLink}
+                    >
+                      <Icon icon="ph:x" className="w-5 h-5" />
+                    </button>
+                    
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <Icon 
+                        icon={
+                          importType === 'youtube' 
+                            ? 'ph:youtube-logo' 
+                            : importType === 'gdoc' 
+                              ? 'ph:google-logo' 
+                              : 'ph:link'
+                        } 
+                        className={`w-5 h-5 ${
+                          importType === 'youtube' 
+                            ? 'text-[#ef4444]' 
+                            : importType === 'gdoc' 
+                              ? 'text-[#3b82f6]' 
+                              : 'text-zinc-400'
+                        }`} 
+                      />
+                      <h3 className="text-[#f4f4f5] text-lg font-medium">
+                        {importType === 'youtube' 
+                          ? 'Import & Summarize YouTube Video' 
+                          : importType === 'gdoc' 
+                            ? 'Import & Summarize Google Doc' 
+                            : 'Import & Summarize Public URL'}
+                      </h3>
+                    </div>
+                    <p className="text-[#71717a] text-xs mb-5">
+                      {importType === 'youtube' 
+                        ? 'Input any public video link. We will resolve its title, channel name, and use the Gemini Success Mentor model to produce an academic summary.'
+                        : importType === 'gdoc' 
+                          ? 'Paste a public Google Doc link. Ensure link sharing is enabled as "Anyone with the link can view". We will download and structure the text content.'
+                          : 'Paste any webpage, paper link, or blog article. We will crawl the clean document text and synthesize it into a library literature note.'}
+                    </p>
+                    
+                    <form onSubmit={handleLinkImportSubmit} className="space-y-4 text-xs font-sans">
+                      <div>
+                        <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-2">
+                          {importType === 'youtube' 
+                            ? 'YouTube Video Link' 
+                            : importType === 'gdoc' 
+                              ? 'Google Doc URL' 
+                              : 'Public URL'}
+                        </label>
+                        <input
+                          type="url"
+                          required
+                          value={importUrl}
+                          onChange={(e) => setImportUrl(e.target.value)}
+                          disabled={isAnalyzingLink}
+                          placeholder={
+                            importType === 'youtube' 
+                              ? 'https://www.youtube.com/watch?v=F3GCo2Y-A9o' 
+                              : importType === 'gdoc' 
+                                ? 'https://docs.google.com/document/d/1BxiMVs0XRA5nFMdKvGdBAnlgY5iK1mJH/edit' 
+                                : 'https://en.wikipedia.org/wiki/Neuroplasticity'
+                          }
+                          className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2.5 text-zinc-200 text-xs focus:border-zinc-500 focus:outline-none placeholder:text-zinc-600 transition-colors disabled:opacity-50"
+                        />
+                      </div>
+
+                      {linkAnalyzeError && (
+                        <div className="flex gap-2.5 items-start p-3.5 bg-red-950/20 border border-red-900/40 rounded-xl">
+                          <Icon icon="ph:warning-circle" className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                          <span className="text-red-400 text-xs leading-relaxed font-medium">{linkAnalyzeError}</span>
+                        </div>
+                      )}
+
+                      {isAnalyzingLink && (
+                        <div className="flex flex-col gap-2.5 items-center justify-center p-6 bg-[#18181b] border border-[#27272a] rounded-xl text-center">
+                          <div className="w-5 h-5 border-2 border-zinc-500 border-t-white rounded-full animate-spin" />
+                          <div className="text-zinc-300 font-medium text-xs">Analyzing and Synthesizing Link Source...</div>
+                          <div className="text-[10px] font-mono text-[#71717a] max-w-sm leading-relaxed">{linkAnalyzeStatus}</div>
+                        </div>
+                      )}
+
+                      {!isAnalyzingLink && (
+                        <div className="flex gap-3 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => setImportModalOpen(false)}
+                            className="flex-1 py-2.5 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-zinc-400 hover:text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer text-center"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            className="flex-1 py-2.5 bg-zinc-200 hover:bg-white text-zinc-950 rounded-xl text-xs font-semibold transition-colors cursor-pointer text-center"
+                          >
+                            Import & Summarize
+                          </button>
+                        </div>
+                      )}
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* Zero-Glow Viewing Paper/Note Summary Modal */}
+              {activeViewingPaper && (
+                <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/75 z-40 flex items-center justify-center p-4">
+                  <div className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-2xl p-6 relative animate-scale-up text-zinc-300">
+                    <button 
+                      onClick={() => setActiveViewingPaper(null)}
+                      className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                    >
+                      <Icon icon="ph:x" className="w-5 h-5" />
+                    </button>
+                    
+                    <h3 className="text-[#f4f4f5] text-xl font-medium leading-snug mb-1">
+                      {activeViewingPaper.title}
+                    </h3>
+                    
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-[#71717a] border-b border-[#27272a] pb-4 mb-4">
+                      {activeViewingPaper.author && (
+                        <div className="flex items-center gap-1">
+                          <Icon icon="ph:user" className="w-3.5 h-3.5 text-zinc-500" />
+                          <span>{activeViewingPaper.author}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1">
+                        <Icon icon="ph:calendar" className="w-3.5 h-3.5 text-zinc-500" />
+                        <span>Added: {activeViewingPaper.added || 'Today'}</span>
+                      </div>
+                      {activeViewingPaper.url && (
+                        <a 
+                          href={activeViewingPaper.url} 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          referrerPolicy="no-referrer"
+                          className="flex items-center gap-1 text-[#0070f3] hover:underline"
+                        >
+                          <Icon icon="ph:link" className="w-3.5 h-3.5" />
+                          <span className="truncate max-w-xs">{activeViewingPaper.url}</span>
+                        </a>
+                      )}
+                    </div>
+
+                    <div className="space-y-4 text-sm leading-relaxed max-h-[350px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-zinc-800">
+                      {activeViewingPaper.summary ? (
+                        <div className="markdown-body prose prose-invert max-w-none text-sm text-[#d4d4d8] font-sans">
+                          <ReactMarkdown>{activeViewingPaper.summary}</ReactMarkdown>
+                        </div>
+                      ) : (
+                        <p className="text-[#d4d4d8] font-sans">
+                          {activeViewingPaper.description}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex justify-between items-center gap-4 mt-6 pt-4 border-t border-[#27272a]">
+                      <button
+                        onClick={() => {
+                          const summaryText = activeViewingPaper.summary || activeViewingPaper.description;
+                          navigator.clipboard.writeText(summaryText);
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 border border-[#27272a] hover:bg-[#1a1a1a] rounded-xl text-xs font-semibold text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                      >
+                        <Icon icon="ph:copy" className="w-3.5 h-3.5" />
+                        <span>Copy Summary</span>
+                      </button>
+
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setActiveViewingPaper(null)}
+                          className="px-5 py-2.5 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-zinc-400 hover:text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Zero-Glow Add Item Table Modal */}
+              {addModalOpen && (
+                <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
+                  <div className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-lg p-6 relative animate-scale-up">
+                    <button 
+                      onClick={() => setAddModalOpen(false)}
+                      className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                    >
+                      <Icon icon="ph:x" className="w-5 h-5" />
+                    </button>
+                    
+                    <h3 className="text-[#f4f4f5] text-lg font-medium mb-1">Add Library Entry</h3>
+                    <p className="text-[#71717a] text-xs mb-5">Manually record a dissertation reference summary or raw project findings</p>
+                    
+                    <form onSubmit={(e) => {
+                      e.preventDefault();
+                      if (!newPaperTitle.trim()) return;
+                      
+                      const newlyCreated: PaperItem = {
+                        title: newPaperTitle,
+                        author: newPaperAuthors.trim() || "",
+                        fileType: newPaperType,
+                        description: newPaperDescription.trim() || "Manually inserted student draft documentation.",
+                        added: "Today",
+                        fullTextStatus: "Available",
+                        viewed: "Just now",
+                        summary: ""
+                      };
+                      
+                      setPapers([newlyCreated, ...papers]);
+
+                      // Create and switch to a new document tab with the content
+                      const newTabId = `manual-${Date.now()}`;
+                      setTabs(prev => [
+                        ...prev,
+                        {
+                          id: newTabId,
+                          type: 'document',
+                          title: newPaperTitle,
+                          content: `<p>${newlyCreated.description}</p>`
+                        }
+                      ]);
+                      setActiveTabId(newTabId);
+
+                      setAddModalOpen(false);
+                    }} className="space-y-4 text-xs">
+                      <div>
+                        <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-1.5">File type</label>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setNewPaperType('Document')}
+                            className={`flex-1 py-2 text-center rounded-xl border font-medium cursor-pointer ${newPaperType === 'Document' ? 'bg-[#27272a] border-[#52525b] text-white' : 'bg-[#18181b] border-[#27272a] text-zinc-400 hover:text-zinc-200'}`}
+                          >
+                            Document
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNewPaperType('Note')}
+                            className={`flex-1 py-2 text-center rounded-xl border font-medium cursor-pointer ${newPaperType === 'Note' ? 'bg-[#27272a] border-[#52525b] text-white' : 'bg-[#18181b] border-[#27272a] text-zinc-400 hover:text-zinc-200'}`}
+                          >
+                            Note
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-1.5">Title</label>
+                        <input
+                          type="text"
+                          required
+                          value={newPaperTitle}
+                          onChange={(e) => setNewPaperTitle(e.target.value)}
+                          placeholder="e.g. Cognitive Rehabilitation Post Stroke"
+                          className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none transition-colors"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-1.5">Authors (optional)</label>
+                        <input
+                          type="text"
+                          value={newPaperAuthors}
+                          onChange={(e) => setNewPaperAuthors(e.target.value)}
+                          placeholder="e.g. Graybiel, et al."
+                          className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none transition-colors"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-1.5">Abstract / Description (optional)</label>
+                        <textarea
+                          rows={2.5}
+                          value={newPaperDescription}
+                          onChange={(e) => setNewPaperDescription(e.target.value)}
+                          placeholder="Provide details about findings, hypotheses or methodology parameters..."
+                          className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none transition-colors resize-none"
+                        ></textarea>
+                      </div>
+
+                      <button
+                        type="submit"
+                        className="w-full py-2.5 bg-zinc-200 hover:bg-white text-zinc-950 font-semibold rounded-xl transition-colors cursor-pointer mt-2"
+                      >
+                        Confirm and Add to Grid Structure
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              )}
+            </div>
           ) : (
-            <>
+            activeTab.fileId ? (
+              <div className="flex-1 flex flex-col bg-[#0b0b0c] h-full overflow-hidden">
+                {/* PDF Viewer Display Body */}
+                <div className="flex-1 w-full bg-[#1e1e1e] relative min-h-0 overflow-hidden">
+                    <div className="w-full h-full overflow-y-auto bg-[#0f0f10]">
+                      <Document
+                        file={`/api/files/${activeTab.fileId}`}
+                        onLoadSuccess={({ numPages }) => setPdfNumPages(numPages)}
+                        className="flex flex-col items-center py-8 gap-6"
+                        loading={
+                          <div className="text-zinc-500 font-mono text-sm py-12 flex items-center justify-center gap-3">
+                            <div className="w-4 h-4 border-2 border-zinc-500 border-t-zinc-300 rounded-full animate-spin" />
+                            Loading PDF...
+                          </div>
+                        }
+                        error={<div className="text-red-400 py-12">Failed to load PDF file.</div>}
+                      >
+                        {Array.from(new Array(pdfNumPages || 0), (el, index) => (
+                          <div key={`page_container_${index + 1}`} id={`pdf-page-${index + 1}`}>
+                            <Page
+                              pageNumber={index + 1}
+                              renderTextLayer={true}
+                              renderAnnotationLayer={true}
+                              className="bg-[#18181b] border border-[#27272a] text-[#e4e4e7]"
+                              width={800}
+                            />
+                          </div>
+                        ))}
+                      </Document>
+                    </div>
+                </div>
+              </div>
+            ) : (
+              <>
               {/* Floating Pill Formatting Bar */}
-              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 shadow-2xl text-[12px] text-[#a1a1aa] whitespace-nowrap select-none">
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 text-[12px] text-[#a1a1aa] whitespace-nowrap select-none">
                 
                 {/* Font Selector */}
                 <div className="flex items-center relative h-full">
@@ -1131,7 +2875,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         animate={{ opacity: 1, y: -8, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
                         transition={{ duration: 0.15, ease: "easeOut" }}
-                        className="absolute left-0 bottom-full mb-2 z-50 bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 shadow-2xl min-w-[140px] overflow-hidden"
+                        className="absolute left-0 bottom-full mb-2 z-50 bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 min-w-[140px] overflow-hidden"
                       >
                         {[
                           { value: 'font-jakarta', label: 'Plus Jakarta' },
@@ -1381,7 +3125,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   {/* Main Document Title */}
                   <TextareaAutosize 
                     value={documentTitle}
-                    onChange={(e) => setDocumentTitle(e.target.value)}
+                    onChange={(e) => {
+                      const newTitle = e.target.value;
+                      setDocumentTitle(newTitle);
+                      setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, title: newTitle } : t));
+                    }}
                     placeholder="Untitled"
                     className="w-full bg-transparent text-[#f4f4f5] tracking-tight font-normal pb-2 resize-none outline-none leading-[1.25] text-[2.2rem] md:text-[2.6rem] placeholder:text-[#3f3f46] font-jakarta"
                   />
@@ -1393,19 +3141,71 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       contentEditable
                       suppressContentEditableWarning
                       data-placeholder="Start writing..."
+                      className="w-full bg-transparent text-inherit outline-none min-h-[400px] leading-relaxed focus:outline-none markdown-body"
                       onInput={(e) => {
                         const html = e.currentTarget.innerHTML;
                         lastContentRef.current = html;
                         setDocumentContent(html);
+                        setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, content: html } : t));
                       }}
                       onBlur={() => {
                         if (editorRef.current) {
-                          const html = editorRef.current.innerHTML;
+                          const originalHtml = editorRef.current.innerHTML;
+                          const html = linkifyHtml(originalHtml);
+                          if (html !== originalHtml) {
+                            editorRef.current.innerHTML = html;
+                          }
                           lastContentRef.current = html;
                           setDocumentContent(html);
+                          setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, content: html } : t));
                         }
                       }}
-                      className="w-full bg-transparent text-inherit outline-none min-h-[400px] leading-relaxed focus:outline-none markdown-body"
+                      onPaste={(e) => {
+                        e.preventDefault();
+                        const text = e.clipboardData.getData('text/plain');
+                        if (text) {
+                          const urlPattern = /^(?:https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|]$|^(?:www\.[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])$/i;
+                          let htmlToInsert = '';
+                          if (urlPattern.test(text.trim())) {
+                            const href = text.trim().toLowerCase().startsWith('www.') ? `http://${text.trim()}` : text.trim();
+                            htmlToInsert = `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline cursor-pointer">${text.trim()}</a>`;
+                          } else {
+                            htmlToInsert = linkifyHtml(text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"));
+                          }
+                          document.execCommand('insertHTML', false, htmlToInsert);
+                        }
+                      }}
+                      onContextMenu={(e) => {
+                        const target = e.target as HTMLElement;
+                        const anchor = target.closest('a');
+                        if (anchor) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setLinkContextMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            target: anchor
+                          });
+                        }
+                      }}
+                      onClick={(e) => {
+                        const target = e.target as HTMLElement;
+                        const anchor = target.closest('a');
+                        if (anchor) {
+                          const href = anchor.getAttribute('href');
+                          if (href) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const tempLink = document.createElement('a');
+                            tempLink.href = href;
+                            tempLink.target = '_blank';
+                            tempLink.rel = 'noopener noreferrer';
+                            document.body.appendChild(tempLink);
+                            tempLink.click();
+                            document.body.removeChild(tempLink);
+                          }
+                        }
+                      }}
                     />
                   </div>
 
@@ -1414,7 +3214,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 </div>
               </div>
             </>
-          )}
+          )
+        )}
           
         </div>
       </div>
@@ -1442,42 +3243,49 @@ Once you have content, I can help you draft sections, summarize findings, or for
             {/* Scrollable Conversation Stream Pane (Scrollable completely independently from Left Editor view) */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#121212] flex flex-col min-h-0">
               
-              {messages.map((m) => (
-                <div 
-                  key={m.id} 
-                  className={`flex flex-col ${
-                    m.role === 'user' 
-                      ? 'self-end max-w-[88%] bg-[#262626] text-white rounded-xl rounded-br-none p-3.5' 
-                      : 'self-start max-w-full bg-transparent text-[#d4d4d8] py-2'
-                  } text-[13px] leading-relaxed transition-all`}
-                >
-                  {/* Reasoning Process */}
-                  {m.role === 'assistant' && m.thought && (
-                    <details className="mb-2 group">
-                      <summary className="text-[11px] font-medium text-[#71717a] hover:text-[#a1a1aa] cursor-pointer transition-colors list-none outline-none inline-flex items-center gap-1">
-                        <div className="w-1 h-1 rounded-full bg-[#71717a] group-hover:bg-[#a1a1aa] transition-colors" />
-                        Thought
-                      </summary>
-                      <div className="mt-1.5 text-[12px] text-[#71717a] pb-2 leading-relaxed max-w-[95%]">
-                        {m.thought}
-                      </div>
-                    </details>
-                  )}
-
-                  {/* Text message */}
-                  <div className={`select-text break-words ${m.role === 'user' ? 'whitespace-pre-wrap' : 'markdown-body text-[#d4d4d8]'}`}>
-                    {m.role === 'user' ? (
-                      m.content
-                    ) : (
-                      <TypewriterMarkdown 
-                        content={m.content} 
-                        timestamp={m.timestamp} 
-                        isStreaming={isAiTyping && m.id === messages[messages.length - 1]?.id} 
-                      />
-                    )}
-                  </div>
+              {messages.length === 0 ? (
+                <div className="flex-grow flex flex-col items-center justify-center py-12">
+                  <img src="/cosmi.png" alt="Cosmi Logo" className="w-24 h-24 md:w-32 md:h-32 opacity-25 select-none grayscale invert animate-fade-in" />
                 </div>
-              ))}
+              ) : (
+                messages.map((m) => (
+                  <div 
+                    key={m.id} 
+                    className={`flex flex-col ${
+                      m.role === 'user' 
+                        ? 'self-end max-w-[88%] bg-[#262626] text-white rounded-xl rounded-br-none p-3.5' 
+                        : 'self-start max-w-full bg-transparent text-[#d4d4d8] py-2'
+                    } text-[13px] leading-relaxed transition-all`}
+                  >
+                    {/* Reasoning Process */}
+                    {m.role === 'assistant' && m.thought && (
+                      <details className="mb-2 group">
+                        <summary className="text-[11px] font-medium text-[#71717a] hover:text-[#a1a1aa] cursor-pointer transition-colors list-none outline-none inline-flex items-center gap-1">
+                          <div className="w-1 h-1 rounded-full bg-[#71717a] group-hover:bg-[#a1a1aa] transition-colors" />
+                          Thought
+                        </summary>
+                        <div className="mt-1.5 text-[12px] text-[#71717a] pb-2 leading-relaxed max-w-[95%]">
+                          {m.thought}
+                        </div>
+                      </details>
+                    )}
+
+                    {/* Text message */}
+                    <div className={`select-text break-words ${m.role === 'user' ? 'whitespace-pre-wrap' : 'markdown-body text-[#d4d4d8]'}`}>
+                      {m.role === 'user' ? (
+                        renderLinkifiedText(m.content)
+                      ) : (
+                        <TypewriterMarkdown 
+                          content={m.content} 
+                          timestamp={m.timestamp} 
+                          onCitationClick={handleCitationClick}
+                          isStreaming={isAiTyping && m.id === messages[messages.length - 1]?.id} 
+                        />
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
 
               {/* Streaming loading animation state */}
               {isAiTyping && (
@@ -1540,6 +3348,212 @@ Once you have content, I can help you draft sections, summarize findings, or for
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {linkContextMenu && (
+        <div 
+          id="link-context-menu"
+          className="fixed z-[9999] bg-[#121212] border border-[#27272a] rounded-lg py-1 min-w-[160px] text-[#e4e4e7] select-none text-xs font-medium"
+          style={{ 
+            top: `${linkContextMenu.y}px`, 
+            left: `${linkContextMenu.x}px` 
+          }}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+        >
+          <button
+            id="btn-rename-hyperlink"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const t = linkContextMenu.target;
+              setLinkToRename({
+                target: t,
+                initialText: t.innerText || t.textContent || "",
+                initialUrl: t.getAttribute('href') || ""
+              });
+              setRenameText(t.innerText || t.textContent || "");
+              setRenameUrl(t.getAttribute('href') || "");
+              setShowLinkRenameModal(true);
+              setLinkContextMenu(null);
+            }}
+            className="w-full text-left px-3 py-2.5 hover:bg-[#202022] transition-colors flex items-center gap-2 text-zinc-200 cursor-pointer"
+          >
+            <Edit2 size={13} />
+            <span>Rename hyperlink</span>
+          </button>
+          
+          <button
+            id="btn-open-hyperlink"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const href = linkContextMenu.target.getAttribute('href');
+              if (href) {
+                const tempLink = document.createElement('a');
+                tempLink.href = href;
+                tempLink.target = '_blank';
+                tempLink.rel = 'noopener noreferrer';
+                document.body.appendChild(tempLink);
+                tempLink.click();
+                document.body.removeChild(tempLink);
+              }
+              setLinkContextMenu(null);
+            }}
+            className="w-full text-left px-3 py-2.5 hover:bg-[#202022] transition-colors flex items-center gap-2 text-zinc-200 cursor-pointer border-t border-[#1a1a1c]"
+          >
+            <ExternalLink size={13} />
+            <span>Open link</span>
+          </button>
+
+          <button
+            id="btn-remove-hyperlink"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const t = linkContextMenu.target;
+              if (t) {
+                // Remove anchor tag, keeping the inline text content
+                const parent = t.parentNode;
+                if (parent) {
+                  while (t.firstChild) {
+                    parent.insertBefore(t.firstChild, t);
+                  }
+                  parent.removeChild(t);
+                }
+                
+                // Sync to state
+                if (editorRef.current) {
+                  const html = editorRef.current.innerHTML;
+                  lastContentRef.current = html;
+                  setDocumentContent(html);
+                }
+              }
+              setLinkContextMenu(null);
+            }}
+            className="w-full text-left px-3 py-2.5 hover:bg-zinc-800 text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-2 border-t border-[#1a1a1c] cursor-pointer"
+          >
+            <Unlink size={13} />
+            <span>Remove link</span>
+          </button>
+        </div>
+      )}
+
+      {showLinkRenameModal && linkToRename && (
+        <div 
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-xs select-none"
+          onClick={() => {
+            setShowLinkRenameModal(false);
+            setLinkToRename(null);
+          }}
+        >
+          <div 
+            className="bg-[#121212] border border-[#27272a] rounded-xl p-5 max-w-sm w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-[#f4f4f5] font-medium text-base mb-4 flex items-center gap-2 border-b border-[#222224] pb-2">
+              <LinkIcon size={16} className="text-blue-400" />
+              Rename Hyperlink
+            </h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">
+                  Display Word/Text
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-[#1e1e1e] border border-[#27272a] rounded-lg px-3 py-2.5 text-zinc-200 text-xs focus:border-zinc-500 focus:outline-none placeholder:text-zinc-600 transition-colors"
+                  placeholder="e.g., Disney History"
+                  value={renameText}
+                  onChange={(e) => setRenameText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const anchor = linkToRename.target;
+                      if (anchor) {
+                        anchor.innerText = renameText.trim() || renameUrl.trim();
+                        anchor.setAttribute('href', renameUrl.trim());
+                        if (editorRef.current) {
+                          const html = editorRef.current.innerHTML;
+                          lastContentRef.current = html;
+                          setDocumentContent(html);
+                        }
+                      }
+                      setShowLinkRenameModal(false);
+                      setLinkToRename(null);
+                    }
+                  }}
+                  autoFocus
+                />
+              </div>
+              
+              <div>
+                <label className="block text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">
+                  URL Destination
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-[#1e1e1e] border border-[#27272a] rounded-lg px-3 py-2.5 text-zinc-200 text-xs focus:border-zinc-500 focus:outline-none placeholder:text-zinc-600 transition-colors cursor-text"
+                  placeholder="https://..."
+                  value={renameUrl}
+                  onChange={(e) => setRenameUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const anchor = linkToRename.target;
+                      if (anchor) {
+                        anchor.innerText = renameText.trim() || renameUrl.trim();
+                        anchor.setAttribute('href', renameUrl.trim());
+                        if (editorRef.current) {
+                          const html = editorRef.current.innerHTML;
+                          lastContentRef.current = html;
+                          setDocumentContent(html);
+                        }
+                      }
+                      setShowLinkRenameModal(false);
+                      setLinkToRename(null);
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-2 mt-6 pt-3 border-t border-[#222224]">
+              <button
+                onClick={() => {
+                  setShowLinkRenameModal(false);
+                  setLinkToRename(null);
+                }}
+                className="px-3.5 py-2 rounded-lg text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const anchor = linkToRename.target;
+                  if (anchor) {
+                    anchor.innerText = renameText.trim() || renameUrl.trim();
+                    anchor.setAttribute('href', renameUrl.trim());
+                    
+                    if (editorRef.current) {
+                      const html = editorRef.current.innerHTML;
+                      lastContentRef.current = html;
+                      setDocumentContent(html);
+                    }
+                  }
+                  setShowLinkRenameModal(false);
+                  setLinkToRename(null);
+                }}
+                className="px-3.5 py-2 rounded-lg text-xs bg-zinc-100 hover:bg-white text-black font-semibold transition-colors cursor-pointer"
+              >
+                Save
+              </button>
+            </div>
           </div>
         </div>
       )}
