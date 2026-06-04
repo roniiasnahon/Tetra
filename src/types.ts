@@ -45,5 +45,7 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   isStreaming?: boolean;
-  suggestion?: SuggestionPayload; // If the assistant generated interactive outline/drafts/citations
+  isHidden?: boolean;
+  thought?: string;
+  suggestion?: SuggestionPayload; 
 }

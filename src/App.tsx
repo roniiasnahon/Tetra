@@ -12,6 +12,12 @@ import 'react-pdf/dist/Page/TextLayer.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
+interface FolderItem {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
 interface PaperItem {
   author: string;
   title: string;
@@ -25,6 +31,7 @@ interface PaperItem {
   fileId?: string;
   mimetype?: string;
   extractedText?: string;
+  folderId?: string;
 }
 
 interface Tab {
@@ -35,6 +42,7 @@ interface Tab {
   fileId?: string;
   mimetype?: string;
   messages?: ChatMessage[];
+  folderId?: string;
 }
 
 interface ChatMessage {
@@ -43,6 +51,7 @@ interface ChatMessage {
   content: string;
   thought?: string;
   timestamp: number;
+  isHidden?: boolean;
 }
 
 const linkifyHtml = (html: string): string => {
@@ -200,9 +209,11 @@ const parseAssistantResponse = (text: string) => {
   let chat = "";
   let title = "";
   let replaceContent = "";
+  let searchRealPapersQuery = "";
 
   const lowerText = text.toLowerCase();
 
+  // 1. Parse <thought>
   const thoughtStartTagIdx = lowerText.indexOf("<thought>");
   let thoughtStartIdx = thoughtStartTagIdx !== -1 ? thoughtStartTagIdx + 9 : -1;
   if (thoughtStartIdx === -1 && lowerText.trim().length > 0) {
@@ -231,16 +242,17 @@ const parseAssistantResponse = (text: string) => {
       if (chatTagIdx !== -1) {
         thoughtEndIdx = chatTagIdx;
         chatStartSearchIdx = chatTagIdx;
+      } else {
+        // Still inside thought block, no chat/title tags should be parsed yet!
+        thought = text.substring(thoughtStartIdx).trim();
+        return { thought, chat: "", title: "", replaceContent: "", searchRealPapersQuery: "" };
       }
     }
 
-    if (thoughtEndIdx !== -1) {
-      thought = text.substring(thoughtStartIdx, thoughtEndIdx).trim();
-    } else {
-      thought = text.substring(thoughtStartIdx).trim();
-    }
+    thought = text.substring(thoughtStartIdx, thoughtEndIdx).trim();
   }
 
+  // 2. Parse <chat>
   const chatStartTagIdx = lowerText.indexOf("<chat>", chatStartSearchIdx);
   let chatStartIdx = chatStartTagIdx !== -1 ? chatStartTagIdx + 6 : -1;
 
@@ -265,23 +277,17 @@ const parseAssistantResponse = (text: string) => {
       chatEndIdx = chatEndTagIdx;
       titleStartSearchIdx = chatEndTagIdx + 7;
     } else {
-      const nextStructuralTagIdx = Math.min(
-        lowerText.indexOf("<title>", chatStartIdx) !== -1 ? lowerText.indexOf("<title>", chatStartIdx) : Infinity,
-        lowerText.indexOf("<replacecontent>", chatStartIdx) !== -1 ? lowerText.indexOf("<replacecontent>", chatStartIdx) : Infinity
-      );
-      if (nextStructuralTagIdx !== Infinity) {
-        chatEndIdx = nextStructuralTagIdx;
-        titleStartSearchIdx = nextStructuralTagIdx;
-      }
+      // If we haven't reached the </chat> tag yet, we shouldn't attempt
+      // to parse any following <title> or <replacecontent> blocks because we are still
+      // actively streaming the chat segment. This prevents any mentioned markdown tags in conversational text.
+      chat = text.substring(chatStartIdx).trim();
+      return { thought, chat, title: "", replaceContent: "", searchRealPapersQuery: "" };
     }
 
-    if (chatEndIdx !== -1) {
-      chat = text.substring(chatStartIdx, chatEndIdx).trim();
-    } else {
-      chat = text.substring(chatStartIdx).trim();
-    }
+    chat = text.substring(chatStartIdx, chatEndIdx).trim();
   }
 
+  // 3. Parse <title> and <replacecontent> starting from after the chat block ends
   const titleStartTagIdx = lowerText.indexOf("<title>", titleStartSearchIdx);
   const titleStartIdx = titleStartTagIdx !== -1 ? titleStartTagIdx + 7 : -1;
   
@@ -319,7 +325,27 @@ const parseAssistantResponse = (text: string) => {
     }
   }
 
-  return { thought, chat, title, replaceContent };
+  // 4. Parse <searchRealPapers>
+  const paperStartTagIdx = lowerText.lastIndexOf("<searchrealpapers>");
+  if (paperStartTagIdx !== -1) {
+    const paperStartIdx = paperStartTagIdx + 18;
+    const paperEndTagIdx = lowerText.indexOf("</searchrealpapers>", paperStartIdx);
+    if (paperEndTagIdx !== -1) {
+      searchRealPapersQuery = text.substring(paperStartIdx, paperEndTagIdx).trim();
+    } else {
+      searchRealPapersQuery = text.substring(paperStartIdx).trim();
+    }
+  }
+
+  // Fallback: If it's still containing XML tags due to LLM hallucinations:
+  if (searchRealPapersQuery && searchRealPapersQuery.includes("<")) {
+     searchRealPapersQuery = searchRealPapersQuery.replace(/<[^>]*>?/gm, '').trim();
+  }
+  if (searchRealPapersQuery.length > 100) {
+     searchRealPapersQuery = searchRealPapersQuery.substring(0, 100);
+  }
+
+  return { thought, chat, title, replaceContent, searchRealPapersQuery };
 };
 
 const extractTextFromPdf = async (url: string): Promise<string> => {
@@ -354,12 +380,11 @@ export default function App() {
   
   // Tab Management
   const [tabs, setTabs] = useState<Tab[]>([
-    { id: 'initial-home', type: 'home', title: 'Home' },
-    { id: 'initial-doc', type: 'document', title: 'Untitled' }
+    { id: 'initial-home', type: 'home', title: 'Home' }
   ]);
-  const [activeTabId, setActiveTabId] = useState('initial-doc');
+  const [activeTabId, setActiveTabId] = useState('initial-home');
   const ignoreNextTabSyncRef = useRef(false);
-  const loadedTabIdRef = useRef<string>('initial-doc');
+  const loadedTabIdRef = useRef<string>('initial-home');
   const activeTabIdRef = useRef(activeTabId);
   const tabsRef = useRef(tabs);
   const activeTab = React.useMemo(() => tabs.find(t => t.id === activeTabId) || tabs[0], [tabs, activeTabId]);
@@ -455,11 +480,12 @@ export default function App() {
 
       const resData = await response.json();
       if (resData.success && resData.data) {
-        setPapers(prev => [resData.data, ...prev]);
+        const withFolder = { ...resData.data, folderId: selectedFolderId || folders[0]?.id || 'f1' };
+        setPapers(prev => [withFolder, ...prev]);
         setImportModalOpen(false);
         setImportUrl('');
         setLinkAnalyzeStatus('');
-        setActiveViewingPaper(resData.data);
+        setActiveViewingPaper(withFolder);
 
         // Auto-create and switch to a new document tab with the synthesized content
         const newTabId = `link-${Date.now()}`;
@@ -599,6 +625,18 @@ export default function App() {
   const [documentTitle, setDocumentTitle] = useState('');
   const [folderName, setFolderName] = useState('');
   const [savedNoteName, setSavedNoteName] = useState('');
+
+  // Folder Management State
+  const [folders, setFolders] = useState<FolderItem[]>([
+    { id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 },
+    { id: 'f2', name: 'Semester Projects', createdAt: Date.now() - 86400000 },
+    { id: 'f3', name: 'Archived Drafts', createdAt: Date.now() }
+  ]);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [renamingFolderTempName, setRenamingFolderTempName] = useState<string>('');
+  const [activeMoveFolderDropdown, setActiveMoveFolderDropdown] = useState<string | null>(null);
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({ 'f1': true, 'f2': true, 'f3': false });
   
   // Research Papers Data
   const [papers, setPapers] = useState<PaperItem[]>([]);
@@ -645,6 +683,7 @@ export default function App() {
 
   const addPaperToLibrary = (paper: any) => {
     const authors = paper.authors?.map((a: any) => a.name).join(', ') || 'Unknown Author';
+    const targetFolder = selectedFolderId || folders[0]?.id || 'f1';
     const newPaper: PaperItem = {
       author: authors,
       title: paper.title,
@@ -653,7 +692,8 @@ export default function App() {
       fullTextStatus: "Available",
       viewed: "Just now",
       fileType: "Document",
-      summary: ""
+      summary: "",
+      folderId: targetFolder
     };
     setPapers(prev => [newPaper, ...prev]);
 
@@ -665,7 +705,8 @@ export default function App() {
         id: newTabId,
         type: 'document',
         title: paper.title,
-        content: `<h3>${paper.title}</h3><p><em>${authors}</em></p><p>${newPaper.description}</p>`
+        content: `<h3>${paper.title}</h3><p><em>${authors}</em></p><p>${newPaper.description}</p>`,
+        folderId: targetFolder
       }
     ]);
     setActiveTabId(newTabId);
@@ -675,6 +716,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
+  const [researchStatus, setResearchStatus] = useState<'fetching' | 'downloading' | 'polishing' | null>(null);
   const aiWritingTabIdRef = useRef<string | null>(null);
   const [isChatSuggestionsDismissed, setIsChatSuggestionsDismissed] = useState(false);
   const [selectedFileLabel, setSelectedFileLabel] = useState<string | null>(null);
@@ -722,7 +764,10 @@ export default function App() {
       return;
     }
     const targetTab = tabs.find(t => t.id === activeTabId);
-    if (targetTab && targetTab.type === 'document' && !targetTab.fileId) {
+    const isDocNotPdf = targetTab && targetTab.type === 'document' && 
+      (!targetTab.fileId || !(targetTab.mimetype === 'application/pdf' || targetTab.title.toLowerCase().endsWith('.pdf')));
+
+    if (isDocNotPdf) {
       setDocumentTitle(targetTab.title || 'Untitled');
       setDocumentContent(targetTab.content || '');
       if (editorRef.current) {
@@ -748,14 +793,49 @@ export default function App() {
   const markdownToHtml = (markdown: string) => {
     if (!markdown) return "";
     try {
+      // Replace literal escaped newlines with actual newline characters
+      const formattedMarkdown = markdown.replace(/\\n/g, '\n');
       // Trim outer whitespace so that heading tags (like ## Introduction) 
       // placed at the start/ends are parsed as actual headings, not inline text.
-      const trimmedMarkdown = markdown.trim();
+      const trimmedMarkdown = formattedMarkdown.trim();
       const htmlText = marked.parse(trimmedMarkdown, { gfm: true, breaks: true }) as string;
       return linkifyHtml(htmlText);
     } catch (e) {
       console.error("Markdown conversion failed", e);
-      return linkifyHtml(markdown);
+      return linkifyHtml(markdown.replace(/\\n/g, '\n'));
+    }
+  };
+
+  const handlePaperClick = (paper: PaperItem) => {
+    const existingTab = tabs.find(t => t.title === paper.title);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+    } else {
+      const newTabId = paper.fileId ? `view-${paper.fileId}` : `view-${Date.now()}`;
+      
+      let initialContent = "";
+      const isPdfValue = paper.mimetype === 'application/pdf' || paper.title.toLowerCase().endsWith('.pdf');
+      if (paper.extractedText && !isPdfValue) {
+        initialContent = `<div class="p-6 text-zinc-300 max-w-3xl mx-auto">
+          <h1 class="text-3xl font-medium tracking-tight mb-2 text-white">${paper.title}</h1>
+          <p class="text-[11px] font-mono text-zinc-500 mb-6 uppercase tracking-wider">Document File: ${paper.title}</p>
+          <div class="h-[1px] bg-zinc-800 mb-6"></div>
+          <div class="space-y-4 leading-relaxed">${paper.extractedText.split('\n\n').map(p => p.trim() ? `<p>${p.replace(/\n/g, '<br/>')}</p>` : '').join('')}</div>
+        </div>`;
+      } else {
+        initialContent = markdownToHtml(paper.summary || paper.description || '');
+      }
+
+      setTabs(prev => [...prev, {
+        id: newTabId,
+        type: 'document',
+        title: paper.title,
+        content: initialContent,
+        fileId: paper.fileId,
+        mimetype: paper.mimetype,
+        folderId: paper.folderId
+      }]);
+      setActiveTabId(newTabId);
     }
   };
 
@@ -829,7 +909,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
   }, [tabs, activeTabId]);
 
   // Sending chat messages
-  const handleSendMessage = async (customText?: string) => {
+  const handleSendMessage = async (customText?: string, options: { isHidden?: boolean } = {}) => {
     const textToSend = customText || chatInput;
     if (!textToSend.trim()) return;
 
@@ -837,7 +917,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
       id: String(Date.now()),
       role: 'user',
       content: textToSend,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      isHidden: options.isHidden
     };
 
     updateChatMessages(prev => [...prev, userMessage]);
@@ -900,6 +981,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
       let hasSwitchedToDoc = false;
       let targetTabIdForAi: string | undefined;
       let streamBuffer = "";
+      let hasTriggeredDownloadPaper = false;
       
       aiWritingTabIdRef.current = null;
 
@@ -924,7 +1006,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                    accumulatedText += parsed.text;
 
                    // Extract <chat>
-                   const { thought, chat, title: parsedTitle, replaceContent: parsedContent } = parseAssistantResponse(accumulatedText);
+                   const { thought, chat, title: parsedTitle, replaceContent: parsedContent, searchRealPapersQuery } = parseAssistantResponse(accumulatedText);
 
                    if (chat !== undefined) {
                      updateChatMessages(prev => prev.map(m => m.id === assistantMessageId ? { ...m, content: chat } : m));
@@ -936,6 +1018,111 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                    if (parsedTitle) {
                      setDocumentTitle(parsedTitle);
+                   }
+
+                   // Process real paper search
+                   if (searchRealPapersQuery && accumulatedText.toLowerCase().includes('</searchrealpapers>') && !hasTriggeredDownloadPaper) {
+                     hasTriggeredDownloadPaper = true;
+                     setResearchStatus('fetching');
+                     try {
+                       fetch("/api/search-arxiv", {
+                         method: "POST",
+                         headers: { "Content-Type": "application/json" },
+                         body: JSON.stringify({ query: searchRealPapersQuery })
+                       }).then(res => res.json()).then(async (resData) => {
+                         if (resData.success && resData.papers) {
+                           setResearchStatus('downloading');
+                           const newPapers = await Promise.all(resData.papers.map(async (p: any) => {
+                             if (p.fileId) setResearchStatus('polishing');
+                             return {
+                               title: p.title,
+                               author: p.author,
+                               description: p.abstract,
+                               url: p.url,
+                               added: "Today",
+                               fullTextStatus: p.fileId ? "Mapped" : "Link Only",
+                               viewed: "Yes",
+                               fileType: "Document",
+                               summary: p.abstract || "",
+                               fileId: p.fileId,
+                               mimetype: "application/pdf",
+                               extractedText: p.fileId ? await extractTextFromPdf(`/api/files/${p.fileId}`) : "",
+                               folderId: selectedFolderId || folders[0]?.id || 'f1'
+                             };
+                           }));
+
+                           setPapers(prev => [...newPapers, ...prev]);
+                           setResearchStatus(null);
+
+                           if (newPapers.some(p => p.fileId)) {
+                             // Auto-trigger summary without visible prompt
+                             newPapers.forEach(p => {
+                               if (p.fileId) {
+                                 // We'll call a special function or just add the abstract as a first pass
+                                 // For now, let's use the abstract as the "spit out summary"
+                                 setTimeout(() => {
+                                   const assistantMsg: ChatMessage = {
+                                     id: String(Date.now() + Math.random()),
+                                     role: 'assistant',
+                                     content: `### New Research Mapped: ${p.title}\n\n**Overview:** ${p.summary || "I have successfully indexed this paper. You can now ask me questions about its methodology or findings."}`,
+                                     timestamp: Date.now()
+                                   };
+                                   updateChatMessages(prev => [...prev, assistantMsg]);
+                                 }, 1000);
+                               }
+                             });
+                           }
+
+                           const newTabs = newPapers.filter((p: any) => p.fileId).map((p: any) => {
+                             let html = "";
+                             if (p.extractedText) {
+                               const pages = p.extractedText.split(/--- Page \d+ of \d+ ---/);
+                               const markers = p.extractedText.match(/--- Page (\d+) of \d+ ---/g) || [];
+                               
+                               html = `<div class="p-6 text-zinc-300 max-w-3xl mx-auto">
+                                 <h1 class="text-3xl font-medium tracking-tight mb-2 text-white">${p.title}</h1>
+                                 <p class="text-[11px] font-mono text-zinc-500 mb-6 uppercase tracking-wider">Mapped Document: ${p.title}</p>
+                                 <div class="h-[1px] bg-zinc-800 mb-6"></div>`;
+
+                               pages.forEach((pageContent: string, idx: number) => {
+                                 if (!pageContent.trim() && idx === 0) return;
+                                 const pageNumMatch = idx > 0 ? markers[idx-1].match(/\d+/) : null;
+                                 const pageNum = pageNumMatch ? pageNumMatch[0] : (idx === 0 ? "1" : idx.toString());
+                                 
+                                 html += `<div id="pdf-page-${pageNum}" class="mb-10 pt-4 border-t border-zinc-800/30 group/page">
+                                   <div class="text-[10px] font-mono text-zinc-600 mb-4 uppercase tracking-widest group-hover/page:text-zinc-400 transition-colors">Page ${pageNum}</div>
+                                   <div class="space-y-4 leading-relaxed">${pageContent.trim().split('\n\n').map((para: string) => para.trim() ? `<p>${para.replace(/\n/g, '<br/>')}</p>` : '').join('')}</div>
+                                 </div>`;
+                               });
+                               html += `</div>`;
+                             }
+
+                             return {
+                               id: `view-${p.fileId}`,
+                               type: 'document' as const,
+                               title: p.title,
+                               content: html,
+                               fileId: p.fileId,
+                               mimetype: "application/pdf",
+                               folderId: selectedFolderId || folders[0]?.id || 'f1'
+                             };
+                           });
+                           
+                           if (newTabs.length > 0) {
+                             setTabs(prev => [...prev, ...newTabs]);
+                             setTimeout(() => {
+                               ignoreNextTabSyncRef.current = true;
+                               setActiveTabId(newTabs[0].id);
+                             }, 100);
+                           }
+                         }
+                       }).catch(err => {
+                          console.error("Error searching Arxiv:", err);
+                          setResearchStatus(null);
+                        });
+                     } catch (err) {
+                       console.error("Failed to make arxiv request", err);
+                     }
                    }
 
                     if (parsedContent && parsedContent.length > 5 && !parsedContent.trim().startsWith("</") && !parsedContent.trim().startsWith(">")) {
@@ -1234,8 +1421,24 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   } catch (pdfErr) {
                     console.error("PDF mapping failed", pdfErr);
                   }
+                } else if (fileLabel.toLowerCase().endsWith('.docx') || fileLabel.toLowerCase().endsWith('.txt') || fileLabel.toLowerCase().endsWith('.md')) {
+                  try {
+                    const textRes = await fetch(`/api/files/${data.fileId}/raw-text`);
+                    if (textRes.ok) {
+                      const textData = await textRes.json();
+                      if (textData.success && textData.text) {
+                        extractedText = textData.text;
+                        summaryInfo = `This document is parsed and mapped successfully. You can start synthesizing your notes, analyzing findings, and asking the Assistant specifically about its claims.`;
+                        const words = extractedText.trim().split(/\s+/).filter(Boolean).length;
+                        pagesCountString = ` (${words} words mapped)`;
+                      }
+                    }
+                  } catch (docxErr) {
+                    console.error("Docx/Text mapping failed", docxErr);
+                  }
                 }
 
+                const targetFolder = selectedFolderId || folders[0]?.id || 'f1';
                 const parsedPaper: PaperItem = {
                   author: "Unknown Author",
                   title: titlePlaceholder,
@@ -1247,45 +1450,69 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   summary: summaryInfo,
                   fileId: data.fileId,
                   mimetype: data.mimetype,
-                  extractedText: extractedText
+                  extractedText: extractedText,
+                  folderId: targetFolder
                 };
                 setPapers(prev => [parsedPaper, ...prev]);
 
                 const newId = `doc-${Date.now()}`;
+                let initialContent = "";
+                if (extractedText) {
+                  const pages = extractedText.split(/--- Page \d+ of \d+ ---/);
+                  const markers = extractedText.match(/--- Page (\d+) of \d+ ---/g) || [];
+                  
+                  initialContent = `<div class="p-6 text-zinc-300 max-w-3xl mx-auto">
+                    <h1 class="text-3xl font-medium tracking-tight mb-2 text-white">${titlePlaceholder}</h1>
+                    <p class="text-[11px] font-mono text-zinc-500 mb-6 uppercase tracking-wider">Mapped Document: ${fileLabel}${pagesCountString}</p>
+                    <div class="h-[1px] bg-zinc-800 mb-6"></div>`;
+
+                  pages.forEach((pageContent: string, idx: number) => {
+                    if (!pageContent.trim() && idx === 0) return;
+                    const pageNumMatch = idx > 0 ? markers[idx-1].match(/\d+/) : null;
+                    const pageNum = pageNumMatch ? pageNumMatch[0] : (idx === 0 ? "1" : idx.toString());
+                    
+                    initialContent += `<div id="pdf-page-${pageNum}" class="mb-10 pt-4 border-t border-zinc-800/30 group/page">
+                      <div class="text-[10px] font-mono text-zinc-600 mb-4 uppercase tracking-widest group-hover/page:text-zinc-400 transition-colors">Page ${pageNum}</div>
+                      <div class="space-y-4 leading-relaxed">${pageContent.trim().split('\n\n').map(p => p.trim() ? `<p>${p.replace(/\n/g, '<br/>')}</p>` : '').join('')}</div>
+                    </div>`;
+                  });
+                  initialContent += `</div>`;
+                } else {
+                  initialContent = `<div class="p-6 text-zinc-300 max-w-3xl mx-auto">
+                      <h1 class="text-3xl font-medium tracking-tight mb-2 text-white">${titlePlaceholder}</h1>
+                      <p class="text-[11px] font-mono text-zinc-500 mb-6 uppercase tracking-wider">Document File: ${fileLabel}${pagesCountString}</p>
+                      <div class="h-[1px] bg-zinc-800 mb-6"></div>
+                      <p class="mb-4 leading-relaxed">The file has been uploaded securely and mapped. You can start synthesizing your notes, analyzing findings, and asking the Assistant specifically about its claims.</p>
+                    </div>`;
+                }
+
                 setTabs(prev => [
                   ...prev,
                   {
                     id: newId,
                     type: 'document',
                     title: titlePlaceholder,
-                    content: `<div class="p-6 text-zinc-300 max-w-3xl mx-auto">
-                      <h1 class="text-3xl font-medium tracking-tight mb-2 text-white">${titlePlaceholder}</h1>
-                      <p class="text-sm font-mono text-zinc-500 mb-6 uppercase tracking-wider">Document File: ${fileLabel}${pagesCountString}</p>
-                      <div class="h-[1px] bg-zinc-800 mb-6"></div>
-                      <p class="mb-4 leading-relaxed">The file has been uploaded securely and mapped. You can start synthesizing your notes, analyzing findings, and asking the Assistant specifically about its claims.</p>
-                    </div>`,
+                    content: initialContent,
                     fileId: data.fileId,
-                    mimetype: data.mimetype
+                    mimetype: data.mimetype,
+                    folderId: targetFolder
                   }
                 ]);
                 setActiveTabId(newId);
                 setSidebarView('files');
                 setIsCreateDropdownOpen(false);
 
-                // Let AI Assistant acknowledge nicely with mapping stats
                 setIsAiTyping(true);
                 setTimeout(() => {
-                  setMessages(prev => [
-                    ...prev,
-                    {
-                      id: String(Date.now()),
-                      role: 'assistant',
-                      content: `Successfully uploaded and mapped scientific reference: **${fileLabel}**${pagesCountString}. I have indexed its content and appended it to your workspace. Feel free to ask me questions or draft essays specifically based on its claims!`,
-                      timestamp: Date.now()
-                    }
-                  ]);
+                  const assistantMsg: ChatMessage = {
+                    id: String(Date.now()),
+                    role: 'assistant',
+                    content: `### Document Mapped: ${fileLabel}\n\nI have successfully indexed **${fileLabel}** and mapped it to your workspace. ${extractedText ? "I've analyzed the full text and am ready to answer specific questions or help you draft citations based on its contents." : "The document metadata has been saved."}`,
+                    timestamp: Date.now()
+                  };
+                  updateChatMessages(prev => [...prev, assistantMsg]);
                   setIsAiTyping(false);
-                }, 1000);
+                }, 500);
               }
             } catch (err: any) {
               console.error("Upload failed", err);
@@ -1367,7 +1594,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     <button 
                       onClick={() => {
                         const newId = `doc-${Date.now()}`;
-                        setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled', content: '' }]);
+                        const targetFolder = selectedFolderId || folders[0]?.id || 'f1';
+                        setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled', content: '', folderId: targetFolder }]);
                         setActiveTabId(newId);
                         setSidebarView('files');
                         setIsCreateDropdownOpen(false);
@@ -1391,9 +1619,23 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </button>
                     <button 
                       onClick={() => {
-                        const newFolderName = prompt('Enter folder name:');
-                        if (newFolderName) {
-                          setFolderName(newFolderName);
+                        const newFolderId = `folder-${Date.now()}`;
+                        const newFolder = {
+                          id: newFolderId,
+                          name: 'Untitled Folder',
+                          createdAt: Date.now()
+                        };
+                        setFolders(prev => [...prev, newFolder]);
+                        setSelectedFolderId(newFolderId);
+
+                        // Open Library tab
+                        const libTab = tabs.find(t => t.type === 'library');
+                        if (libTab) {
+                          setActiveTabId(libTab.id);
+                        } else {
+                          const newId = `lib-${Date.now()}`;
+                          setTabs([...tabs, { id: newId, type: 'library', title: 'Library' }]);
+                          setActiveTabId(newId);
                         }
                         setIsCreateDropdownOpen(false);
                       }}
@@ -1434,13 +1676,110 @@ Once you have content, I can help you draft sections, summarize findings, or for
             
             <div className="flex-1 overflow-y-auto px-3">
               {sidebarView === 'files' && (
-                <div className="space-y-0.5">
-                   <button className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-[#1a1a1a] transition-all group">
-                      <div className="w-4 h-4 flex items-center justify-center shrink-0">
-                         <Icon icon="ph:folder" className="w-4 h-4 text-[#71717a] group-hover:text-[#f4f4f5]" />
+                <div className="space-y-2 select-none">
+                  <div className="flex items-center justify-between px-2 mb-1.5">
+                    <span className="text-[10px] text-[#71717a] uppercase font-bold tracking-wider">Workspace Folders</span>
+                    <button 
+                      onClick={() => {
+                        const newFolderId = `folder-${Date.now()}`;
+                        setFolders(prev => [...prev, { id: newFolderId, name: 'Untitled Folder', createdAt: Date.now() }]);
+                      }}
+                      className="p-1 hover:bg-[#27272a] rounded text-[#71717a] hover:text-[#f4f4f5] transition-colors cursor-pointer"
+                      title="New Folder"
+                    >
+                      <Icon icon="ph:folder-simple-plus" className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {folders.map(folder => {
+                    const isExpanded = !!expandedFolders[folder.id];
+                    const folderFiles = allLibraryItems.filter(item => item.folderId === folder.id);
+                    const isSelected = selectedFolderId === folder.id && activeTab.type === 'library';
+
+                    return (
+                      <div key={folder.id} className="space-y-0.5">
+                        {/* Folder Row */}
+                        <div 
+                          className={`flex items-center gap-1.5 p-1.5 rounded-lg transition-all group ${
+                            isSelected 
+                              ? 'bg-[#27272a]/40 text-white' 
+                              : 'hover:bg-[#161616] text-[#a1a1aa] hover:text-white'
+                          }`}
+                        >
+                          <button
+                            onClick={() => {
+                              setExpandedFolders(prev => ({ ...prev, [folder.id]: !prev[folder.id] }));
+                            }}
+                            className="p-0.5 hover:bg-[#27272a] rounded text-[#71717a] hover:text-[#f4f4f5] cursor-pointer"
+                          >
+                            <Icon 
+                              icon="ph:caret-right" 
+                              className={`w-3.5 h-3.5 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} 
+                            />
+                          </button>
+
+                          <button 
+                            onClick={() => {
+                              setSelectedFolderId(folder.id);
+                              // Expand on select
+                              setExpandedFolders(prev => ({ ...prev, [folder.id]: true }));
+                              
+                              // Switch active tab to Library
+                              const libTab = tabs.find(t => t.type === 'library');
+                              if (libTab) {
+                                setActiveTabId(libTab.id);
+                              } else {
+                                const newId = `lib-${Date.now()}`;
+                                setTabs([...tabs, { id: newId, type: 'library', title: 'Library' }]);
+                                setActiveTabId(newId);
+                              }
+                            }}
+                            className="flex-1 flex items-center justify-between min-w-0 text-left cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Icon 
+                                icon={isExpanded ? "ph:folder-open" : "ph:folder"} 
+                                className={`w-4 h-4 shrink-0 col-[#52525b] ${isSelected ? 'text-blue-400' : 'text-zinc-500'}`} 
+                              />
+                              <span className="text-xs font-semibold truncate text-[#a1a1aa] group-hover:text-white">
+                                {folder.name}
+                              </span>
+                            </div>
+                            <span className="text-[9px] px-1.5 bg-[#18181b] border border-[#27272a]/40 rounded text-zinc-500 font-mono">
+                              {folderFiles.length}
+                            </span>
+                          </button>
+                        </div>
+
+                        {/* Nested Items */}
+                        {isExpanded && (
+                          <div className="pl-6 space-y-0.5 border-l border-[#27272a]/40 ml-3.5 my-1">
+                            {folderFiles.length === 0 ? (
+                              <div className="py-1.5 px-2 text-[10.5px] italic text-[#52525b] select-none">
+                                Empty folder
+                              </div>
+                            ) : (
+                              folderFiles.map((file, fIdx) => (
+                                <button
+                                  key={fIdx}
+                                  onClick={() => handlePaperClick(file)}
+                                  className="w-full flex items-center gap-2 pr-1.5 pl-2 py-2 rounded-lg text-[#71717a] hover:text-[#f4f4f5] hover:bg-[#161616]/40 transition-all text-left min-w-0 cursor-pointer group"
+                                  title={file.title}
+                                >
+                                  <Icon 
+                                    icon="ph:file-text" 
+                                    className="w-3.5 h-3.5 text-zinc-600 shrink-0 group-hover:text-zinc-400" 
+                                  />
+                                  <span className="text-[11.5px] truncate font-medium flex-1 text-zinc-400 group-hover:text-white">
+                                    {file.title}
+                                  </span>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <span className="text-[#a1a1aa] text-[12.5px] font-medium truncate group-hover:text-[#f4f4f5]">My Research</span>
-                   </button>
+                    );
+                  })}
                 </div>
               )}
 
@@ -1725,7 +2064,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
           <Icon icon="ph:pencil-line" className="w-3.5 h-3.5" />
         )}
         <span className="truncate max-w-[130px]">
-          {tab.type === 'home' ? 'Home' : tab.type === 'library' ? 'Library' : (tab.id === activeTabId && tab.type === 'document' && !tab.fileId ? documentTitle : tab.title) || 'Untitled'}
+          {tab.type === 'home' ? 'Home' : tab.type === 'library' ? 'Library' : (tab.id === activeTabId && tab.type === 'document' && (!tab.fileId || !(tab.mimetype === 'application/pdf' || tab.title.toLowerCase().endsWith('.pdf'))) ? documentTitle : tab.title) || 'Untitled'}
         </span>
         {tabs.length > 1 && (
           <button 
@@ -1869,8 +2208,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                           <button 
                             onClick={() => {
-                              const name = prompt('Enter folder name:');
-                              if (name) setFolderName(name);
+                              const newFolderId = `folder-${Date.now()}`;
+                              setFolders(prev => [...prev, { id: newFolderId, name: 'Untitled Folder', createdAt: Date.now() }]);
                               setIsHomeCreateDropdownOpen(false);
                             }}
                             className="w-full flex items-center gap-3 px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
@@ -2001,7 +2340,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </div>
                   ) : (
                     <div className="w-full max-w-3xl flex flex-col gap-8 pb-32">
-                       {messages.map((m) => (
+                       {messages.filter(m => !m.isHidden).map((m) => (
                         <div 
                           key={m.id} 
                           className={`flex flex-col ${
@@ -2114,8 +2453,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 {/* Header section - Millimeter margin from edge */}
                 <div className="flex items-center justify-between mb-8 px-4">
                   <div>
-                    <h1 className="text-2xl text-[#f4f4f5] font-medium tracking-tight">Library</h1>
-                    <p className="text-[#71717a] text-[11px] mt-1">Files, research assets, and citation repository</p>
+                    <h1 className="text-2xl text-[#f4f4f5] font-medium tracking-tight">
+                      {selectedFolderId ? folders.find(f => f.id === selectedFolderId)?.name || 'Library' : 'Library'}
+                    </h1>
+                    {!selectedFolderId && (
+                      <p className="text-[#71717a] text-[11px] mt-1">Files, research assets, and citation repository</p>
+                    )}
                   </div>
                   
                   <div className="relative w-64">
@@ -2199,6 +2542,18 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               <span className="font-medium">File upload</span>
                             </button>
 
+                            <button
+                              onClick={() => {
+                                const newFolderId = `folder-${Date.now()}`;
+                                setFolders(prev => [...prev, { id: newFolderId, name: 'Untitled Folder', createdAt: Date.now() }]);
+                                setIsAddDropdownOpen(false);
+                              }}
+                              className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                            >
+                              <Icon icon="ph:folder-plus" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
+                              <span className="font-medium">New folder</span>
+                            </button>
+
                             <div className="h-[1px] bg-[#27272a] my-1 mx-2" />
 
                             <div className="relative">
@@ -2278,128 +2633,310 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   </div>
                 </div>
 
-                {/* Table Interface - Unified background and edge-to-edge */}
-                {sortedPapers.length === 0 ? (
-                  <div className="py-20 text-center mx-4 border border-dashed border-[#27272a] rounded-xl bg-[#161616]/20">
-                    <Icon icon="ph:books" className="w-10 h-10 text-[#3a3a3c] mx-auto mb-4" />
-                    <h3 className="text-[#e4e4e7] text-sm">Empty Repository</h3>
+                {/* Real Folder & File System - Responsive Design with zero-glow buttons */}
+                {selectedFolderId === null ? (
+                  <div className="flex-1 flex flex-col px-4 select-none">
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-xs uppercase font-mono tracking-wider font-bold text-zinc-500">Folders</h2>
+                    </div>
+
+                    <div className="bg-[#121212] overflow-x-auto border border-[#27272a] rounded-xl flex flex-col">
+                      <table className="w-full text-left border-collapse min-w-[700px]">
+                        <thead>
+                          <tr className="border-b border-[#27272a] bg-[#161616]/40 text-[#71717a] text-[10.5px] font-jakarta tracking-wider uppercase">
+                            <th className="py-3 pl-6 pr-3 font-semibold text-[#8a8a93]">Folder Name</th>
+                            <th className="py-3 px-3 font-semibold text-[#8a8a93]">Items</th>
+                            <th className="py-3 px-3 font-semibold text-[#8a8a93]">Created Date</th>
+                            <th className="py-3 pr-6 pl-3 font-semibold text-[#8a8a93] text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#1e1e20] text-xs">
+                          {folders.map(folder => {
+                            const folderFiles = sortedPapers.filter(p => p.folderId === folder.id);
+                            return (
+                              <tr 
+                                key={folder.id} 
+                                onClick={() => setSelectedFolderId(folder.id)}
+                                className="hover:bg-[#1a1a1a]/40 transition-colors group cursor-pointer"
+                              >
+                                <td className="py-3.5 pl-6 pr-3 font-medium">
+                                  <div className="flex items-center gap-3">
+                                    <Icon icon="ph:folder-open" className="w-4 h-4 text-zinc-400" />
+                                    {renamingFolderId === folder.id ? (
+                                      <input
+                                        autoFocus
+                                        value={renamingFolderTempName}
+                                        onChange={(e) => setRenamingFolderTempName(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            setFolders(folders.map(f => f.id === folder.id ? { ...f, name: renamingFolderTempName.trim() || 'Untitled Folder' } : f));
+                                            setRenamingFolderId(null);
+                                          } else if (e.key === 'Escape') {
+                                            setRenamingFolderId(null);
+                                          }
+                                        }}
+                                        onBlur={() => {
+                                          setFolders(folders.map(f => f.id === folder.id ? { ...f, name: renamingFolderTempName.trim() || 'Untitled Folder' } : f));
+                                          setRenamingFolderId(null);
+                                        }}
+                                        className="bg-[#1a1a1a] border border-[#27272a] text-zinc-300 text-xs rounded px-2 py-0.5 focus:outline-none focus:border-zinc-500 w-full max-w-[200px]"
+                                        onClick={(e) => e.stopPropagation()}
+                                      />
+                                    ) : (
+                                      <span className="text-[#f4f4f5] max-w-[300px] truncate">{folder.name}</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-3.5 text-zinc-400 font-jakarta">
+                                  {folderFiles.length} item{folderFiles.length !== 1 ? 's' : ''}
+                                </td>
+                                <td className="px-3 py-3.5 text-zinc-500">
+                                  {new Date(folder.createdAt).toLocaleDateString()}
+                                </td>
+                                <td className="py-3.5 pr-6 pl-3">
+                                  <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setRenamingFolderId(folder.id);
+                                        setRenamingFolderTempName(folder.name);
+                                      }}
+                                      className="p-1.5 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white transition-colors"
+                                      title="Rename Folder"
+                                    >
+                                      <Icon icon="ph:pencil-simple" className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (confirm(`Are you sure you want to delete folder "${folder.name}"?`)) {
+                                          setFolders(folders.filter(f => f.id !== folder.id));
+                                          setPapers(papers.filter(p => p.folderId !== folder.id));
+                                        }
+                                      }}
+                                      className="p-1.5 hover:bg-[#27272a] rounded text-red-400 hover:text-red-350 transition-colors"
+                                      title="Delete Folder"
+                                    >
+                                      <Icon icon="ph:trash" className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 ) : (
-                  <div className="bg-[#121212] overflow-x-auto select-none border-t border-[#27272a] flex-1">
-                    <table className="w-full text-left border-collapse min-w-[950px]">
-                      <thead>
-                        <tr className="border-b border-[#27272a]/60 text-[#71717a] text-[10.5px] font-mono tracking-wider uppercase">
-                          <th className="w-[44px] pl-4 py-3">
+                  // Deep Folder Contents Viewer
+                  <div className="flex-1 flex flex-col px-4">
+                    {/* Navigation Path */}
+                    <div className="flex items-center gap-2 mb-4">
+                      <button 
+                        onClick={() => setSelectedFolderId(null)}
+                        className="flex items-center gap-1 text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                      >
+                        <Icon icon="ph:caret-left" className="w-3.5 h-3.5" />
+                        <span>All Folders</span>
+                      </button>
+                      <span className="text-[#27272a] text-xs">/</span>
+                      <div className="flex items-center gap-2">
+                        <Icon icon="ph:folder-open" className="w-3.5 h-3.5 text-zinc-400" />
+                        <span className="text-xs font-semibold text-white">
+                          {folders.find(f => f.id === selectedFolderId)?.name || 'Browsing Directory'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Filtered Folder Papers */}
+                    {(() => {
+                      const folderPapers = sortedPapers.filter(p => p.folderId === selectedFolderId);
+                      return folderPapers.length === 0 ? (
+                        <div className="py-20 text-center border border-dashed border-[#27272a] rounded-xl bg-[#161616]/20">
+                          <Icon icon="ph:folder" className="w-10 h-10 text-zinc-600 mx-auto mb-4 animate-pulse" />
+                          <h3 className="text-[#e4e4e7] text-sm font-medium mb-1">Folder is Empty</h3>
+                          <p className="text-[#52525b] text-xs max-w-sm mx-auto mb-4">No assets have been added here yet. Create some research notes or upload files to fill it!</p>
+                          <div className="flex justify-center gap-2">
                             <button 
                               onClick={() => {
-                                if (selectedPapers.length === sortedPapers.length) {
-                                  setSelectedPapers([]);
-                                } else {
-                                  setSelectedPapers(sortedPapers.map(p => p.title));
-                                }
+                                const newId = `doc-${Date.now()}`;
+                                setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled', content: '', folderId: selectedFolderId }]);
+                                setActiveTabId(newId);
                               }}
-                              className="w-3.5 h-3.5 rounded-sm border border-[#27272a] bg-[#1a1a1a] flex items-center justify-center hover:border-zinc-500 transition-colors cursor-pointer"
+                              className="px-3.5 py-1.5 bg-zinc-200 hover:bg-white text-zinc-900 rounded-lg text-xs font-semibold cursor-pointer"
                             >
-                              {selectedPapers.length === sortedPapers.length && sortedPapers.length > 0 && (
-                                <div className="w-1.5 h-1.5 bg-zinc-200 rounded-[1px]" />
-                              )}
-                              {selectedPapers.length > 0 && selectedPapers.length < sortedPapers.length && (
-                                <div className="w-1.5 h-[1px] bg-zinc-400" />
-                              )}
+                              New Document
                             </button>
-                          </th>
-                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">Title</th>
-                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">Authors</th>
-                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">Added</th>
-                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">Full text</th>
-                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">Viewed</th>
-                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">File type</th>
-                          <th className="py-3 px-3 font-semibold text-[#8a8a93]">Summary</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#1e1e20] text-xs">
-                        {sortedPapers.map((paper, idx) => {
-                          const isChecked = selectedPapers.includes(paper.title);
-                          return (
-                            <tr 
-                              key={idx} 
-                              onClick={() => {
-                                const existingTab = tabs.find(t => t.title === paper.title);
-                                if (existingTab) {
-                                  setActiveTabId(existingTab.id);
-                                } else {
-                                  const newTabId = `view-${Date.now()}`;
-                                  setTabs(prev => [...prev, {
-                                    id: newTabId,
-                                    type: 'document',
-                                    title: paper.title,
-                                    content: markdownToHtml(paper.summary || paper.description || ''),
-                                    fileId: paper.fileId,
-                                    mimetype: paper.mimetype
-                                  }]);
-                                  setActiveTabId(newTabId);
-                                }
-                              }} 
-                              className={`hover:bg-[#1a1a1a]/40 transition-colors group cursor-pointer ${isChecked ? 'bg-[#1a1a1a]/25' : ''}`}
+                            <button 
+                              onClick={() => fileInputRef.current?.click()}
+                              className="px-3.5 py-1.5 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#252528] text-zinc-200 rounded-lg text-xs font-medium cursor-pointer"
                             >
-                              <td 
-                                className="w-[44px] pl-4 py-3.5"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (isChecked) {
-                                    setSelectedPapers(selectedPapers.filter(t => t !== paper.title));
-                                  } else {
-                                    setSelectedPapers([...selectedPapers, paper.title]);
-                                  }
-                                }}
-                              >
-                                <div className={`w-3.5 h-3.5 rounded-sm border border-[#27272a] flex items-center justify-center transition-colors ${isChecked ? 'bg-zinc-200 border-zinc-200' : 'bg-[#1a1a1a]'}`}>
-                                  {isChecked && <Icon icon="ph:check" className="w-2.5 h-2.5 text-[#121212]" />}
-                                </div>
-                              </td>
-                              <td className={`px-3 ${displayDensity === 'compact' ? 'py-2' : 'py-3.5'} font-medium`}>
-                                <div className="flex items-center gap-2.5">
-                                  {paper.fileType === 'Note' ? <Icon icon="ph:file-text" className="w-4 h-4 text-zinc-400" /> : <Icon icon="ph:article" className="w-4 h-4 text-zinc-300" />}
-                                  <span className="text-[#f4f4f5] truncate max-w-[280px]">{paper.title}</span>
-                                </div>
-                              </td>
-                              <td className="px-3 text-zinc-400">{paper.author || '—'}</td>
-                              <td className="px-3 text-zinc-500">{paper.added || '—'}</td>
-                              <td className="px-3">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  {paper.fullTextStatus === 'Available' ? (
-                                    <span className="text-[#e4e4e7] bg-[#1a1a1a] px-2 py-0.5 rounded text-[10px] border border-[#27272a]">
-                                      Available
-                                    </span>
-                                  ) : (
-                                    <span className="text-zinc-600">Unavailable</span>
-                                  )}
-                                  {paper.extractedText && (
-                                    <span className="text-emerald-400 bg-emerald-950/45 px-1.5 py-0.5 rounded text-[10px] border border-emerald-900/60 font-mono">
-                                      Mapped
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="px-3 text-zinc-500">{paper.viewed || '—'}</td>
-                              <td className="px-3 text-zinc-400 capitalize">{paper.fileType || '—'}</td>
-                              <td className="px-3 text-zinc-500">
-                                <button 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveViewingPaper(paper);
-                                  }}
-                                  className="px-2.5 py-1 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-zinc-300 hover:text-white font-sans text-[11px] rounded-lg transition cursor-pointer flex items-center gap-1.5 font-medium select-none"
-                                >
-                                  <Icon icon="ph:eye" className="w-3.5 h-3.5" />
-                                  <span>View Summary</span>
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                              Upload PDF File
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-[#121212] overflow-x-auto border border-[#27272a] rounded-xl min-h-[260px]">
+                          <table className="w-full text-left border-collapse min-w-[950px]">
+                            <thead>
+                              <tr className="border-b border-[#27272a] bg-[#1a1a1a]/40 text-[#71717a] text-[10.5px] font-jakarta tracking-wider uppercase">
+                                <th className="w-[44px] pl-4 py-3">
+                                  <button 
+                                    onClick={() => {
+                                      const folderNames = folderPapers.map(p => p.title);
+                                      const allSelected = folderNames.every(name => selectedPapers.includes(name));
+                                      if (allSelected) {
+                                        setSelectedPapers(selectedPapers.filter(name => !folderNames.includes(name)));
+                                      } else {
+                                        setSelectedPapers([...new Set([...selectedPapers, ...folderNames])]);
+                                      }
+                                    }}
+                                    className="w-3.5 h-3.5 rounded-sm border border-[#27272a] bg-[#1a1a1a] flex items-center justify-center hover:border-zinc-500 transition-colors cursor-pointer"
+                                  >
+                                    {folderPapers.map(p => p.title).every(name => selectedPapers.includes(name)) ? (
+                                      <div className="w-1.5 h-1.5 bg-zinc-200 rounded-[1px]" />
+                                    ) : folderPapers.some(p => selectedPapers.includes(p.title)) ? (
+                                      <div className="w-1.5 h-[1px] bg-zinc-400" />
+                                    ) : null}
+                                  </button>
+                                </th>
+                                <th className="py-3 px-3 font-semibold text-[#8a8a93]">Title</th>
+                                <th className="py-3 px-3 font-semibold text-[#8a8a93]">Move Folder</th>
+                                <th className="py-3 px-3 font-semibold text-[#8a8a93]">Authors</th>
+                                <th className="py-3 px-3 font-semibold text-[#8a8a93]">Added</th>
+                                <th className="py-3 px-3 font-semibold text-[#8a8a93]">Full text</th>
+                                <th className="py-3 px-3 font-semibold text-[#8a8a93]">Viewed</th>
+                                <th className="py-3 px-3 font-semibold text-[#8a8a93]">Type</th>
+                                <th className="py-3 px-3 font-semibold text-[#8a8a93]">Summary</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#1e1e20] text-xs">
+                              {folderPapers.map((paper, idx) => {
+                                const isChecked = selectedPapers.includes(paper.title);
+                                const openUpward = idx > 0 && idx >= folderPapers.length - 2;
+                                return (
+                                  <tr 
+                                    key={idx} 
+                                    onClick={() => handlePaperClick(paper)}
+                                    className={`hover:bg-[#1a1a1a]/40 transition-colors group cursor-pointer ${isChecked ? 'bg-[#1a1a1a]/25' : ''}`}
+                                  >
+                                    <td 
+                                      className="w-[44px] pl-4 py-3.5"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (isChecked) {
+                                          setSelectedPapers(selectedPapers.filter(t => t !== paper.title));
+                                        } else {
+                                          setSelectedPapers([...selectedPapers, paper.title]);
+                                        }
+                                      }}
+                                    >
+                                      <div className={`w-3.5 h-3.5 rounded-sm border border-[#27272a] flex items-center justify-center transition-colors ${isChecked ? 'bg-zinc-200 border-zinc-200' : 'bg-[#1a1a1a]'}`}>
+                                        {isChecked && <Icon icon="ph:check" className="w-2.5 h-2.5 text-[#121212]" />}
+                                      </div>
+                                    </td>
+                                    <td className="px-3 py-3.5 font-medium">
+                                      <div className="flex items-center gap-2.5">
+                                        {paper.fileType === 'Note' ? <Icon icon="ph:file-text" className="w-4 h-4 text-zinc-400" /> : <Icon icon="ph:article" className="w-4 h-4 text-zinc-300" />}
+                                        <span className="text-[#f4f4f5] truncate max-w-[240px]">{paper.title}</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-3" onClick={(e) => e.stopPropagation()}>
+                                      <div className="relative inline-flex items-center" tabIndex={0} onBlur={(e) => {
+                                        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                                          setActiveMoveFolderDropdown(null);
+                                        }
+                                      }}>
+                                        <button 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setActiveMoveFolderDropdown(activeMoveFolderDropdown === paper.title ? null : paper.title);
+                                          }} 
+                                          className={`flex items-center gap-1.5 px-3 py-1.5 font-semibold rounded-lg transition-all cursor-pointer w-full min-w-[130px] max-w-[140px] justify-between ${activeMoveFolderDropdown === paper.title ? 'bg-white text-zinc-950' : 'bg-zinc-200 hover:bg-white text-zinc-950'}`}
+                                        >
+                                          <span className="text-[11px] truncate">
+                                            {paper.folderId ? folders.find(f => f.id === paper.folderId)?.name || 'Library' : 'Library'}
+                                          </span>
+                                          <Icon icon="ph:caret-down" className={`w-3 h-3 shrink-0 transition-transform ${activeMoveFolderDropdown === paper.title ? 'rotate-180' : ''}`} />
+                                        </button>
+
+                                        <AnimatePresence>
+                                          {activeMoveFolderDropdown === paper.title && (
+                                            <motion.div 
+                                              initial={{ opacity: 0, y: openUpward ? -4 : 4, scale: 0.95 }}
+                                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                                              exit={{ opacity: 0, y: openUpward ? -4 : 4, scale: 0.95 }}
+                                              transition={{ duration: 0.1 }}
+                                              className={`absolute left-0 ${openUpward ? 'bottom-full mb-1.5' : 'top-full mt-1.5'} w-48 bg-[#18181b] border border-[#27272a] rounded-xl py-1.5 z-[70] shadow-xl`}
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              <button
+                                                onClick={() => {
+                                                  setPapers(prev => prev.map(p => p.title === paper.title ? { ...p, folderId: undefined } : p));
+                                                  setActiveMoveFolderDropdown(null);
+                                                }}
+                                                className="w-full flex items-center px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer text-left font-medium"
+                                              >
+                                                Library
+                                              </button>
+                                              {folders.map(folder => (
+                                                <button
+                                                  key={folder.id}
+                                                  onClick={() => {
+                                                    setPapers(prev => prev.map(p => p.title === paper.title ? { ...p, folderId: folder.id } : p));
+                                                    setActiveMoveFolderDropdown(null);
+                                                  }}
+                                                  className="w-full flex items-center px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer text-left truncate font-medium"
+                                                >
+                                                  {folder.name}
+                                                </button>
+                                              ))}
+                                            </motion.div>
+                                          )}
+                                        </AnimatePresence>
+                                      </div>
+                                    </td>
+                                    <td className="px-3 text-zinc-400">{paper.author || '—'}</td>
+                                    <td className="px-3 text-zinc-500">{paper.added || '—'}</td>
+                                    <td className="px-3">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        {paper.fullTextStatus === 'Available' ? (
+                                          <span className="text-[#e4e4e7] bg-[#1a1a1a] px-2 py-0.5 rounded text-[10px] border border-[#27272a]">
+                                            Available
+                                          </span>
+                                        ) : (
+                                          <span className="text-zinc-650">Unavailable</span>
+                                        )}
+                                        {paper.extractedText && (
+                                          <span className="text-emerald-400 bg-emerald-950/45 px-1.5 py-0.5 rounded text-[10px] border border-emerald-900/60 font-mono">
+                                            Mapped
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="px-3 text-zinc-500">{paper.viewed || '—'}</td>
+                                    <td className="px-3 text-zinc-400 capitalize">{paper.fileType || '—'}</td>
+                                    <td className="px-3 text-[#52525b]">
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setActiveViewingPaper(paper);
+                                        }}
+                                        className="px-2.5 py-1 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-zinc-300 hover:text-white font-sans text-[11px] rounded-lg transition-all cursor-pointer flex items-center gap-1.5 font-medium select-none"
+                                      >
+                                        <Icon icon="ph:eye" className="w-3.5 h-3.5" />
+                                        <span>View Summary</span>
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )
+                    })()}
                   </div>
                 )}
 
@@ -2671,11 +3208,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     <div className="space-y-4 text-sm leading-relaxed max-h-[350px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-zinc-800">
                       {activeViewingPaper.summary ? (
                         <div className="markdown-body prose prose-invert max-w-none text-sm text-[#d4d4d8] font-sans">
-                          <ReactMarkdown>{activeViewingPaper.summary}</ReactMarkdown>
+                          <ReactMarkdown>{activeViewingPaper.summary.replace(/\\n/g, '\n')}</ReactMarkdown>
                         </div>
                       ) : (
-                        <p className="text-[#d4d4d8] font-sans">
-                          {activeViewingPaper.description}
+                        <p className="text-[#d4d4d8] font-sans whitespace-pre-wrap">
+                          {activeViewingPaper.description ? activeViewingPaper.description.replace(/\\n/g, '\n') : ''}
                         </p>
                       )}
                     </div>
@@ -2817,7 +3354,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
               )}
             </div>
           ) : (
-            activeTab.fileId ? (
+            (activeTab.fileId && (activeTab.mimetype === 'application/pdf' || activeTab.title.toLowerCase().endsWith('.pdf'))) ? (
               <div className="flex-1 flex flex-col bg-[#0b0b0c] h-full overflow-hidden">
                 {/* PDF Viewer Display Body */}
                 <div className="flex-1 w-full bg-[#1e1e1e] relative min-h-0 overflow-hidden">
@@ -2863,7 +3400,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     <span className="font-medium text-[11px] min-w-[70px] text-left">
                       {editorFont === 'font-jakarta' ? 'Plus Jakarta' : 
                        editorFont === 'font-serif' ? 'Lora (Serif)' :
-                       editorFont === 'font-sans' ? 'Inter (Sans)' : 'JetBrains Mono'}
+                       editorFont === 'font-sans' ? 'Inter (Sans)' : 'Plus Jakarta (Alt)'}
                     </span>
                     <Icon icon="ph:caret-down" className={`w-3 h-3 text-[#71717a] transition-transform duration-200 ${isFontDropdownOpen ? 'rotate-180' : ''}`} />
                   </button>
@@ -2881,7 +3418,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           { value: 'font-jakarta', label: 'Plus Jakarta' },
                           { value: 'font-serif', label: 'Lora (Serif)' },
                           { value: 'font-sans', label: 'Inter (Sans)' },
-                          { value: 'font-mono', label: 'JetBrains Mono' }
+                          { value: 'font-mono', label: 'Plus Jakarta (Alt)' }
                         ].map((font) => (
                           <button
                             key={font.value}
@@ -3288,9 +3825,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
               )}
 
               {/* Streaming loading animation state */}
-              {isAiTyping && (
+              {(isAiTyping || researchStatus) && (
                 <div className="self-start bg-transparent py-2 max-w-full text-[13px] leading-relaxed select-none">
-                  <span className="shimmer-text font-jakarta font-medium">Thinking...</span>
+                  <span className="shimmer-text font-jakarta font-medium">
+                    {researchStatus === 'fetching' ? 'Fetching...' : 
+                     researchStatus === 'downloading' ? 'Downloading...' :
+                     researchStatus === 'polishing' ? 'Polishing...' : 
+                     'Thinking...'}
+                  </span>
                 </div>
               )}
 

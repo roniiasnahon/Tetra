@@ -11,6 +11,10 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import multer from "multer";
+import mammoth from "mammoth";
+import PDFDocument from "pdfkit";
+import axios from "axios";
+import { parseStringPromise } from "xml2js";
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -64,7 +68,7 @@ You are given the current research context of the user workspace:
 TONE & BEHAVIOR:
 - **Relatable & Student-Friendly**: Use an engaging, warm, and supportive tone. Use phrases like "Let's crush this!", "Great progress so far!", or "That's a brilliant angle."
 - **Smart Editor**: ONLY provide draft edits if the user explicitly asks for writing, editing, generating, or rewriting. If the user is just saying "hi", "thanks", "that's nice", or chatting casually, YOU MUST NOT include document editing tags (<replaceContent> or <title>).
-- **Interactive PDF Mapping**: When you refer to content from a mapped PDF in the "Citations" list, you MUST include an interactive citation in your chat response using the following format: '[[page:NUMBER|SOURCE_TITLE]]' (e.g., "The results show an increase in velocity [[page:4|Abstract_Physics.pdf]]"). This allows the user to click and jump directly to that page.
+- **Interactive PDF Mapping**: When you refer to content from a mapped PDF in the "Citations" list, you MUST include an interactive citation in your chat response using the following format: '[[page:NUMBER|SOURCE_TITLE]]' (e.g., "The results show an increase in velocity [[page:4|Abstract_Physics.pdf]]"). This allows the user to click and jump directly to that page. You can identify page numbers by looking for "--- Page N of M ---" markers in the provided full text context.
 - **Academic Excellence**: When you do write, never sacrifice quality. Provide multi-paragraph, detailed, and highly polished content.
 - **Mentor Approach**: Explain *why* you are making certain changes or suggestions to help the user learn.
 
@@ -78,6 +82,13 @@ Your detailed, step-by-step reasoning and academic planning.
 <chat>
 Your warm, encouraging mentor-style conversational response here. This is where your conversational chat, explanations of changes, and helpful greetings belong.
 </chat>
+
+CRITICAL PROTOCOL FOR SOURCE RESEARCH & DOWNLOADS:
+If the user asks to "find", "search", "lookup", "download", or "get sources/papers/research" about any topic:
+1. Briefly state in <chat> that you are searching for real academic papers.
+2. You MUST append a <searchRealPapers> XML element immediately after your </chat> element containing ONLY a single, short search query string. 
+<searchRealPapers>machine learning</searchRealPapers>
+Do NOT hallucinate or generate paper contents using <downloadPaper>. Only provide the query. The system will download 1 real PDF paper natively and display it.
 
 CRITICAL RULE ABOUT DOCUMENT EDITING:
 If AND ONLY IF the user EXPLICITLY asks you to "write an essay", "create a document", "draft a text", "generate an outline", or similar commands, YOU MUST append the following two tags after your <chat> tag:
@@ -204,6 +215,28 @@ async function startServer() {
     res.setHeader("Content-Type", file.mimetype);
     res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.originalname)}"`);
     res.send(file.buffer);
+  });
+
+  app.get("/api/files/:id/raw-text", async (req, res) => {
+    const file = uploadedFiles.get(req.params.id);
+    if (!file) {
+      return res.status(404).json({ success: false, error: "File not found" });
+    }
+
+    try {
+      const extension = file.originalname.toLowerCase().split('.').pop();
+      if (extension === "docx") {
+        const result = await mammoth.extractRawText({ buffer: file.buffer });
+        return res.json({ success: true, text: result.value });
+      } else if (extension === "txt" || extension === "md" || extension === "html" || extension === "json") {
+        return res.json({ success: true, text: file.buffer.toString("utf-8") });
+      } else {
+        return res.json({ success: true, text: "", message: "Standard parsing not supported for this file type" });
+      }
+    } catch (err: any) {
+      console.error("Error extracting text from file:", err);
+      res.status(500).json({ success: false, error: err.message || "Failed to extract text from file" });
+    }
   });
 
   // API Check Enpoint
@@ -435,13 +468,15 @@ Keep the 'fileType' as either 'Note' or 'Document'.`;
       }
 
       const parsedJSON = JSON.parse(responseText.trim());
+      const rawSummary = parsedJSON.summary || parsedJSON.description || "";
+      const summaryCleaned = typeof rawSummary === 'string' ? rawSummary.replace(/\\n/g, '\n') : "";
       res.json({
         success: true,
         data: {
           title: parsedJSON.title || sourceMetaData.title,
           author: parsedJSON.author || sourceMetaData.author,
-          description: parsedJSON.summary.substring(0, 100) + "...",
-          summary: parsedJSON.summary, // store full text in summary property
+          description: summaryCleaned.substring(0, 100) + "...",
+          summary: summaryCleaned, // store full text in summary property
           fileType: parsedJSON.fileType || "Note",
           added: "Today",
           fullTextStatus: "Available",
@@ -504,7 +539,7 @@ Keep the 'fileType' as either 'Note' or 'Document'.`;
       }
 
       const lastMessage = messages[messages.length - 1]?.content || "";
-      const isSearchRequest = /find|search|research|papers|articles|studies|scholar/i.test(lastMessage) && lastMessage.length < 100;
+      const isSearchRequest = /find|search|research|papers|articles|studies|scholar|source|lookup|download|internet|web|document/i.test(lastMessage) && lastMessage.length < 150;
 
       let researchContext = "";
       if (isSearchRequest) {
@@ -533,14 +568,29 @@ Please synthesize these results into your greeting and offer to cite them.
       const userCitationList = context?.citations || [];
       const userOutlineList = context?.outline || [];
 
+      // Extract full text sections if available to make them prominent for the AI
+      const fullTextSections = userCitationList
+        .filter((c: any) => c.extractedText)
+        .map((c: any) => `FULL TEXT CONTENT FOR SOURCE "${c.title}" (Use page markers for citations):\n${c.extractedText.substring(0, 30000)}`) // Limit per source to avoid context overflow
+        .join('\n\n---\n\n');
+
       // Package context into system input state
       const formattedContext = `
 --- CURRENT WORKSPACE STATE ---
 RESEARCH TOPIC & NOTES:
 ${JSON.stringify(userNoteList, null, 2)}
 
-RESEARCH CITATIONS:
-${JSON.stringify(userCitationList, null, 2)}
+RESEARCH CITATIONS SUMMARY (Library):
+${JSON.stringify(userCitationList.map((c: any) => ({ 
+  title: c.title, 
+  author: c.author, 
+  year: c.added, 
+  fileId: c.fileId,
+  hasMappedFullText: !!c.extractedText
+})), null, 2)}
+
+EXTRACTED FULL TEXT FOR MAPPED SOURCES:
+${fullTextSections || "No full text mapped yet. Download papers to see coordinates."}
 
 CURRENT STRUCTURAL OUTLINE (EDITOR CONTENT):
 ${JSON.stringify(userOutlineList, null, 2)}
@@ -606,6 +656,212 @@ ${researchContext}
       res.status(500).json({ success: false, error: err?.message || "Internal server error." });
     } else {
       next(err);
+    }
+  });
+
+  app.post("/api/search-arxiv", async (req, res) => {
+    try {
+      const { query } = req.body;
+      if (!query) {
+        return res.status(400).json({ success: false, error: "Missing query" });
+      }
+
+      const fetchWithRetry = async (url: string, opts: any = {}, retries = 3) => {
+        for (let i = 0; i < retries; i++) {
+          try {
+            return await axios.get(url, { ...opts, timeout: 15000 });
+          } catch (err: any) {
+            if (i === retries - 1) throw err;
+            await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
+          }
+        }
+        throw new Error("Max retries reached");
+      };
+
+      let cleanQuery = query.replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!cleanQuery) cleanQuery = "machine learning";
+
+      const searchUrl = `https://api.openalex.org/works?search=${encodeURIComponent(cleanQuery)}&filter=has_pdf_url:true&per-page=1&mailto=asnahonron@gmail.com`;
+      const response = await fetchWithRetry(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const data = response.data;
+
+      const entries = data.results || [];
+      const papers = [];
+
+      for (const entry of entries) {
+        const title = entry.title || 'Unknown Title';
+        const author = entry.authorships?.[0]?.author?.display_name || 'Unknown Author';
+        
+        let abstract = "No abstract available.";
+        if (entry.abstract_inverted_index) {
+          const index = entry.abstract_inverted_index;
+          const words: string[] = [];
+          for (const key of Object.keys(index)) {
+            for (const pos of index[key]) {
+              words[pos] = key;
+            }
+          }
+          abstract = words.join(" ").trim();
+        }
+
+        const year = entry.publication_year?.toString() || '2026';
+        let pdfLink = entry.best_oa_location?.pdf_url || entry.open_access?.oa_url;
+        
+        // Try to find a direct Arxiv link if the main one isn't Arxiv but it's an Arxiv paper
+        if (entry.ids?.arxiv) {
+           const arxivId = entry.ids.arxiv.split('/').pop();
+           if (!pdfLink?.includes('arxiv.org')) {
+             pdfLink = `https://arxiv.org/pdf/${arxivId}.pdf`;
+           }
+        }
+
+        let fileId = null;
+        if (pdfLink) {
+          try {
+            // wait a little bit to respect rate limits
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            const attemptDownload = async (url: string) => {
+              const headers: any = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/pdf,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': 'https://www.google.com/',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': '"Windows"',
+                'Upgrade-Insecure-Requests': '1'
+              };
+              
+              try {
+                const domain = new URL(url).hostname;
+                if (domain.includes('ajpmonline.org') || domain.includes('sciencedirect.com') || domain.includes('elsevier.com')) {
+                   headers['Referer'] = `https://${domain}/`;
+                   headers['User-Agent'] = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+                }
+              } catch (e) {}
+
+              return await fetchWithRetry(url, { 
+                responseType: 'arraybuffer',
+                headers: headers
+              }, 1);
+            };
+
+            let pdfRes;
+            try {
+              pdfRes = await attemptDownload(pdfLink);
+            } catch (pdfErr: any) {
+              console.warn(`Primary download failed for ${title} from ${pdfLink}: ${pdfErr.message}. Trying fallbacks.`);
+              
+              // Try other locations if available
+              const locations = entry.locations || [];
+              for (const loc of locations) {
+                if (loc.pdf_url && loc.pdf_url !== pdfLink) {
+                  try {
+                    await new Promise(resolve => setTimeout(resolve, 1000)); // Delay between fallback attempts
+                    pdfRes = await attemptDownload(loc.pdf_url);
+                    pdfLink = loc.pdf_url; // update link to the working one
+                    break;
+                  } catch (e) {
+                    console.warn(`Fallback download failed for ${title} from ${loc.pdf_url}`);
+                    continue;
+                  }
+                }
+              }
+            }
+
+            if (pdfRes) {
+              fileId = `semantic-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+              uploadedFiles.set(fileId, {
+                buffer: Buffer.from(pdfRes.data),
+                mimetype: 'application/pdf',
+                originalname: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
+              });
+            } else {
+              console.error(`All PDF download attempts failed for ${title}`);
+            }
+          } catch (outerErr: any) {
+             console.error(`Outer error for ${title}:`, outerErr.message);
+          }
+        }
+
+        papers.push({
+          title,
+          author,
+          abstract,
+          year,
+          url: entry.url || pdfLink,
+          fileId
+        });
+      }
+
+      res.json({ success: true, papers });
+    } catch (err: any) {
+      console.error('Error searching OpenAlex:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post("/api/generate-pdf", async (req, res) => {
+    try {
+      const { title, author, year, abstract, fullText } = req.body;
+      
+      const doc = new PDFDocument({ margin: 50 });
+      const buffers: Buffer[] = [];
+      
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => {
+        const pdfData = Buffer.concat(buffers);
+        const fileId = `file-${Date.now()}`;
+        uploadedFiles.set(fileId, {
+          buffer: pdfData,
+          mimetype: 'application/pdf',
+          originalname: `${title ? title.replace(/[^a-zA-Z0-9]/g, '_') : 'document'}.pdf`
+        });
+        res.json({ success: true, fileId });
+      });
+
+      if (title) {
+        doc.fontSize(24).font('Helvetica-Bold').fillColor('black').text(title, { align: 'center' });
+        doc.moveDown(0.5);
+      }
+      
+      if (author || year) {
+        doc.fontSize(12).font('Helvetica').fillColor('gray').text(`${author || 'Unknown Author'} (${year || '2026'})`, { align: 'center' });
+        doc.moveDown(2);
+      }
+
+      if (abstract) {
+        doc.fontSize(16).font('Helvetica-Bold').fillColor('black').text('Abstract');
+        doc.moveDown(0.5);
+        doc.fontSize(12).font('Helvetica').text(abstract, { align: 'justify' });
+        doc.moveDown(2);
+      }
+
+      if (fullText) {
+        const sections = fullText.split(/(?=^## )/gm);
+        for (const section of sections) {
+          if (section.trim().startsWith('## ')) {
+            const lines = section.split('\n');
+            const heading = lines[0].replace('## ', '').trim();
+            const body = lines.slice(1).join('\n').trim();
+            doc.fontSize(16).font('Helvetica-Bold').text(heading);
+            doc.moveDown(0.5);
+            doc.fontSize(12).font('Helvetica').text(body, { align: 'justify' });
+            doc.moveDown(2);
+          } else {
+            doc.fontSize(12).font('Helvetica').text(section, { align: 'justify' });
+            doc.moveDown();
+          }
+        }
+      }
+
+      doc.end();
+    } catch (err: any) {
+      console.error('Error generating PDF:', err);
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 
