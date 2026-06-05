@@ -5,10 +5,15 @@ import remarkGfm from 'remark-gfm';
 import { marked } from 'marked';
 import { motion, AnimatePresence } from 'motion/react';
 import { Icon } from '@iconify/react';
-import { Edit2, ExternalLink, Unlink, Link as LinkIcon } from 'lucide-react';
+import { Edit2, ExternalLink, Unlink, Link as LinkIcon, PanelRight, Coffee, X } from 'lucide-react';
+import { SidePanel } from './components/SidePanel';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
+
+// Firebase imports
+import { auth, db, OperationType, handleFirestoreError, signInWithPopup, googleProvider, signOut } from './firebase';
+import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocFromServer } from 'firebase/firestore';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -76,10 +81,20 @@ const linkifyHtml = (html: string): string => {
       return token;
     }
     
-    return token.replace(urlPattern, (url) => {
+    // Process URLs
+    let tokenText = token.replace(urlPattern, (url) => {
       const href = url.toLowerCase().startsWith('www.') ? `http://${url}` : url;
       return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline cursor-pointer">${url}</a>`;
     });
+
+    // Process double bracket citations [[page:2|Title]]
+    tokenText = tokenText.replace(/\[\[page:(\d+)\|(.+?)\]\]/g, (_, p, t) => {
+      const cleanLabel = t.replace(/_/g, ' ');
+      const href = `#cite-page-${p}-${encodeURIComponent(t)}`;
+      return `<a href="${href}" class="inline-flex items-center gap-1 bg-zinc-800/80 hover:bg-zinc-700/80 text-blue-400 hover:text-blue-300 px-1.5 py-0.5 rounded text-[11px] font-mono border border-zinc-700 transition-colors mx-0.5 cursor-pointer align-middle select-all" data-page="${p}" data-title="${t}">📄 ${cleanLabel} (p. ${p})</a>`;
+    });
+
+    return tokenText;
   });
   
   return processedTokens.join("");
@@ -172,13 +187,14 @@ const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationClick, is
             const encodedTitle = dataStr.substring(firstHyphen + 1);
             try {
               const title = decodeURIComponent(encodedTitle);
+              const cleanLabel = title.replace(/_/g, ' ');
               return (
                 <button 
                   onClick={() => onCitationClick?.(page, title)}
                   className="inline-flex items-center gap-1 bg-zinc-800 hover:bg-zinc-700 text-blue-400 px-1.5 py-0.5 rounded text-[11px] font-mono border border-zinc-700 transition-colors mx-0.5 cursor-pointer align-middle"
                 >
                   <Icon icon="ph:bookmark-simple-fill" className="w-3 h-3" />
-                  {children}
+                  📄 {cleanLabel} (p. {page})
                 </button>
               );
             } catch (e) {
@@ -212,6 +228,22 @@ const parseAssistantResponse = (text: string) => {
   let searchRealPapersQuery = "";
 
   const lowerText = text.toLowerCase();
+
+  // If there are absolutely NO valid XML tags in the text, treat everything as chat content.
+  const hasTag = lowerText.includes("<thought>") || 
+                  lowerText.includes("</thought>") || 
+                  lowerText.includes("<chat>") || 
+                  lowerText.includes("</chat>") || 
+                  lowerText.includes("<title>") || 
+                  lowerText.includes("</title>") || 
+                  lowerText.includes("<replacecontent>") || 
+                  lowerText.includes("</replacecontent>") ||
+                  lowerText.includes("<searchrealpapers>") ||
+                  lowerText.includes("</searchrealpapers>");
+
+  if (!hasTag) {
+    return { thought: "", chat: text.trim(), title: "", replaceContent: "", searchRealPapersQuery: "" };
+  }
 
   // 1. Parse <thought>
   const thoughtStartTagIdx = lowerText.indexOf("<thought>");
@@ -350,8 +382,22 @@ const parseAssistantResponse = (text: string) => {
 
 const extractTextFromPdf = async (url: string): Promise<string> => {
   try {
+    let pdfUrlToLoad = url;
+
+    // Only download if it's an external URL (starts with http)
+    if (url.startsWith("http")) {
+      const response = await fetch('/api/research/download-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error);
+      pdfUrlToLoad = `/api/files/${data.fileId}`;
+    }
+
     const loadingTask = pdfjs.getDocument({
-      url,
+      url: pdfUrlToLoad,
       cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
       cMapPacked: true,
     });
@@ -375,6 +421,9 @@ const extractTextFromPdf = async (url: string): Promise<string> => {
 
 export default function App() {
   const [isAssistantOpen, setIsAssistantOpen] = useState(true);
+  const [showBuyCoffeeModal, setShowBuyCoffeeModal] = useState(false);
+  const [supportAmountPaid, setSupportAmountPaid] = useState<string | null>(null);
+  const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [sidebarView, setSidebarView] = useState<'files' | 'chats' | 'search' | 'library'>('files');
   
@@ -481,7 +530,7 @@ export default function App() {
       const resData = await response.json();
       if (resData.success && resData.data) {
         const withFolder = { ...resData.data, folderId: selectedFolderId || folders[0]?.id || 'f1' };
-        setPapers(prev => [withFolder, ...prev]);
+        dbSetPaper(withFolder);
         setImportModalOpen(false);
         setImportUrl('');
         setLinkAnalyzeStatus('');
@@ -626,20 +675,212 @@ export default function App() {
   const [folderName, setFolderName] = useState('');
   const [savedNoteName, setSavedNoteName] = useState('');
 
+  // Firebase Authentication & Authorization State
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isCloudMenuOpen, setIsCloudMenuOpen] = useState(false);
+
   // Folder Management State
   const [folders, setFolders] = useState<FolderItem[]>([
     { id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 },
-    { id: 'f2', name: 'Semester Projects', createdAt: Date.now() - 86400000 },
-    { id: 'f3', name: 'Archived Drafts', createdAt: Date.now() }
   ]);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renamingFolderTempName, setRenamingFolderTempName] = useState<string>('');
+  const [folderToDelete, setFolderToDelete] = useState<FolderItem | null>(null);
+  const [isDeleteFolderModalOpen, setIsDeleteFolderModalOpen] = useState(false);
   const [activeMoveFolderDropdown, setActiveMoveFolderDropdown] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({ 'f1': true, 'f2': true, 'f3': false });
   
   // Research Papers Data
   const [papers, setPapers] = useState<PaperItem[]>([]);
+
+  // Database helper wrappers to sync automatically to Firestore or guest local state
+  const dbSetFolder = async (folder: FolderItem) => {
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'users', currentUser.uid, 'folders', folder.id), {
+          id: folder.id,
+          name: folder.name,
+          createdAt: folder.createdAt
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/folders/${folder.id}`);
+      }
+    } else {
+      setFolders(prev => {
+        if (prev.some(f => f.id === folder.id)) {
+          return prev.map(f => f.id === folder.id ? folder : f);
+        }
+        return [...prev, folder];
+      });
+    }
+  };
+
+  const dbDeleteFolder = async (folderId: string) => {
+    if (currentUser) {
+      try {
+        await deleteDoc(doc(db, 'users', currentUser.uid, 'folders', folderId));
+        // Also remove referencing papers
+        const papersToDelete = papers.filter(p => p.folderId === folderId);
+        for (const p of papersToDelete) {
+          const paperId = encodeURIComponent(p.title).replace(/\./g, '%2E');
+          await deleteDoc(doc(db, 'users', currentUser.uid, 'papers', paperId));
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `users/${currentUser.uid}/folders/${folderId}`);
+      }
+    } else {
+      setFolders(prev => prev.filter(f => f.id !== folderId));
+      setPapers(prev => prev.filter(p => p.folderId !== folderId));
+    }
+  };
+
+  const dbSetPaper = async (paper: PaperItem) => {
+    const paperId = encodeURIComponent(paper.title).replace(/\./g, '%2E');
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'users', currentUser.uid, 'papers', paperId), {
+          author: paper.author || '',
+          title: paper.title || '',
+          description: paper.description || '',
+          url: paper.url || '',
+          added: paper.added || '',
+          fullTextStatus: paper.fullTextStatus || '',
+          viewed: paper.viewed || '',
+          fileType: paper.fileType || '',
+          summary: paper.summary || '',
+          fileId: paper.fileId || '',
+          mimetype: paper.mimetype || '',
+          extractedText: paper.extractedText || '',
+          folderId: paper.folderId || ''
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/papers/${paperId}`);
+      }
+    } else {
+      setPapers(prev => {
+        if (prev.some(p => p.title === paper.title)) {
+          return prev.map(p => p.title === paper.title ? paper : p);
+        }
+        return [paper, ...prev];
+      });
+    }
+  };
+
+  const dbDeletePaper = async (paperTitle: string) => {
+    const paperId = encodeURIComponent(paperTitle).replace(/\./g, '%2E');
+    if (currentUser) {
+      try {
+        await deleteDoc(doc(db, 'users', currentUser.uid, 'papers', paperId));
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `users/${currentUser.uid}/papers/${paperId}`);
+      }
+    } else {
+      setPapers(prev => prev.filter(p => p.title !== paperTitle));
+    }
+  };
+
+  // Real-time Firestore synchronization effect
+  useEffect(() => {
+    let unsubscribeUser: () => void = () => {};
+    
+    const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
+      setCurrentUser(user);
+      setIsAuthLoading(false);
+      
+      if (user) {
+        // Save user profile state
+        try {
+          const userDocRef = doc(db, 'users', user.uid);
+          await setDoc(userDocRef, {
+            uid: user.uid,
+            email: user.email || '',
+            displayName: user.displayName || 'Researcher',
+            createdAt: Date.now()
+          }, { merge: true });
+        } catch (error) {
+          console.error("Failed saving user profile:", error);
+        }
+
+        // Test database connection
+        try {
+          await getDocFromServer(doc(db, 'test', 'connection'));
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('the client is offline')) {
+            console.error("Please check your Firebase configuration.");
+          }
+        }
+
+        // Subscribe to folders
+        const foldersColRef = collection(db, 'users', user.uid, 'folders');
+        const unsubFolders = onSnapshot(foldersColRef, (snapshot) => {
+          const loadedFolders: FolderItem[] = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            loadedFolders.push({
+              id: doc.id,
+              name: data.name || 'Untitled Folder',
+              createdAt: data.createdAt || Date.now()
+            });
+          });
+          
+          if (loadedFolders.length > 0) {
+            setFolders(loadedFolders);
+          } else {
+            // Seed a default folder if empty
+            const defaultFolder: FolderItem = { id: 'f1', name: 'My Research', createdAt: Date.now() };
+            setDoc(doc(db, 'users', user.uid, 'folders', defaultFolder.id), defaultFolder);
+          }
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/folders`);
+        });
+
+        // Subscribe to papers
+        const papersColRef = collection(db, 'users', user.uid, 'papers');
+        const unsubPapers = onSnapshot(papersColRef, (snapshot) => {
+          const loadedPapers: PaperItem[] = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            loadedPapers.push({
+              author: data.author || '',
+              title: data.title || '',
+              description: data.description || '',
+              url: data.url || '',
+              added: data.added || '',
+              fullTextStatus: data.fullTextStatus || '',
+              viewed: data.viewed || '',
+              fileType: data.fileType || '',
+              summary: data.summary || '',
+              fileId: data.fileId || '',
+              mimetype: data.mimetype || '',
+              extractedText: data.extractedText || '',
+              folderId: data.folderId || ''
+            });
+          });
+          setPapers(loadedPapers);
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/papers`);
+        });
+
+        unsubscribeUser = () => {
+          unsubFolders();
+          unsubPapers();
+        };
+      } else {
+        unsubscribeUser();
+        setFolders([
+          { id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 }
+        ]);
+        setPapers([]);
+      }
+    });
+
+    return () => {
+      unsubscribeAuth();
+      unsubscribeUser();
+    };
+  }, []);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -695,7 +936,7 @@ export default function App() {
       summary: "",
       folderId: targetFolder
     };
-    setPapers(prev => [newPaper, ...prev]);
+    dbSetPaper(newPaper);
 
     // Auto-create and switch to a new document tab with the added document's content
     const newTabId = `added-${Date.now()}`;
@@ -721,23 +962,27 @@ export default function App() {
   const [isChatSuggestionsDismissed, setIsChatSuggestionsDismissed] = useState(false);
   const [selectedFileLabel, setSelectedFileLabel] = useState<string | null>(null);
 
-  const updateChatMessages = (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+  const updateChatMessages = (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]), skipTabsUpdate = true) => {
     setMessages(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      let targetTabId = activeTabIdRef.current;
-      const currentTab = tabsRef.current.find(t => t.id === targetTabId);
-      if (!currentTab || currentTab.type !== 'chat') {
-        const firstChat = tabsRef.current.find(t => t.type === 'chat');
-        if (firstChat) {
-          targetTabId = firstChat.id;
+      if (!skipTabsUpdate) {
+        let targetTabId = activeTabIdRef.current;
+        const currentTab = tabsRef.current.find(t => t.id === targetTabId);
+        if (!currentTab || currentTab.type !== 'chat') {
+          const firstChat = tabsRef.current.find(t => t.type === 'chat');
+          if (firstChat) {
+            targetTabId = firstChat.id;
+          }
         }
+        setTabs(prevTabs => prevTabs.map(t => t.id === targetTabId ? { ...t, messages: next } : t));
       }
-      setTabs(prevTabs => prevTabs.map(t => t.id === targetTabId ? { ...t, messages: next } : t));
       return next;
     });
   };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const assistantMessageIdRef = useRef<string | null>(null);
 
   // Auto Scroll Chat
   useEffect(() => {
@@ -891,22 +1136,46 @@ Once you have content, I can help you draft sections, summarize findings, or for
   }, []);
 
   const handleCitationClick = React.useCallback((page: number, title: string) => {
-    // 1. Find the tab that matches the title
-    const targetTab = tabs.find(t => t.title && t.title.toLowerCase().includes(title.toLowerCase()));
+    const normalizedTarget = title.replace(/_/g, ' ').trim().toLowerCase();
+    
+    // 1. Try to find a matching tab
+    let targetTab = tabs.find(t => {
+      if (!t.title) return false;
+      const normalizedTabTitle = t.title.replace(/_/g, ' ').trim().toLowerCase();
+      return normalizedTabTitle.includes(normalizedTarget) || normalizedTarget.includes(normalizedTabTitle);
+    });
+
     if (targetTab) {
       if (activeTabId !== targetTab.id) {
         setActiveTabId(targetTab.id);
       }
       
-      // 2. Wait for tab to switch then scroll
+      // Wait for tab transfer then scroll to target page id element
       setTimeout(() => {
         const pageEl = document.getElementById(`pdf-page-${page}`);
         if (pageEl) {
           pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
       }, 500);
+    } else {
+      // 2. Try to locate the paper in the library/papers state list and load it dynamically
+      const matchedPaper = papers.find(p => {
+        if (!p.title) return false;
+        const normalizedPaperTitle = p.title.replace(/_/g, ' ').trim().toLowerCase();
+        return normalizedPaperTitle.includes(normalizedTarget) || normalizedTarget.includes(normalizedPaperTitle);
+      });
+      
+      if (matchedPaper) {
+        handlePaperClick(matchedPaper);
+        setTimeout(() => {
+          const pageEl = document.getElementById(`pdf-page-${page}`);
+          if (pageEl) {
+            pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }, 800);
+      }
     }
-  }, [tabs, activeTabId]);
+  }, [tabs, activeTabId, papers]);
 
   // Sending chat messages
   const handleSendMessage = async (customText?: string, options: { isHidden?: boolean } = {}) => {
@@ -921,10 +1190,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
       isHidden: options.isHidden
     };
 
-    updateChatMessages(prev => [...prev, userMessage]);
+    updateChatMessages(prev => [...prev, userMessage], false);
     if (!customText) {
       setChatInput('');
     }
+    
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     
     setIsAiTyping(true);
 
@@ -956,24 +1228,25 @@ Once you have content, I can help you draft sections, summarize findings, or for
               linkedCitations: []
             }]
           }
-        })
+        }),
+        signal: controller.signal
       });
 
       if (!response.ok) {
         throw new Error('API server returned status ' + response.status);
       }
 
-      const assistantMessageId = String(Date.now() + 1);
+      assistantMessageIdRef.current = String(Date.now() + 1);
       updateChatMessages(prev => [
         ...prev,
         {
-          id: assistantMessageId,
+          id: assistantMessageIdRef.current!,
           role: 'assistant',
           content: '',
           thought: '',
           timestamp: Date.now()
         }
-      ]);
+      ], false);
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -993,6 +1266,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
           const lines = streamBuffer.split('\n');
           // Keep the last incomplete line in the buffer
           streamBuffer = lines.pop() || "";
+          
+          if (lines.length > 0) {
+            updateChatMessages(prev => prev); // Final update to sync tabs
+          }
 
           for (const line of lines) {
             const trimmedLine = line.trim();
@@ -1009,11 +1286,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
                    const { thought, chat, title: parsedTitle, replaceContent: parsedContent, searchRealPapersQuery } = parseAssistantResponse(accumulatedText);
 
                    if (chat !== undefined) {
-                     updateChatMessages(prev => prev.map(m => m.id === assistantMessageId ? { ...m, content: chat } : m));
+                     updateChatMessages(prev => prev.map(m => m.id === assistantMessageIdRef.current ? { ...m, content: chat } : m));
                    }
 
                    if (thought !== undefined) {
-                     updateChatMessages(prev => prev.map(m => m.id === assistantMessageId ? { ...m, thought: thought } : m));
+                     updateChatMessages(prev => prev.map(m => m.id === assistantMessageIdRef.current ? { ...m, thought: thought } : m));
                    }
 
                    if (parsedTitle) {
@@ -1051,7 +1328,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                              };
                            }));
 
-                           setPapers(prev => [...newPapers, ...prev]);
+                           newPapers.forEach(np => {
+                             dbSetPaper(np);
+                           });
                            setResearchStatus(null);
 
                            if (newPapers.some(p => p.fileId)) {
@@ -1243,7 +1522,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
       setIsAiTyping(false);
       aiWritingTabIdRef.current = null;
-    } catch (e) {
+    } catch (e: any) {
+      if (e.name === 'AbortError') {
+        console.log("AI streaming was aborted by the user.");
+        return; // Exit without triggering the fallback
+      }
       setIsAiTyping(false);
       aiWritingTabIdRef.current = null;
       console.warn("Express server Gemini API failed, using deep local simulation rules:", e);
@@ -1281,6 +1564,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
           }
         }
       }
+
 
       setTimeout(() => {
         updateChatMessages(prev => [
@@ -1363,6 +1647,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
     const orderMultiplier = sortOrder === 'asc' ? 1 : -1;
     return valA.localeCompare(valB) * orderMultiplier;
   });
+
+
 
   return (
     <div className="h-screen bg-[#070707] text-[#e4e4e7] font-sans flex selection:bg-[#262626] overflow-hidden">
@@ -1453,7 +1739,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   extractedText: extractedText,
                   folderId: targetFolder
                 };
-                setPapers(prev => [parsedPaper, ...prev]);
+                dbSetPaper(parsedPaper);
 
                 const newId = `doc-${Date.now()}`;
                 let initialContent = "";
@@ -1625,7 +1911,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           name: 'Untitled Folder',
                           createdAt: Date.now()
                         };
-                        setFolders(prev => [...prev, newFolder]);
+                        dbSetFolder(newFolder);
                         setSelectedFolderId(newFolderId);
 
                         // Open Library tab
@@ -1682,7 +1968,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     <button 
                       onClick={() => {
                         const newFolderId = `folder-${Date.now()}`;
-                        setFolders(prev => [...prev, { id: newFolderId, name: 'Untitled Folder', createdAt: Date.now() }]);
+                        dbSetFolder({ id: newFolderId, name: 'Untitled Folder', createdAt: Date.now() });
                       }}
                       className="p-1 hover:bg-[#27272a] rounded text-[#71717a] hover:text-[#f4f4f5] transition-colors cursor-pointer"
                       title="New Folder"
@@ -2100,7 +2386,101 @@ Once you have content, I can help you draft sections, summarize findings, or for
           <div className="flex-1" />
 
           {/* Right Header Navigation & Panel Controls */}
-          <div className="flex items-center gap-3 h-full pb-1.5 pt-1.5">
+          <div className="flex items-center gap-2.5 h-full pb-1.5 pt-1.5 text-[#f4f4f5]">
+            {/* Cloud Database Integration Section */}
+            <div className="relative">
+              {isAuthLoading ? (
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-zinc-500 font-medium">
+                  <Icon icon="ph:spinner-gap" className="w-3.5 h-3.5 animate-spin" />
+                  <span>Loading...</span>
+                </div>
+              ) : currentUser ? (
+                <>
+                  <button 
+                    onClick={() => setIsCloudMenuOpen(!isCloudMenuOpen)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#141d17] border border-[#1d3021] text-[#a4fad8] hover:text-[#d2faec] hover:bg-[#1a261c] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98]"
+                    title="Account"
+                  >
+                    <Icon icon="ph:user-circle" className="w-3.5 h-3.5" />
+                    <span className="max-w-[124px] truncate">{currentUser.displayName || currentUser.email || 'User'}</span>
+                  </button>
+
+                  <AnimatePresence>
+                    {isCloudMenuOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 4, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                        transition={{ duration: 0.1 }}
+                        className="absolute right-0 top-full mt-1 w-64 bg-[#18181b] border border-[#27272a] rounded-xl py-3 z-[100] shadow-xl text-left"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="px-4 py-2 border-b border-zinc-800 pb-3 mb-2">
+                          <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Account</div>
+                          <div className="text-sm font-semibold text-[#f4f4f5] mt-1 truncate">{currentUser.displayName || 'Google Account'}</div>
+                          <div className="text-xs text-zinc-400 truncate">{currentUser.email}</div>
+                        </div>
+
+                        <div className="px-4 py-2 mb-1.5">
+                          <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Library</div>
+                          <div className="flex items-center gap-2 text-xs text-zinc-300 mt-2">
+                            <Icon icon="ph:folder" className="w-4 h-4 text-zinc-500" />
+                            <span>{folders.length} Folders</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-zinc-300 mt-1">
+                            <Icon icon="ph:file-text" className="w-4 h-4 text-zinc-500" />
+                            <span>{papers.length} Documents</span>
+                          </div>
+                        </div>
+
+                        <div className="h-[1px] bg-[#27272a] my-1" />
+
+                        <div className="px-2">
+                          <button
+                            onClick={async () => {
+                              try {
+                                await signOut(auth);
+                                setIsCloudMenuOpen(false);
+                              } catch (err) {
+                                console.error("Sign out error:", err);
+                              }
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:text-red-300 hover:bg-red-950/20 rounded-lg transition-colors cursor-pointer text-left font-medium"
+                          >
+                            <Icon icon="ph:sign-out" className="w-4 h-4" />
+                            <span>Sign Out</span>
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </>
+              ) : (
+                <button 
+                  onClick={async () => {
+                    try {
+                      await signInWithPopup(auth, googleProvider);
+                    } catch (err) {
+                      console.error("Sign in failed:", err);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#27272a] border border-[#3f3f46] text-zinc-200 hover:text-white hover:bg-zinc-800 transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98]"
+                  title="Sign In with Google"
+                >
+                  <Icon icon="ph:user-circle" className="w-3.5 h-3.5 text-zinc-400" />
+                  <span>Sign In</span>
+                </button>
+              )}
+            </div>
+
+            <button 
+              onClick={() => setShowBuyCoffeeModal(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#1d1614] border border-[#30211d] text-[#e3a088] hover:text-[#fad2c3] hover:bg-[#261d1a] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98]"
+              title="Buy us a coffee"
+            >
+              <Coffee className="w-3.5 h-3.5 text-[#e3a088]" />
+              <span>Buy me a Coffee</span>
+            </button>
             {!isAssistantOpen && (
               <button 
                 onClick={() => setIsAssistantOpen(true)}
@@ -2115,8 +2495,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
         </header>
 
         {/* Main Editor Component Container */}
-        <div className="relative flex-1 bg-[#121212] rounded-2xl flex flex-col overflow-hidden min-w-0 transition-all">
-          
+        <div className="relative flex-1 bg-[#121212] rounded-2xl flex flex-row overflow-hidden min-w-0 transition-all">
+          <div className="flex-1 flex flex-col min-w-0">
           {activeTab.type === 'home' ? (
             <div className="flex-1 overflow-y-auto focus:outline-none scroll-smooth">
               <div className="max-w-[800px] mx-auto w-full p-8 md:p-14 lg:p-20 flex flex-col justify-center min-h-full">
@@ -2209,7 +2589,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           <button 
                             onClick={() => {
                               const newFolderId = `folder-${Date.now()}`;
-                              setFolders(prev => [...prev, { id: newFolderId, name: 'Untitled Folder', createdAt: Date.now() }]);
+                              dbSetFolder({ id: newFolderId, name: 'Untitled Folder', createdAt: Date.now() });
                               setIsHomeCreateDropdownOpen(false);
                             }}
                             className="w-full flex items-center gap-3 px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
@@ -2235,17 +2615,30 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       maskImage: 'linear-gradient(to right, rgba(0,0,0,1) 82%, rgba(0,0,0,0) 98%)'
                     }}
                   >
-                    {[folderName || 'My Research', 'Semester Projects', 'Workshops', 'Archived Drafts', 'Shared Resources', 'Media Assets'].map((folder, idx) => (
+                    {folders.slice(0, 6).map((folder, idx) => (
                       <button 
-                        key={idx} 
+                        key={folder.id} 
+                        onClick={() => {
+                          setSelectedFolderId(folder.id);
+                          const libraryTab = tabs.find(t => t.type === 'library');
+                          if (libraryTab) {
+                            setActiveTabId(libraryTab.id);
+                          } else {
+                            const newId = `library-${Date.now()}`;
+                            setTabs([...tabs, { id: newId, type: 'library', title: 'Library' }]);
+                            setActiveTabId(newId);
+                          }
+                        }}
                         className="flex flex-col items-start p-6 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-all duration-300 rounded-[28px] text-left cursor-pointer group min-w-[240px] shrink-0"
                       >
                         <div className="mb-4 group-hover:scale-105 transition-transform duration-300">
                           <Icon icon="ph:folder-user" className="w-10 h-10 text-[#f4f4f5]" />
                         </div>
                         <div className="min-w-0">
-                          <h3 className="text-[#e4e4e7] font-medium text-base truncate mb-1">{folder}</h3>
-                          <p className="text-[#71717a] text-xs">{idx === 0 ? 'Active research' : 'Updated last week'}</p>
+                          <h3 className="text-[#e4e4e7] font-medium text-base truncate mb-1">{folder.name}</h3>
+                          <p className="text-[#71717a] text-xs">
+                             {idx === 0 ? 'Recently updated' : (idx === 1 ? 'Last week' : 'Research project')}
+                          </p>
                         </div>
                       </button>
                     ))}
@@ -2545,7 +2938,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             <button
                               onClick={() => {
                                 const newFolderId = `folder-${Date.now()}`;
-                                setFolders(prev => [...prev, { id: newFolderId, name: 'Untitled Folder', createdAt: Date.now() }]);
+                                dbSetFolder({ id: newFolderId, name: 'Untitled Folder', createdAt: Date.now() });
                                 setIsAddDropdownOpen(false);
                               }}
                               className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
@@ -2669,14 +3062,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                         onChange={(e) => setRenamingFolderTempName(e.target.value)}
                                         onKeyDown={(e) => {
                                           if (e.key === 'Enter') {
-                                            setFolders(folders.map(f => f.id === folder.id ? { ...f, name: renamingFolderTempName.trim() || 'Untitled Folder' } : f));
+                                            dbSetFolder({ ...folder, name: renamingFolderTempName.trim() || 'Untitled Folder' });
                                             setRenamingFolderId(null);
                                           } else if (e.key === 'Escape') {
                                             setRenamingFolderId(null);
                                           }
                                         }}
                                         onBlur={() => {
-                                          setFolders(folders.map(f => f.id === folder.id ? { ...f, name: renamingFolderTempName.trim() || 'Untitled Folder' } : f));
+                                          dbSetFolder({ ...folder, name: renamingFolderTempName.trim() || 'Untitled Folder' });
                                           setRenamingFolderId(null);
                                         }}
                                         className="bg-[#1a1a1a] border border-[#27272a] text-zinc-300 text-xs rounded px-2 py-0.5 focus:outline-none focus:border-zinc-500 w-full max-w-[200px]"
@@ -2709,10 +3102,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        if (confirm(`Are you sure you want to delete folder "${folder.name}"?`)) {
-                                          setFolders(folders.filter(f => f.id !== folder.id));
-                                          setPapers(papers.filter(p => p.folderId !== folder.id));
-                                        }
+                                        setFolderToDelete(folder);
+                                        setIsDeleteFolderModalOpen(true);
                                       }}
                                       className="p-1.5 hover:bg-[#27272a] rounded text-red-400 hover:text-red-350 transition-colors"
                                       title="Delete Folder"
@@ -2873,7 +3264,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                             >
                                               <button
                                                 onClick={() => {
-                                                  setPapers(prev => prev.map(p => p.title === paper.title ? { ...p, folderId: undefined } : p));
+                                                  dbSetPaper({ ...paper, folderId: '' });
                                                   setActiveMoveFolderDropdown(null);
                                                 }}
                                                 className="w-full flex items-center px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer text-left font-medium"
@@ -2884,7 +3275,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                                 <button
                                                   key={folder.id}
                                                   onClick={() => {
-                                                    setPapers(prev => prev.map(p => p.title === paper.title ? { ...p, folderId: folder.id } : p));
+                                                    dbSetPaper({ ...paper, folderId: folder.id });
                                                     setActiveMoveFolderDropdown(null);
                                                   }}
                                                   className="w-full flex items-center px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer text-left truncate font-medium"
@@ -2981,7 +3372,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                          <button 
                           onClick={() => {
-                            setPapers(prev => prev.filter(p => !selectedPapers.includes(p.title)));
+                            selectedPapers.forEach(title => dbDeletePaper(title));
                             setSelectedPapers([]);
                           }}
                           className="flex items-center gap-2 px-3 py-1.5 hover:bg-[#1a1a1a] rounded-lg text-white text-[13px] transition-colors cursor-pointer"
@@ -3242,6 +3633,109 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 </div>
               )}
 
+              {/* Buy Me a Coffee Support Modal */}
+              {showBuyCoffeeModal && (
+                <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
+                  <div className="bg-[#121212] border border-[#2d2d30] rounded-2xl w-full max-w-[420px] p-6 relative flex flex-col overflow-hidden select-none animate-scale-up">
+                    <button 
+                      onClick={() => {
+                        setShowBuyCoffeeModal(false);
+                        setSupportAmountPaid(null);
+                      }}
+                      className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer p-1 rounded-md hover:bg-[#1a1a1c] transition-colors"
+                      title="Close dialog"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+
+                    {supportAmountPaid ? (
+                      <div className="flex flex-col items-center text-center space-y-4 py-4 animate-fade-in">
+                        <div className="w-14 h-14 rounded-full bg-emerald-950/30 border border-emerald-800/40 flex items-center justify-center text-emerald-400">
+                          <Coffee className="w-7 h-7" />
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <h3 className="text-base font-bold text-zinc-100 font-jakarta">Support Succeeded!</h3>
+                          <span className="text-[10px] uppercase tracking-wider font-mono text-emerald-500 font-bold">Official Workspace Patron</span>
+                        </div>
+
+                        <p className="text-xs text-zinc-400 leading-relaxed px-1">
+                          Thank you deep down for your virtual donation of <span className="text-emerald-400 font-bold">{supportAmountPaid}</span>! This supports daily Gemini token requests, web parser microservices, and general app development.
+                        </p>
+
+                        <button
+                          onClick={() => {
+                            setShowBuyCoffeeModal(false);
+                            setSupportAmountPaid(null);
+                          }}
+                          className="w-full py-2 bg-zinc-200 hover:bg-white text-zinc-950 rounded-xl font-bold text-xs transition-colors cursor-pointer mt-2"
+                        >
+                          Conclude & Return
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center text-center space-y-4 pt-1">
+                        {/* Coffee cup box */}
+                        <div className="w-14 h-14 rounded-2xl bg-[#221714] border border-[#44312a] flex items-center justify-center text-[#e3a088]">
+                          <Coffee className="w-7 h-7" />
+                        </div>
+
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-bold text-zinc-100 font-jakarta">Support AI Research Workspace</h3>
+                          <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">Keep the model intelligence active ☕</p>
+                        </div>
+
+                        <p className="text-xs text-zinc-400 leading-relaxed px-1">
+                          If our draft optimizer, citation indexers, automatic web synthesis, or new interactive study panels have saved you time, consider buying us a coffee!
+                        </p>
+
+                        {/* Coffee visual selectors */}
+                        <div className="w-full flex gap-2.5 pt-2">
+                          {[
+                            { count: 1, label: "1 Coffee", price: "$5", desc: "Warm Thanks!" },
+                            { count: 3, label: "3 Coffees", price: "$15", desc: "Keep it up!" },
+                            { count: 5, label: "5 Coffees", price: "$25", desc: "Pro sponsor!" }
+                          ].map((item) => (
+                            <button
+                              key={item.count}
+                              onClick={() => setSupportAmountPaid(item.price)}
+                              className="flex-1 bg-[#161618] border border-[#242426] hover:border-zinc-500 p-3 rounded-xl transition-all cursor-pointer flex flex-col items-center gap-1 group"
+                            >
+                              <span className="text-xs font-bold text-zinc-300 group-hover:text-white">{item.label}</span>
+                              <span className="text-[10px] font-mono text-zinc-500">{item.price}</span>
+                              <span className="text-[9.5px] text-zinc-600 font-semibold">{item.desc}</span>
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Direct exterior Support links */}
+                        <div className="w-full space-y-2 pt-2">
+                          <a 
+                            href="https://buymeacoffee.com"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full py-2.5 rounded-xl bg-zinc-200 hover:bg-white text-[#121212] font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <Coffee className="w-3.5 h-3.5" />
+                            <span>Support on BuyMeACoffee.com</span>
+                            <ExternalLink className="w-3 h-3 ml-0.5" />
+                          </a>
+                          
+                          <button
+                            onClick={() => {
+                              setShowBuyCoffeeModal(false);
+                            }}
+                            className="w-full py-2 text-[10.5px] text-zinc-500 hover:text-zinc-300 font-medium transition-colors cursor-pointer"
+                          >
+                            Maybe next time, thanks!
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Zero-Glow Add Item Table Modal */}
               {addModalOpen && (
                 <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
@@ -3271,7 +3765,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         summary: ""
                       };
                       
-                      setPapers([newlyCreated, ...papers]);
+                      dbSetPaper(newlyCreated);
 
                       // Create and switch to a new document tab with the content
                       const newTabId = `manual-${Date.now()}`;
@@ -3358,6 +3852,15 @@ Once you have content, I can help you draft sections, summarize findings, or for
               <div className="flex-1 flex flex-col bg-[#0b0b0c] h-full overflow-hidden">
                 {/* PDF Viewer Display Body */}
                 <div className="flex-1 w-full bg-[#1e1e1e] relative min-h-0 overflow-hidden">
+                    {!isSidePanelOpen && (
+                      <button
+                        onClick={() => setIsSidePanelOpen(true)}
+                        className="absolute top-4 right-4 z-10 p-2 text-[#a1a1aa] hover:text-[#f4f4f5] transition-all cursor-pointer"
+                        title="Toggle Side Panel"
+                      >
+                        <PanelRight className="w-5 h-5" />
+                      </button>
+                    )}
                     <div className="w-full h-full overflow-y-auto bg-[#0f0f10]">
                       <Document
                         file={`/api/files/${activeTab.fileId}`}
@@ -3387,9 +3890,18 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 </div>
               </div>
             ) : (
-              <>
-              {/* Floating Pill Formatting Bar */}
-              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 text-[12px] text-[#a1a1aa] whitespace-nowrap select-none">
+              <div className="relative flex-1 flex flex-col h-full overflow-hidden">
+                {!isSidePanelOpen && (
+                  <button
+                    onClick={() => setIsSidePanelOpen(true)}
+                    className="absolute top-3 right-3 z-30 p-2 text-[#a1a1aa] hover:text-[#f4f4f5] transition-all cursor-pointer"
+                    title="Toggle Side Panel"
+                  >
+                    <PanelRight className="w-5 h-5" />
+                  </button>
+                )}
+                {/* Floating Pill Formatting Bar */}
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 text-[12px] text-[#a1a1aa] whitespace-nowrap select-none">
                 
                 {/* Font Selector */}
                 <div className="flex items-center relative h-full">
@@ -3733,13 +4245,31 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           if (href) {
                             e.preventDefault();
                             e.stopPropagation();
-                            const tempLink = document.createElement('a');
-                            tempLink.href = href;
-                            tempLink.target = '_blank';
-                            tempLink.rel = 'noopener noreferrer';
-                            document.body.appendChild(tempLink);
-                            tempLink.click();
-                            document.body.removeChild(tempLink);
+                            
+                            if (href.startsWith('#cite-page-')) {
+                              // Custom citation coordinates link
+                              const dataStr = href.replace('#cite-page-', '');
+                              const firstHyphen = dataStr.indexOf('-');
+                              if (firstHyphen !== -1) {
+                                const page = parseInt(dataStr.substring(0, firstHyphen));
+                                const encodedTitle = dataStr.substring(firstHyphen + 1);
+                                try {
+                                  const title = decodeURIComponent(encodedTitle);
+                                  handleCitationClick(page, title);
+                                } catch (err) {
+                                  console.error("Failed parsing citation target", err);
+                                }
+                              }
+                            } else {
+                              // Standard external URL link
+                              const tempLink = document.createElement('a');
+                              tempLink.href = href;
+                              tempLink.target = '_blank';
+                              tempLink.rel = 'noopener noreferrer';
+                              document.body.appendChild(tempLink);
+                              tempLink.click();
+                              document.body.removeChild(tempLink);
+                            }
                           }
                         }
                       }}
@@ -3750,10 +4280,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                 </div>
               </div>
-            </>
+            </div>
           )
         )}
-          
+          </div>
+          <SidePanel isOpen={isSidePanelOpen && activeTab.type === 'document'} onClose={() => setIsSidePanelOpen(false)} tabId={activeTabId} activeTab={activeTab} papers={papers} />
         </div>
       </div>
 
@@ -3875,17 +4406,32 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     <Icon icon="ph:paperclip" className="w-[18px] h-[18px]" />
                   </button>
 
-                  <button 
-                    onClick={() => handleSendMessage()}
-                    disabled={!chatInput.trim()}
-                    className={`transition-colors p-[6px] rounded-md cursor-pointer ${
-                      chatInput.trim() 
-                        ? 'text-[#f4f4f5] hover:bg-[#2d2d30]' 
-                        : 'text-[#52525b] cursor-not-allowed'
-                    }`}
-                  >
-                    <Icon icon="ph:paper-plane-right" className="w-5 h-5" />
-                  </button>
+                  {isAiTyping ? (
+                    <button 
+                      onClick={() => {
+                        abortControllerRef.current?.abort();
+                        if (assistantMessageIdRef.current) {
+                          updateChatMessages(prev => prev.map(m => m.id === assistantMessageIdRef.current ? { ...m, content: "You made me stop :(" } : m));
+                        }
+                        setIsAiTyping(false);
+                      }}
+                      className="text-[#ef4444] hover:bg-[#2d2d30] transition-colors p-[6px] rounded-md cursor-pointer animate-pulse"
+                    >
+                      <Icon icon="ph:spinner-gap" className="w-5 h-5 animate-spin" />
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => handleSendMessage()}
+                      disabled={!chatInput.trim()}
+                      className={`transition-colors p-[6px] rounded-md cursor-pointer ${
+                        chatInput.trim() 
+                          ? 'text-[#f4f4f5] hover:bg-[#2d2d30]' 
+                          : 'text-[#52525b] cursor-not-allowed'
+                      }`}
+                    >
+                      <Icon icon="ph:paper-plane-right" className="w-5 h-5" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -4095,6 +4641,45 @@ Once you have content, I can help you draft sections, summarize findings, or for
               >
                 Save
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Folder Deletion Confirmation Modal */}
+      {isDeleteFolderModalOpen && folderToDelete && (
+        <div 
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in"
+          onClick={() => setIsDeleteFolderModalOpen(false)}
+        >
+          <div 
+            className="bg-[#1c1c1e] border border-zinc-800 rounded-[20px] w-full max-w-[320px] overflow-hidden shadow-2xl animate-scale-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <h3 className="text-lg font-bold text-white mb-2 text-left">Delete Folder?</h3>
+              <p className="text-zinc-400 text-[13px] leading-normal mb-6 text-left">
+                Are you sure you want to delete <span className="text-zinc-200 font-semibold">"{folderToDelete.name}"</span>? 
+                All documents indexed within this folder will be removed.
+              </p>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setIsDeleteFolderModalOpen(false)}
+                  className="flex-1 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg text-[13px] font-semibold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => {
+                    dbDeleteFolder(folderToDelete.id);
+                    setIsDeleteFolderModalOpen(false);
+                    setFolderToDelete(null);
+                  }}
+                  className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[13px] font-semibold transition-all cursor-pointer"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
         </div>

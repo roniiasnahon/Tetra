@@ -1,0 +1,85 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net - Catch-All Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions for hardened permission logic
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Schema Validation Helpers
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) 
+        && data.uid is string && data.uid.size() <= 128
+        && data.email is string && data.email.size() <= 256;
+    }
+
+    function isValidFolder(data) {
+      return data.keys().hasAll(['id', 'name', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 200
+        && data.createdAt is int;
+    }
+
+    function isValidPaper(data) {
+      return data.keys().hasAll(['title'])
+        && data.title is string && data.title.size() <= 500
+        && (!data.keys().hasAny(['author']) || (data.author is string && data.author.size() <= 4000))
+        && (!data.keys().hasAny(['description']) || (data.description is string && data.description.size() <= 100000))
+        && (!data.keys().hasAny(['url']) || (data.url is string && data.url.size() <= 2048))
+        && (!data.keys().hasAny(['added']) || (data.added is string && data.added.size() <= 128))
+        && (!data.keys().hasAny(['fullTextStatus']) || (data.fullTextStatus is string && data.fullTextStatus.size() <= 128))
+        && (!data.keys().hasAny(['viewed']) || (data.viewed is string && data.viewed.size() <= 128))
+        && (!data.keys().hasAny(['fileType']) || (data.fileType is string && data.fileType.size() <= 128))
+        && (!data.keys().hasAny(['summary']) || (data.summary is string && data.summary.size() <= 100000))
+        && (!data.keys().hasAny(['fileId']) || (data.fileId is string && data.fileId.size() <= 128))
+        && (!data.keys().hasAny(['mimetype']) || (data.mimetype is string && data.mimetype.size() <= 128))
+        && (!data.keys().hasAny(['extractedText']) || (data.extractedText is string && data.extractedText.size() <= 5000000))
+        && (!data.keys().hasAny(['folderId']) || (data.folderId is string && data.folderId.size() <= 128));
+    }
+
+    // Rules for top-level users collection
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming()) && incoming().uid == existing().uid;
+      allow delete: if false; // User deletion is handled through Auth administration
+
+      // Rules for user's subcollections
+      match /folders/{folderId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidFolder(incoming());
+        allow update: if isOwner(userId) && isValidFolder(incoming()) && incoming().id == existing().id;
+        allow delete: if isOwner(userId);
+      }
+
+      match /papers/{paperId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidPaper(incoming());
+        allow update: if isOwner(userId) && isValidPaper(incoming());
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

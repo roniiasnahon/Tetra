@@ -1,0 +1,62 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Authenticated user representation",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The unique user ID" },
+        "email": { "type": "string", "description": "User email address" },
+        "displayName": { "type": "string", "description": "User's preferred display name" },
+        "createdAt": { "type": "integer", "description": "Creation timestamp" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Folder": {
+      "title": "Folder",
+      "description": "Folder container for research materials",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique folder identifier" },
+        "name": { "type": "string", "description": "Display name of the folder" },
+        "createdAt": { "type": "integer", "description": "Creation timestamp" }
+      },
+      "required": ["id", "name", "createdAt"]
+    },
+    "Paper": {
+      "title": "Paper",
+      "description": "Research paper or document item saved in the library",
+      "type": "object",
+      "properties": {
+        "author": { "type": "string", "description": "The authors of the research" },
+        "title": { "type": "string", "description": "Title of the work" },
+        "description": { "type": "string", "description": "Brief description or summary" },
+        "url": { "type": "string", "description": "External paper URL" },
+        "added": { "type": "string", "description": "Formatted date the item was added" },
+        "fullTextStatus": { "type": "string", "description": "Current status of full text extraction" },
+        "viewed": { "type": "string", "description": "Formatted last viewed date" },
+        "fileType": { "type": "string", "description": "File format identification" },
+        "summary": { "type": "string", "description": "Generated or original paper summary" },
+        "fileId": { "type": "string", "description": "Related unique reference storage ID" },
+        "mimetype": { "type": "string", "description": "MIME type description of the resource" },
+        "extractedText": { "type": "string", "description": "Full extracted textual contents" },
+        "folderId": { "type": "string", "description": "ID of the containing folder" }
+      },
+      "required": ["title"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Top-level user profile"
+    },
+    "/users/{userId}/folders/{folderId}": {
+      "schema": "Folder",
+      "description": "Subcollection storing folder metadata"
+    },
+    "/users/{userId}/papers/{paperId}": {
+      "schema": "Paper",
+      "description": "Subcollection storing user-saved academic resources"
+    }
+  }
+}
