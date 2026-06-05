@@ -47,6 +47,19 @@ body {
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
+  .custom-scrollbar-h::-webkit-scrollbar {
+    height: 2px;
+  }
+  .custom-scrollbar-h::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar-h::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 0;
+  }
+  .custom-scrollbar-h:hover::-webkit-scrollbar-thumb {
+    background: #3f3f46;
+  }
 }
 
 @keyframes shimmer {

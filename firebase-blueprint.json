@@ -2,61 +2,99 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "Authenticated user representation",
+      "description": "User profile information.",
       "type": "object",
       "properties": {
-        "uid": { "type": "string", "description": "The unique user ID" },
-        "email": { "type": "string", "description": "User email address" },
-        "displayName": { "type": "string", "description": "User's preferred display name" },
-        "createdAt": { "type": "integer", "description": "Creation timestamp" }
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "createdAt": { "type": "number" }
       },
-      "required": ["uid", "email"]
+      "required": ["uid", "email", "createdAt"]
     },
     "Folder": {
       "title": "Folder",
-      "description": "Folder container for research materials",
+      "description": "Folder metadata for organizing papers.",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Unique folder identifier" },
-        "name": { "type": "string", "description": "Display name of the folder" },
-        "createdAt": { "type": "integer", "description": "Creation timestamp" }
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "number" }
       },
       "required": ["id", "name", "createdAt"]
     },
     "Paper": {
       "title": "Paper",
-      "description": "Research paper or document item saved in the library",
+      "description": "Research paper metadata and status.",
       "type": "object",
       "properties": {
-        "author": { "type": "string", "description": "The authors of the research" },
-        "title": { "type": "string", "description": "Title of the work" },
-        "description": { "type": "string", "description": "Brief description or summary" },
-        "url": { "type": "string", "description": "External paper URL" },
-        "added": { "type": "string", "description": "Formatted date the item was added" },
-        "fullTextStatus": { "type": "string", "description": "Current status of full text extraction" },
-        "viewed": { "type": "string", "description": "Formatted last viewed date" },
-        "fileType": { "type": "string", "description": "File format identification" },
-        "summary": { "type": "string", "description": "Generated or original paper summary" },
-        "fileId": { "type": "string", "description": "Related unique reference storage ID" },
-        "mimetype": { "type": "string", "description": "MIME type description of the resource" },
-        "extractedText": { "type": "string", "description": "Full extracted textual contents" },
-        "folderId": { "type": "string", "description": "ID of the containing folder" }
+        "author": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "url": { "type": "string" },
+        "added": { "type": "string" },
+        "fullTextStatus": { "type": "string" },
+        "viewed": { "type": "string" },
+        "fileType": { "type": "string" },
+        "summary": { "type": "string" },
+        "fileId": { "type": "string" },
+        "mimetype": { "type": "string" },
+        "extractedText": { "type": "string" },
+        "folderId": { "type": "string" }
       },
       "required": ["title"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "Persistent chat history.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "messages": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["title", "messages", "updatedAt"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "Active workspace state.",
+      "type": "object",
+      "properties": {
+        "tabs": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "activeTabId": { "type": "string" },
+        "messages": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      }
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
-      "description": "Top-level user profile"
+      "description": "User profile document."
     },
     "/users/{userId}/folders/{folderId}": {
       "schema": "Folder",
-      "description": "Subcollection storing folder metadata"
+      "description": "User's research folders."
     },
     "/users/{userId}/papers/{paperId}": {
       "schema": "Paper",
-      "description": "Subcollection storing user-saved academic resources"
+      "description": "User's research papers."
+    },
+    "/users/{userId}/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "User's saved chat conversations."
+    },
+    "/users/{userId}/workspace/session": {
+      "schema": "Session",
+      "description": "User's current active workspace session state."
     }
   }
 }

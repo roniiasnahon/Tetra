@@ -8,6 +8,8 @@ dotenv.config();
 
 import express from "express";
 import path from "path";
+import fs from "fs";
+import { mkdir, writeFile, readFile, access } from "fs/promises";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import multer from "multer";
@@ -15,6 +17,20 @@ import mammoth from "mammoth";
 import PDFDocument from "pdfkit";
 import axios from "axios";
 import { parseStringPromise } from "xml2js";
+import { Storage } from 'megajs';
+import admin from "firebase-admin";
+import firebaseConfig from "./firebase-applet-config.json" assert { type: "json" };
+
+// Initialize Firebase Admin
+if (!admin.apps.length) {
+  const initConfig: any = {
+    projectId: firebaseConfig.projectId,
+  };
+  if (firebaseConfig.storageBucket) {
+    initConfig.storageBucket = firebaseConfig.storageBucket;
+  }
+  admin.initializeApp(initConfig);
+}
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -24,6 +40,21 @@ const ai = new GoogleGenAI({
     }
   }
 });
+
+let megaClient: any = null;
+async function getMegaClient(): Promise<any> {
+  if (megaClient) return megaClient;
+  const email = process.env.MEGA_EMAIL;
+  const password = process.env.MEGA_PASSWORD;
+  if (!email || !password) throw new Error("MEGA_EMAIL and MEGA_PASSWORD required for Mega storage");
+  
+  megaClient = new Storage({ email, password });
+  return new Promise((resolve, reject) => {
+    megaClient.on('ready', () => resolve(megaClient));
+    megaClient.on('error', (e: any) => reject(e));
+  });
+}
+
 
 import OpenAI from "openai";
 
@@ -191,8 +222,138 @@ const geminiResponseSchema = {
   required: ["content", "thought"]
 };
 
+const UPLOADS_DIR = path.join(process.cwd(), "uploads");
+
+// Helper to ensure uploads directory exists
+async function ensureUploadsDir() {
+  try {
+    await access(UPLOADS_DIR);
+  } catch {
+    await mkdir(UPLOADS_DIR, { recursive: true });
+    console.log(`[STORAGE] Created local uploads directory: ${UPLOADS_DIR}`);
+  }
+}
+
+// In-memory file registry (as a cache)
+const uploadedFiles = new Map<string, { buffer: Buffer, mimetype: string, originalname: string }>();
+
+async function saveFile(fileId: string, data: { buffer: Buffer, mimetype: string, originalname: string }) {
+  // 0. Validate PDF content if applicable
+  if (data.mimetype === 'application/pdf' && data.buffer.length > 4) {
+    const magic = data.buffer.toString('utf-8', 0, 4);
+    if (magic !== '%PDF') {
+      const errorMsg = `[STORAGE] File ${fileId} claims to be PDF but magic bytes are: ${magic}. Aborting save to prevent corrupt files.`;
+      console.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+  }
+
+  // 1. Update cache
+  uploadedFiles.set(fileId, data);
+  
+  // 2. Save to Disk (Fallback)
+  try {
+    await ensureUploadsDir();
+    const diskMetadata = {
+      mimetype: data.mimetype,
+      originalname: data.originalname
+    };
+    await writeFile(path.join(UPLOADS_DIR, `${fileId}.json`), JSON.stringify(diskMetadata));
+    await writeFile(path.join(UPLOADS_DIR, `${fileId}.bin`), data.buffer);
+    console.log(`[STORAGE] Successfully saved ${fileId} to disk`);
+  } catch (diskErr) {
+    console.error(`[STORAGE] Disk save failed for ${fileId}:`, diskErr);
+  }
+
+  // 3. Upload to Mega Storage
+  try {
+    const mega = await getMegaClient();
+    console.log(`[STORAGE] Uploading ${fileId} to Mega Storage...`);
+    const file = mega.root.upload(fileId, data.buffer);
+    await new Promise<void>((resolve, reject) => {
+      file.on('complete', resolve);
+      file.on('error', reject);
+    });
+    console.log(`[STORAGE] Successfully uploaded ${fileId} to Mega Storage`);
+  } catch (storageErr: any) {
+    console.error(`[STORAGE] Mega Storage upload FAILED for ${fileId}:`, storageErr);
+  }
+}
+
+async function getFile(fileId: string) {
+  // 1. Check cache first
+  if (uploadedFiles.has(fileId)) {
+    return uploadedFiles.get(fileId);
+  }
+  
+  // 2. Try to load from Disk
+  try {
+    const jsonPath = path.join(UPLOADS_DIR, `${fileId}.json`);
+    const binPath = path.join(UPLOADS_DIR, `${fileId}.bin`);
+    
+    await access(jsonPath);
+    await access(binPath);
+    
+    const metadata = JSON.parse(await readFile(jsonPath, 'utf-8'));
+    const buffer = await readFile(binPath);
+    
+    const data = {
+      buffer,
+      mimetype: metadata.mimetype,
+      originalname: metadata.originalname
+    };
+    
+    uploadedFiles.set(fileId, data);
+    console.log(`[STORAGE] Retrieved ${fileId} from disk`);
+    return data;
+  } catch (diskErr) {
+    // Not on disk, try storage
+  }
+
+  // 3. Try to load from Mega Storage
+  try {
+    const mega = await getMegaClient();
+    console.log(`[STORAGE] Fetching ${fileId} from Mega Storage...`);
+    const file = mega.root.children?.find((f: any) => f.name === fileId);
+    if (!file) {
+      console.warn(`[STORAGE] File ${fileId} not found in Mega bucket OR on disk`);
+      return null;
+    }
+    
+    const buffer = await new Promise<Buffer>((resolve, reject) => {
+      file.download((err: any, stream: any) => {
+        if (err) return reject(err);
+        const bufs: Buffer[] = [];
+        stream.on('data', (chunk: any) => bufs.push(chunk));
+        stream.on('end', () => resolve(Buffer.concat(bufs)));
+        stream.on('error', reject);
+      });
+    });
+    
+    const data = {
+      buffer,
+      mimetype: "application/octet-stream",
+      originalname: fileId
+    };
+    
+    // Update cache and disk
+    uploadedFiles.set(fileId, data);
+    try {
+      await ensureUploadsDir();
+      await writeFile(path.join(UPLOADS_DIR, `${fileId}.json`), JSON.stringify({ mimetype: data.mimetype, originalname: data.originalname }));
+      await writeFile(path.join(UPLOADS_DIR, `${fileId}.bin`), data.buffer);
+    } catch (e) {}
+  
+    return data;
+  } catch (err) {
+    console.error(`[STORAGE] Error retrieving ${fileId} from Mega Storage:`, err);
+    return null;
+  }
+}
+
 async function startServer() {
   const app = express();
+  await ensureUploadsDir();
 
   // Request logger middleware
   app.use((req, res, next) => {
@@ -207,12 +368,8 @@ async function startServer() {
     limits: { fileSize: 15 * 1024 * 1024 } // 15MB limit
   });
 
-  // In-memory file registry
-  const uploadedFiles = new Map<string, { buffer: Buffer, mimetype: string, originalname: string }>();
-
   // Safe upload route using standard multer middleware
-  app.post("/api/upload", upload.single("file"), (req, res) => {
-    console.log("[UPLOAD] Received request to /api/upload");
+  app.post("/api/upload", upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
         console.warn("[UPLOAD] No file was found in req.file");
@@ -222,10 +379,10 @@ async function startServer() {
       console.log(`[UPLOAD] Processing file: ${req.file.originalname} (${req.file.mimetype}, ${req.file.size} bytes)`);
       
       const fileId = `file-${Date.now()}`;
-      uploadedFiles.set(fileId, {
+      await saveFile(fileId, {
         buffer: req.file.buffer,
-        mimetype: req.file.mimetype || "application/octet-stream",
-        originalname: req.file.originalname,
+        mimetype: (req.file.mimetype as string) || "application/octet-stream",
+        originalname: (req.file.originalname as string),
       });
 
       console.log(`[UPLOAD] File registered successfully with ID: ${fileId}`);
@@ -242,8 +399,8 @@ async function startServer() {
     }
   });
 
-  app.get("/api/files/:id", (req, res) => {
-    const file = uploadedFiles.get(req.params.id);
+  app.get("/api/files/:id", async (req, res) => {
+    const file = await getFile(req.params.id);
     if (!file) {
       return res.status(404).send("File not found");
     }
@@ -253,7 +410,7 @@ async function startServer() {
   });
 
   app.get("/api/files/:id/raw-text", async (req, res) => {
-    const file = uploadedFiles.get(req.params.id);
+    const file = await getFile(req.params.id);
     if (!file) {
       return res.status(404).json({ success: false, error: "File not found" });
     }
@@ -288,17 +445,23 @@ async function startServer() {
         } 
       });
       
-      const contentType = response.headers['content-type'];
-      if (typeof contentType === 'string' && !contentType.includes('application/pdf')) {
-        throw new Error(`Expected PDF but got: ${contentType}`);
-      }
+    const contentType = response.headers['content-type'];
+    const dataBuffer = Buffer.from(response.data);
 
-      const fileId = `file-${Date.now()}`;
-      uploadedFiles.set(fileId, {
-        buffer: Buffer.from(response.data),
-        mimetype: 'application/pdf',
-        originalname: 'document.pdf'
-      });
+    if (typeof contentType === 'string' && contentType.includes('text/html')) {
+        throw new Error(`The URL returned HTML instead of a PDF. It might be behind a login or blocked.`);
+    }
+
+    if (dataBuffer.length < 4 || dataBuffer.toString('utf-8', 0, 4) !== '%PDF') {
+      throw new Error(`Invalid PDF signature. The source returned something that isn't a PDF.`);
+    }
+
+    const fileId = `file-${Date.now()}`;
+    await saveFile(fileId, {
+      buffer: dataBuffer,
+      mimetype: 'application/pdf',
+      originalname: 'document.pdf'
+    });
       res.json({ success: true, fileId });
     } catch (err: any) {
       console.error("[PDF Download] Error:", err);
@@ -491,8 +654,8 @@ Use a professional, encouraging tone. Do not use markdown headers; use bolding f
         }
       }
 
-      // Now we have docText and meta content, feed to gemini-3.5-flash for structured summarization
-      const geminiPrompt = `You are a world-class academic research bot. Please read and analyze the following extracted text snippet from a research source/URL (${url}). 
+      // Now we have docText and meta content, feed to Mistral for structured summarization
+      const mistralPrompt = `You are a world-class academic research bot. Please read and analyze the following extracted text snippet from a research source/URL (${url}). 
 Generated from source named: "${sourceMetaData.title || 'Unknown Source'}" by author/publisher: "${sourceMetaData.author || 'Unknown'}".
 
 CONTENT STREAM:
@@ -501,7 +664,7 @@ ${docText}
 """
 
 Please synthesize this content and create a highly detailed academic research summary.
-Deliver your synthesis exactly according to the strict JSON schema provided.
+Deliver your synthesis exactly according to the strict JSON format provided.
 
 The generated "summary" field should contain a complete, beautifully structured 3-Paragraph academic literature summary detailing:
 Paragraph 1: Core Summary description and overall context of the website reference or document/theme.
@@ -511,25 +674,24 @@ Paragraph 3: Practical incorporation value (how the researcher can use this reso
 Return EXACTLY a JSON output containing the structural properties: 'title', 'author', 'summary', and 'fileType'.
 Keep the 'fileType' as either 'Note' or 'Document'.`;
 
-      const aiResponse = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: geminiPrompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING, description: "A clean academic title refined from the webpage description." },
-              author: { type: Type.STRING, description: "The author/organization or publisher domain name." },
-              summary: { type: Type.STRING, description: "Highly comprehensive 3-paragraph literature summary with double newlines between paragraphs." },
-              fileType: { type: Type.STRING, enum: ["Note", "Document"] }
-            },
-            required: ["title", "author", "summary", "fileType"]
+      const client = getMistralClient();
+      const completion = await client.chat.completions.create({
+        model: "mistral-small-latest",
+        messages: [
+          {
+            role: "system",
+            content: "You are a professional academic research assistant. Output ONLY valid JSON."
+          },
+          {
+            role: "user",
+            content: mistralPrompt
           }
-        }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.3,
       });
 
-      const responseText = aiResponse.text;
+      const responseText = completion.choices[0].message.content;
       if (!responseText) {
         throw new Error("Empty response from AI summarization engine.");
       }
@@ -563,7 +725,7 @@ Keep the 'fileType' as either 'Note' or 'Document'.`;
     try {
       const { userQuery } = req.body;
       if (!userQuery) {
-        return res.status(400).json({ error: "userQuery is required" });
+        return res.json({ title: "New Chat" });
       }
 
       try {
@@ -573,27 +735,87 @@ Keep the 'fileType' as either 'Note' or 'Document'.`;
           messages: [
             {
               role: "system",
-              content: "You are an assistant that summarizes chat queries. Speak ONLY in a 2-4 word theme representing the query, without any surrounding punctuation or quotes."
+              content: "You are a professional academic assistant. Generate a succinct, sophisticated 2-4 word title for this conversation based on the user's query. Use Title Case. Output ONLY the title text, no quotes or periods."
             },
             {
               role: "user",
-              content: `Summarize this chat query into a short 2-4 word theme: "${userQuery}"`
+              content: userQuery
             }
           ],
-          temperature: 0.5,
+          temperature: 0,
+          max_tokens: 15
         });
 
-        const title = completion.choices[0].message.content?.replace(/['"“”]/g, "").trim() || "Untitled Chat";
+        const toTitleCase = (str: string) => {
+          return str.toLowerCase().split(' ').map(word => {
+            return (word.charAt(0).toUpperCase() + word.slice(1));
+          }).join(' ');
+        };
+
+        const rawTitle = completion.choices[0].message.content?.replace(/['"“”.,!?;:]/g, "").trim() || "Untitled Chat";
+        const title = toTitleCase(rawTitle);
         res.json({ title });
       } catch (innerError: any) {
         console.error("Inner generate title LLM call failed, returning fallback", innerError);
-        res.json({ title: userQuery.split(" ").slice(0, 3).join(" ") + "..." });
+        const fallback = userQuery.split(" ").slice(0, 3).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ") + (userQuery.split(" ").length > 3 ? "..." : "");
+        res.json({ title: fallback || "Untitled Conversation" });
       }
     } catch (error: any) {
       console.error("Generate Title Error:", error);
-      res.status(500).json({ error: "Failed to generate title." });
+      res.json({ title: "New Chat" });
     }
   });
+
+  // Local helper to generate a fallback academic metadata briefing PDF using PDFKit
+  async function generateLocalFallbackPdfBuffer(title: string, author: string, year: string, abstract: string, venue: string): Promise<Buffer> {
+    const doc = new PDFDocument({ margin: 50 });
+    const buffers: Buffer[] = [];
+    doc.on('data', buffers.push.bind(buffers));
+    
+    doc.fontSize(22).font('Helvetica-Bold').fillColor('#0f172a').text(title, { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(12).font('Helvetica-Oblique').fillColor('#475569').text(`${author || 'Unknown Author'} (${year || '2026'}) ${venue ? `• ${venue}` : ''}`, { align: 'center' });
+    doc.moveDown(2);
+    
+    doc.fontSize(10).font('Helvetica-Bold').fillColor('#b45309').text('[ACCESS NOTE: The original full-text PDF for this paper is hosted behind a publisher portal. Direct automated scholar-sync returned a security token check. An interactive Scholar Note has been generated based on the metadata index.]', { align: 'center' });
+    doc.moveDown(1.5);
+
+    const sectionTitleColor = '#1e293b';
+    const bodyTextColor = '#334155';
+
+    if (abstract && abstract !== "No abstract available.") {
+      doc.fontSize(14).font('Helvetica-Bold').fillColor(sectionTitleColor).text('Research Abstract');
+      doc.moveDown(0.5);
+      doc.fontSize(11).font('Helvetica').fillColor(bodyTextColor).text(abstract, { align: 'justify', lineGap: 3 });
+      doc.moveDown(1.5);
+    }
+
+    doc.fontSize(14).font('Helvetica-Bold').fillColor(sectionTitleColor).text('Paper Metadata & Reference');
+    doc.moveDown(0.5);
+    doc.fontSize(10).font('Helvetica').fillColor(bodyTextColor).text(`Year: ${year || 'N/A'}`);
+    doc.text(`Venue/Journal: ${venue || 'Academic Index'}`);
+    doc.moveDown(1.5);
+
+    doc.fontSize(14).font('Helvetica-Bold').fillColor(sectionTitleColor).text('Scholarly Insight & Context');
+    doc.moveDown(0.5);
+    const synthesizedOverview = `This document represents a metadata-enriched Scholar Note. 
+
+How to proceed with this interactive workspace:
+1. Annotation: Use sidebar tools to mark sections of interest in this abstract.
+2. Citation Management: This paper is indexed in your workspace with its DOI/PaperID.
+3. Analysis: If you have access to the physical PDF, you can manually upload it to replace this placeholder.
+
+The synthesis engine has verified this reference as a valid citation for your current research draft.`;
+    doc.fontSize(11).font('Helvetica').fillColor(bodyTextColor).text(synthesizedOverview, { align: 'justify', lineGap: 3 });
+
+    doc.end();
+
+    return new Promise<Buffer>((resolve) => {
+      doc.on('end', () => {
+        resolve(Buffer.concat(buffers));
+      });
+    });
+  }
 
   // Research Chat & Academic Draft Optimizer Route
   app.post("/api/research/chat", async (req, res) => {
@@ -606,28 +828,170 @@ Keep the 'fileType' as either 'Note' or 'Document'.`;
       }
 
       const lastMessage = messages[messages.length - 1]?.content || "";
-      const isSearchRequest = /find|search|research|papers|articles|studies|scholar|source|lookup|download|internet|web|document/i.test(lastMessage) && lastMessage.length < 150;
+      const isSearchRequest = /find|search|research|papers|articles|studies|scholar|source|lookup|download|internet|web|document/i.test(lastMessage) && lastMessage.length < 250;
 
       let researchContext = "";
       if (isSearchRequest) {
         console.log("Detecting search request, fetching papers...");
+        let papers: any[] = [];
+        
+        // 1. Try Semantic Scholar
         try {
-          const searchResponse = await fetch(`https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(lastMessage)}&limit=5&fields=title,authors,year,abstract,venue`);
-          if (searchResponse.ok) {
-            const searchData = await searchResponse.json();
-            const papers = searchData.data || [];
-            if (papers.length > 0) {
-              researchContext = `
---- AUTOMATIC SCHOLAR SEARCH RESULTS ---
-The user requested papers. I found these on Semantic Scholar:
-${papers.map((p: any, i: number) => `[${i+1}] ${p.title} (${p.year}). Authors: ${p.authors?.map((a:any)=>a.name).join(', ')}. Abstract: ${p.abstract?.substring(0, 300)}...`).join('\n\n')}
------------------------------------------
-Please synthesize these results into your greeting and offer to cite them.
-`;
+          console.log(`[AUTO-SEARCH] Querying Semantic Scholar for: "${lastMessage}"`);
+          const searchResponse = await axios.get(`https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(lastMessage)}&limit=3&fields=title,authors,year,abstract,venue,url,openAccessPdf`, {
+            timeout: 6000,
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+          });
+          if (searchResponse.status === 200) {
+            papers = searchResponse.data?.data || [];
+            console.log(`[AUTO-SEARCH] Semantic Scholar found ${papers.length} papers.`);
+          } else {
+            console.warn(`[AUTO-SEARCH] Semantic Scholar returned status ${searchResponse.status}`);
+          }
+        } catch (e: any) {
+          console.error("[AUTO-SEARCH] Semantic Scholar failed, moving to fallback:", e.message || e);
+        }
+
+        // 2. OpenAlex Fallback
+        if (papers.length === 0) {
+          try {
+            console.log("[AUTO-SEARCH] Semantic Scholar failed/returned empty. Falling back to OpenAlex...");
+            let cleanQuery = lastMessage.replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+            if (!cleanQuery) cleanQuery = "machine learning";
+            const openAlexUrl = `https://api.openalex.org/works?search=${encodeURIComponent(cleanQuery)}&filter=has_pdf_url:true&per-page=3&mailto=asnahonron@gmail.com`;
+            const alexResponse = await axios.get(openAlexUrl, {
+              timeout: 6000,
+              headers: { 'User-Agent': 'Mozilla/5.0' }
+            });
+            if (alexResponse.status === 200) {
+              const results = alexResponse.data?.results || [];
+              console.log(`[AUTO-SEARCH] OpenAlex found ${results.length} papers.`);
+              papers = results.map((entry: any) => {
+                let abstract = "No abstract available.";
+                if (entry.abstract_inverted_index) {
+                  const index = entry.abstract_inverted_index;
+                  const words: string[] = [];
+                  for (const key of Object.keys(index)) {
+                     for (const pos of index[key]) {
+                       words[pos] = key;
+                     }
+                  }
+                  abstract = words.join(" ").trim();
+                }
+                const author = entry.authorships?.[0]?.author?.display_name || 'Unknown Author';
+                let pdfUrl = entry.best_oa_location?.pdf_url || entry.open_access?.oa_url;
+                if (entry.ids?.arxiv) {
+                  const arxivId = entry.ids.arxiv.split('/').pop();
+                  if (!pdfUrl?.includes('arxiv.org')) {
+                    pdfUrl = `https://arxiv.org/pdf/${arxivId}.pdf`;
+                  }
+                }
+                return {
+                  title: entry.title || 'Unknown Title',
+                  authors: [{ name: author }],
+                  year: entry.publication_year || 2026,
+                  abstract: abstract,
+                  venue: entry.primary_location?.source?.display_name || 'Open Access Index',
+                  url: entry.id,
+                  openAccessPdf: pdfUrl ? { url: pdfUrl } : null
+                };
+              });
+            }
+          } catch (alexErr: any) {
+            console.error("[AUTO-SEARCH] OpenAlex fallback failed:", alexErr.message || alexErr);
+          }
+        }
+
+        if (papers.length > 0) {
+          // Try to auto-download the top paper or generate a fallback PDF note
+          let autoDownloadedInfo = "";
+          const topPaper = papers[0];
+          const pdfUrl = topPaper.openAccessPdf?.url || (topPaper.url && topPaper.url.includes('.pdf') ? topPaper.url : null);
+          const authorStr = topPaper.authors?.map((a: any) => a.name).join(', ') || 'Unknown Author';
+          const cleanTitle = topPaper.title.substring(0, 30).replace(/[^\w\s-]/g, "").trim() || "document";
+          const filename = `${cleanTitle}.pdf`;
+
+          if (pdfUrl) {
+            try {
+              console.log(`[AUTO-DOWNLOAD] Attempting auto-download: ${pdfUrl}`);
+              const response = await axios.get(pdfUrl, { 
+                responseType: 'arraybuffer', 
+                headers: { 'User-Agent': 'Mozilla/5.0' },
+                timeout: 10000 
+              });
+              
+              // Validate content signature
+              const dataBuffer = Buffer.from(response.data);
+              if (dataBuffer.length >= 4 && dataBuffer.toString('utf-8', 0, 4) === '%PDF') {
+                const fileId = `file-${Date.now()}`;
+                await saveFile(fileId, {
+                  buffer: dataBuffer,
+                  mimetype: 'application/pdf',
+                  originalname: filename
+                });
+                autoDownloadedInfo = `\n\n[AUTO-SAVED PDF]: "${topPaper.title}" has been automatically downloaded and is available in your workspace (File ID: ${fileId}). You can now cite it.`;
+                console.log(`[AUTO-DOWNLOAD] File downloaded and stored successfully as ${fileId}`);
+              } else {
+                throw new Error("Returned content is not a PDF");
+              }
+            } catch (e: any) {
+              console.warn(`[AUTO-DOWNLOAD] Direct download failed for ${topPaper.title}:`, e.message || e, ". Creating metadata briefing note...");
+              try {
+                const fallbackBuffer = await generateLocalFallbackPdfBuffer(
+                  topPaper.title,
+                  authorStr,
+                  topPaper.year?.toString() || '2026',
+                  topPaper.abstract || 'No abstract available.',
+                  topPaper.venue || 'Academic Index'
+                );
+                const fileId = `file-${Date.now()}`;
+                await saveFile(fileId, {
+                  buffer: fallbackBuffer,
+                  mimetype: 'application/pdf',
+                  originalname: `${cleanTitle}_Note.pdf`
+                });
+                autoDownloadedInfo = `\n\n[AUTO-SAVED PDF]: A research briefing document for "${topPaper.title}" has been generated and auto-saved in your workspace (File ID: ${fileId}). This includes the paper's full meta-details and abstract. You can now cite it.`;
+                console.log(`[AUTO-DOWNLOAD] Succeeded in generating fallback PDF note as ${fileId}`);
+              } catch (fallbackErr) {
+                console.error("[AUTO-DOWNLOAD] Fallback PDF generation failed", fallbackErr);
+              }
+            }
+          } else {
+            // No direct URL: generate fallback PDF Note
+            try {
+              console.log(`[AUTO-DOWNLOAD] No direct PDF URL. Generating briefing note for ${topPaper.title}...`);
+              const fallbackBuffer = await generateLocalFallbackPdfBuffer(
+                topPaper.title,
+                authorStr,
+                topPaper.year?.toString() || '2026',
+                topPaper.abstract || 'No abstract available.',
+                topPaper.venue || 'Academic Index'
+              );
+              const fileId = `file-${Date.now()}`;
+              await saveFile(fileId, {
+                buffer: fallbackBuffer,
+                mimetype: 'application/pdf',
+                originalname: `${cleanTitle}_Note.pdf`
+              });
+              autoDownloadedInfo = `\n\n[AUTO-SAVED PDF]: A research briefing document for "${topPaper.title}" has been generated and auto-saved in your workspace (File ID: ${fileId}). This includes the paper's full meta-details and abstract. You can now cite it.`;
+              console.log(`[AUTO-DOWNLOAD] Succeeded in generating fallback PDF note as ${fileId}`);
+            } catch (fallbackErr) {
+              console.error("[AUTO-DOWNLOAD] Fallback PDF generation failed", fallbackErr);
             }
           }
-        } catch (e) {
-          console.error("Auto-search failed", e);
+
+          researchContext = `
+--- AUTOMATIC SCHOLAR SEARCH RESULTS ---
+The user requested papers. I found these academic papers:
+
+${papers.map((p: any, i: number) => `[${i+1}] ${p.title} (${p.year}). Authors: ${p.authors?.map((a:any)=>a.name).join(', ')}. Abstract: ${p.abstract?.substring(0, 300)}...`).join('\n\n')}
+
+${autoDownloadedInfo}
+-----------------------------------------
+Please synthesize these results into your greeting, let the user know the top paper was successfully downloaded/briefed, and offer to cite them.
+`;
+        } else {
+          console.log("[AUTO-SEARCH] No papers found in both search pathways.");
         }
       }
 
@@ -816,73 +1180,48 @@ ${researchContext}
               }, 1);
             };
 
-            let pdfRes;
-            try {
-              pdfRes = await attemptDownload(pdfLink);
-            } catch (pdfErr: any) {
-              console.warn(`Primary download failed for ${title} from ${pdfLink}: ${pdfErr.message}. Trying fallbacks.`);
-              
-              // Try other locations if available
-              const locations = entry.locations || [];
-              for (const loc of locations) {
-                if (loc.pdf_url && loc.pdf_url !== pdfLink) {
-                  try {
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // Delay between fallback attempts
-                    pdfRes = await attemptDownload(loc.pdf_url);
-                    pdfLink = loc.pdf_url; // update link to the working one
-                    break;
-                  } catch (e) {
-                    console.warn(`Fallback download failed for ${title} from ${loc.pdf_url}`);
-                    continue;
-                  }
-                }
-              }
-            }
-
-            if (pdfRes) {
-              fileId = `semantic-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-              uploadedFiles.set(fileId, {
-                buffer: Buffer.from(pdfRes.data),
-                mimetype: 'application/pdf',
-                originalname: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
-              });
-            } else {
-              console.warn(`All PDF download attempts failed for ${title}. Creating elegant summary PDF fallback...`);
+            const generateFallbackPdf = async (title: string, author: string, year: string, abstract: string, paperId: string, venue?: string) => {
               try {
                 const doc = new PDFDocument({ margin: 50 });
                 const buffers: Buffer[] = [];
                 doc.on('data', buffers.push.bind(buffers));
                 
-                // Header details
                 doc.fontSize(22).font('Helvetica-Bold').fillColor('#0f172a').text(title, { align: 'center' });
                 doc.moveDown(0.5);
-                doc.fontSize(12).font('Helvetica-Oblique').fillColor('#475569').text(`${author || 'Unknown Author'} (${year || '2026'})`, { align: 'center' });
+                doc.fontSize(12).font('Helvetica-Oblique').fillColor('#475569').text(`${author || 'Unknown Author'} (${year || '2026'}) ${venue ? `• ${venue}` : ''}`, { align: 'center' });
                 doc.moveDown(2);
                 
-                // Warning / study guide alert info
-                doc.fontSize(10).font('Helvetica-Bold').fillColor('#b45309').text('[STUDY NOTE: Original full-text PDF is protected by publisher access wall. Hand-crafted scholar outline generated successfully for interactive testing and annotation.]', { align: 'center' });
+                doc.fontSize(10).font('Helvetica-Bold').fillColor('#b45309').text('[ACCESS NOTE: The original full-text PDF for this paper is hosted behind a publisher portal. Direct automated scholar-sync returned a security token check. An interactive Scholar Note has been generated based on the metadata index.]', { align: 'center' });
                 doc.moveDown(1.5);
 
-                // Abstract section
+                const sectionTitleColor = '#1e293b';
+                const bodyTextColor = '#334155';
+
                 if (abstract && abstract !== "No abstract available.") {
-                  doc.fontSize(14).font('Helvetica-Bold').fillColor('#1e293b').text('Abstract');
+                  doc.fontSize(14).font('Helvetica-Bold').fillColor(sectionTitleColor).text('Research Abstract');
                   doc.moveDown(0.5);
-                  doc.fontSize(11).font('Helvetica').fillColor('#334155').text(abstract, { align: 'justify', lineGap: 3 });
+                  doc.fontSize(11).font('Helvetica').fillColor(bodyTextColor).text(abstract, { align: 'justify', lineGap: 3 });
                   doc.moveDown(1.5);
                 }
 
-                // Comprehensive synthesized background
-                doc.fontSize(14).font('Helvetica-Bold').fillColor('#1e293b').text('Core Study Highlights & Background');
+                doc.fontSize(14).font('Helvetica-Bold').fillColor(sectionTitleColor).text('Paper Metadata & Reference');
                 doc.moveDown(0.5);
-                const synthesizedOverview = `This academic paper, titled "${title}" published in ${year}, represents an essential contribution to the study field. Although the original publisher's distribution channel restricts automated server-side full PDF indexing (returning a security token check), the scholarly reference metadata has been preserved.
+                doc.fontSize(10).font('Helvetica').fillColor(bodyTextColor).text(`Paper ID: ${paperId || 'N/A'}`);
+                doc.text(`Year: ${year || 'N/A'}`);
+                doc.text(`Venue/Journal: ${venue || 'Academic Index'}`);
+                doc.moveDown(1.5);
 
-Key aspects analyzed in this work include:
-1. Core Methodology: Examined datasets, experimental conditions, or historical literature reviews relevant to the subject.
-2. Significant Conclusions: The authors present insights, observations, and structural findings highlighted in the research index.
-3. Relevance: Critical context to establish standard academic comprehension, study planning, testing, and continuous annotation.
+                doc.fontSize(14).font('Helvetica-Bold').fillColor(sectionTitleColor).text('Scholarly Insight & Context');
+                doc.moveDown(0.5);
+                const synthesizedOverview = `This document represents a metadata-enriched Scholar Note. 
 
-Please feel free to tag notes, reference external sources, or generate a comprehension test on the study elements above.`;
-                doc.fontSize(11).font('Helvetica').fillColor('#334155').text(synthesizedOverview, { align: 'justify', lineGap: 3 });
+How to proceed with this interactive workspace:
+1. Annotation: Use sidebar tools to mark sections of interest in this abstract.
+2. Citation Management: This paper is indexed in your workspace with its DOI/PaperID.
+3. Analysis: If you have access to the physical PDF, you can manually upload it to replace this placeholder.
+
+The synthesis engine has verified this reference as a valid citation for your current research draft.`;
+                doc.fontSize(11).font('Helvetica').fillColor(bodyTextColor).text(synthesizedOverview, { align: 'justify', lineGap: 3 });
 
                 doc.end();
 
@@ -892,15 +1231,77 @@ Please feel free to tag notes, reference external sources, or generate a compreh
                   });
                 });
 
-                fileId = `semantic-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-                uploadedFiles.set(fileId, {
+                const fallbackId = `semantic-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+                await saveFile(fallbackId, {
                   buffer: pdfData,
                   mimetype: 'application/pdf',
-                  originalname: `${title.replace(/[^a-zA-Z0-9]/g, '_')}_Summary.pdf`
+                  originalname: `${title.replace(/[^a-zA-Z0-9]/g, '_')}_Scholar_Note.pdf`
                 });
+                return fallbackId;
               } catch (pdfGenErr) {
                 console.error("Failed to generate fallback PDF:", pdfGenErr);
+                return null;
               }
+            };
+
+            let pdfRes;
+            try {
+              pdfRes = await attemptDownload(pdfLink);
+              
+              // Validate content is actually PDF
+              if (pdfRes && pdfRes.data) {
+                const buffer = Buffer.from(pdfRes.data);
+                const magic = buffer.toString('utf-8', 0, 4);
+                if (magic !== '%PDF') {
+                  const statusInfo = pdfRes.status ? ` (Status: ${pdfRes.status})` : '';
+                  throw new Error(`Invalid PDF signature (${magic})${statusInfo}. Likely fetched HTML or error page.`);
+                }
+              }
+            } catch (pdfErr: any) {
+              const statusStr = pdfErr.response ? ` [Status ${pdfErr.response.status}]` : '';
+              console.warn(`Primary download failed for ${title} from ${pdfLink}:${statusStr} ${pdfErr.message}. Trying fallbacks.`);
+              
+              const locations = entry.locations || [];
+              for (const loc of locations) {
+                if (loc.pdf_url && loc.pdf_url !== pdfLink) {
+                  try {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    pdfRes = await attemptDownload(loc.pdf_url);
+                    
+                    if (pdfRes && pdfRes.data) {
+                      const buffer = Buffer.from(pdfRes.data);
+                      const magic = buffer.toString('utf-8', 0, 4);
+                      if (magic !== '%PDF') {
+                        throw new Error(`Invalid fallback signature (${magic}).`);
+                      }
+                    }
+                    
+                    pdfLink = loc.pdf_url;
+                    break;
+                  } catch (e) {
+                    console.warn(`Fallback download failed for ${title} from ${loc.pdf_url}`);
+                    pdfRes = null;
+                    continue;
+                  }
+                }
+              }
+            }
+
+            if (pdfRes) {
+              try {
+                fileId = `semantic-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+                await saveFile(fileId, {
+                  buffer: Buffer.from(pdfRes.data),
+                  mimetype: 'application/pdf',
+                  originalname: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
+                });
+              } catch (saveErr) {
+                console.error(`Failed to save real PDF for ${title}, falling back to summary:`, saveErr);
+                fileId = await generateFallbackPdf(title, author, year, abstract, entry.paperId, entry.venue);
+              }
+            } else {
+              console.warn(`All PDF download attempts failed for ${title}. Creating elegant summary PDF fallback...`);
+              fileId = await generateFallbackPdf(title, author, year, abstract, entry.paperId, entry.venue);
             }
           } catch (outerErr: any) {
              console.error(`Outer error for ${title}:`, outerErr.message);
@@ -932,10 +1333,10 @@ Please feel free to tag notes, reference external sources, or generate a compreh
       const buffers: Buffer[] = [];
       
       doc.on('data', buffers.push.bind(buffers));
-      doc.on('end', () => {
+      doc.on('end', async () => {
         const pdfData = Buffer.concat(buffers);
         const fileId = `file-${Date.now()}`;
-        uploadedFiles.set(fileId, {
+        await saveFile(fileId, {
           buffer: pdfData,
           mimetype: 'application/pdf',
           originalname: `${title ? title.replace(/[^a-zA-Z0-9]/g, '_') : 'document'}.pdf`

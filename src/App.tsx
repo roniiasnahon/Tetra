@@ -204,7 +204,7 @@ const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationClick, is
           return <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>;
         },
         table: ({ children }) => (
-          <div className="overflow-x-auto my-4 scrollbar-hide">
+          <div className="overflow-x-auto my-4 custom-scrollbar-h">
             <table className="w-full border-collapse border border-zinc-800 text-[12px] leading-snug">
               {children}
             </table>
@@ -396,8 +396,18 @@ const extractTextFromPdf = async (url: string): Promise<string> => {
       pdfUrlToLoad = `/api/files/${data.fileId}`;
     }
 
+    const response = await fetch(pdfUrlToLoad);
+    if (!response.ok) throw new Error(`Failed to fetch file: ${response.statusText}`);
+    const arrayBuffer = await response.arrayBuffer();
+    
+    // Quick validation of PDF header
+    const header = new TextDecoder().decode(new Uint8Array(arrayBuffer.slice(0, 4)));
+    if (header !== '%PDF') {
+      throw new Error(`Invalid PDF structure: the file starts with "${header}" instead of "%PDF". It might be a protected page or an error message.`);
+    }
+
     const loadingTask = pdfjs.getDocument({
-      url: pdfUrlToLoad,
+      data: arrayBuffer,
       cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
       cMapPacked: true,
     });
@@ -432,15 +442,21 @@ export default function App() {
     { id: 'initial-home', type: 'home', title: 'Home' }
   ]);
   const [activeTabId, setActiveTabId] = useState('initial-home');
+  const [activeAssistantTabId, setActiveAssistantTabId] = useState<string | null>(null);
   const ignoreNextTabSyncRef = useRef(false);
   const loadedTabIdRef = useRef<string>('initial-home');
   const activeTabIdRef = useRef(activeTabId);
+  const activeAssistantTabIdRef = useRef(activeAssistantTabId);
   const tabsRef = useRef(tabs);
   const activeTab = React.useMemo(() => tabs.find(t => t.id === activeTabId) || tabs[0], [tabs, activeTabId]);
 
   useEffect(() => {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
+
+  useEffect(() => {
+    activeAssistantTabIdRef.current = activeAssistantTabId;
+  }, [activeAssistantTabId]);
 
   useEffect(() => {
     tabsRef.current = tabs;
@@ -474,6 +490,63 @@ export default function App() {
   const [isHomeCreateDropdownOpen, setIsHomeCreateDropdownOpen] = useState(false);
   const [isCreateDropdownOpen, setIsCreateDropdownOpen] = useState(false);
   const [isChatDropdownOpen, setIsChatDropdownOpen] = useState(false);
+  const [isChatMenuOpen, setIsChatMenuOpen] = useState(false);
+  const [isRenamingChat, setIsRenamingChat] = useState<string | null>(null);
+  const [renamingChatText, setRenamingChatText] = useState("");
+
+  const handleRenameChat = (e: React.KeyboardEvent | React.FocusEvent) => {
+    if ('key' in e && e.key !== 'Enter' && e.key !== 'Escape') return;
+    
+    if (isRenamingChat) {
+      if (!('key' in e) || e.key === 'Enter') {
+        const newTitle = renamingChatText.trim() || 'Untitled';
+        setTabs(tabs.map(t => t.id === isRenamingChat ? { ...t, title: newTitle } : t));
+      }
+      setIsRenamingChat(null);
+    }
+  };
+
+  const deleteTab = async (id: string) => {
+    if (tabs.length <= 1 && tabs[0].id === id) {
+      const newId = `chat-${Date.now()}`;
+      setTabs([{ id: newId, type: 'chat', title: 'Untitled' }]);
+      setActiveTabId(newId);
+      setActiveAssistantTabId(newId);
+      setMessages([]);
+    } else {
+      const updatedTabs = tabs.filter(t => t.id !== id);
+      const tabToDeleteIndex = tabs.findIndex(t => t.id === id);
+      setTabs(updatedTabs);
+      
+      if (activeTabId === id) {
+        const nextTab = updatedTabs[tabToDeleteIndex] || updatedTabs[tabToDeleteIndex - 1] || updatedTabs[0];
+        setActiveTabId(nextTab.id);
+      }
+      
+      if (activeAssistantTabId === id) {
+        const nextAssistantTab = updatedTabs.find(t => t.type === 'chat');
+        if (nextAssistantTab) {
+          setActiveAssistantTabId(nextAssistantTab.id);
+          setMessages(nextAssistantTab.messages || []);
+        } else {
+          setActiveAssistantTabId(null);
+          setMessages([]);
+        }
+      }
+    }
+
+    if (currentUser) {
+      const path = `users/${currentUser.uid}/chats/${id}`;
+      try {
+        await deleteDoc(doc(db, 'users', currentUser.uid, 'chats', id));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.DELETE, path);
+      }
+    }
+    setIsChatMenuOpen(false);
+    setIsAssistantChatDropdownOpen(false);
+  };
+  const [isAssistantChatDropdownOpen, setIsAssistantChatDropdownOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [pdfNumPages, setPdfNumPages] = useState<number | null>(null);
@@ -677,7 +750,9 @@ export default function App() {
 
   // Firebase Authentication & Authorization State
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const currentUserIdRef = useRef<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isSessionLoaded, setIsSessionLoaded] = useState(false);
   const [isCloudMenuOpen, setIsCloudMenuOpen] = useState(false);
 
   // Folder Management State
@@ -787,6 +862,7 @@ export default function App() {
     
     const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
       setCurrentUser(user);
+      currentUserIdRef.current = user ? user.uid : null;
       setIsAuthLoading(false);
       
       if (user) {
@@ -801,6 +877,27 @@ export default function App() {
           }, { merge: true });
         } catch (error) {
           console.error("Failed saving user profile:", error);
+        }
+
+        // Load workspace session state
+        try {
+          const sessionDoc = await getDocFromServer(doc(db, 'users', user.uid, 'workspace', 'session'));
+          if (sessionDoc.exists()) {
+            const data = sessionDoc.data();
+            if (data.tabs && Array.isArray(data.tabs) && data.tabs.length > 0) {
+              setTabs(data.tabs);
+            }
+            if (data.activeTabId) {
+              setActiveTabId(data.activeTabId);
+            }
+            if (data.messages && Array.isArray(data.messages)) {
+                setMessages(data.messages);
+            }
+          }
+        } catch (error) {
+          console.error("Failed loading workspace session:", error);
+        } finally {
+          setIsSessionLoaded(true);
         }
 
         // Test database connection
@@ -863,9 +960,32 @@ export default function App() {
           handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/papers`);
         });
 
+        // Subscribe to all chats for persistence
+        const chatsColRef = collection(db, 'users', user.uid, 'chats');
+        const unsubChats = onSnapshot(chatsColRef, (snapshot) => {
+          const loadedChats: Tab[] = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            loadedChats.push({
+              id: doc.id,
+              type: 'chat',
+              title: data.title || 'Untitled',
+              messages: data.messages || []
+            });
+          });
+          setAllChats(loadedChats.sort((a, b) => {
+              const aLast = a.messages && a.messages.length > 0 ? a.messages[a.messages.length - 1].timestamp : 0;
+              const bLast = b.messages && b.messages.length > 0 ? b.messages[b.messages.length - 1].timestamp : 0;
+              return bLast - aLast;
+          }));
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/chats`);
+        });
+
         unsubscribeUser = () => {
           unsubFolders();
           unsubPapers();
+          unsubChats();
         };
       } else {
         unsubscribeUser();
@@ -873,6 +993,14 @@ export default function App() {
           { id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 }
         ]);
         setPapers([]);
+        setTabs([{ id: 'initial-home', type: 'home', title: 'Home' }]);
+        setActiveTabId('initial-home');
+        setMessages([]);
+        setActiveViewingPaper(null);
+        setDocumentContent('');
+        setDocumentTitle('');
+        setSearchResults([]);
+        setIsSessionLoaded(false);
       }
     });
 
@@ -954,6 +1082,7 @@ export default function App() {
   };
 
   // AI Assistant Chat Messages
+  const [allChats, setAllChats] = useState<Tab[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
@@ -962,11 +1091,26 @@ export default function App() {
   const [isChatSuggestionsDismissed, setIsChatSuggestionsDismissed] = useState(false);
   const [selectedFileLabel, setSelectedFileLabel] = useState<string | null>(null);
 
+  const saveChatToLibrary = async (targetUserId: string, chatTab: Tab) => {
+    if (!chatTab || chatTab.type !== 'chat') return;
+    const path = `users/${targetUserId}/chats/${chatTab.id}`;
+    try {
+      const chatDocRef = doc(db, 'users', targetUserId, 'chats', chatTab.id);
+      await setDoc(chatDocRef, {
+        title: chatTab.title || 'Untitled',
+        messages: chatTab.messages || [],
+        updatedAt: Date.now()
+      }, { merge: true });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  };
+
   const updateChatMessages = (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]), skipTabsUpdate = true) => {
     setMessages(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       if (!skipTabsUpdate) {
-        let targetTabId = activeTabIdRef.current;
+        let targetTabId = activeAssistantTabIdRef.current || activeTabIdRef.current;
         const currentTab = tabsRef.current.find(t => t.id === targetTabId);
         if (!currentTab || currentTab.type !== 'chat') {
           const firstChat = tabsRef.current.find(t => t.type === 'chat');
@@ -974,7 +1118,15 @@ export default function App() {
             targetTabId = firstChat.id;
           }
         }
-        setTabs(prevTabs => prevTabs.map(t => t.id === targetTabId ? { ...t, messages: next } : t));
+        
+        const updatedTabs = tabsRef.current.map(t => t.id === targetTabId ? { ...t, messages: next } : t);
+        setTabs(updatedTabs);
+
+        // Also save to persistent chat library
+        if (currentUser) {
+          const chatTab = updatedTabs.find(t => t.id === targetTabId);
+          if (chatTab) saveChatToLibrary(currentUser.uid, chatTab);
+        }
       }
       return next;
     });
@@ -988,6 +1140,25 @@ export default function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isAiTyping]);
+
+  // Sync workspace session to Firestore periodically when changes occur
+  useEffect(() => {
+    if (isSessionLoaded && currentUser && tabs && tabs.length > 0) {
+      const handler = setTimeout(() => {
+        const sessionRef = doc(db, 'users', currentUser.uid, 'workspace', 'session');
+        // Strip undefined values which Firebase rejects
+        const cleanTabs = JSON.parse(JSON.stringify(tabs));
+        const cleanMessages = JSON.parse(JSON.stringify(messages));
+        
+        setDoc(sessionRef, {
+          tabs: cleanTabs,
+          activeTabId,
+          messages: cleanMessages
+        }, { merge: true }).catch(err => console.error("Workspace sync failed:", err));
+      }, 3000);
+      return () => clearTimeout(handler);
+    }
+  }, [tabs, activeTabId, messages, currentUser, isSessionLoaded]);
 
   // Word count helper
   const wordCount = (() => {
@@ -1021,6 +1192,7 @@ export default function App() {
       }
     } else if (targetTab && targetTab.type === 'chat') {
       setMessages(targetTab.messages || []);
+      setActiveAssistantTabId(targetTab.id);
     } else {
       if (activeTabId !== 'initial-home') {
         setDocumentTitle('Untitled');
@@ -1187,7 +1359,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
       role: 'user',
       content: textToSend,
       timestamp: Date.now(),
-      isHidden: options.isHidden
+      isHidden: options.isHidden ?? false
     };
 
     updateChatMessages(prev => [...prev, userMessage], false);
@@ -1199,6 +1371,32 @@ Once you have content, I can help you draft sections, summarize findings, or for
     abortControllerRef.current = controller;
     
     setIsAiTyping(true);
+
+    // Generate a title for this chat session EARLIER if it's currently "Untitled" or "New chat"
+    const currentTabId = activeTabIdRef.current;
+    const currentTab = tabsRef.current.find(t => t.id === currentTabId);
+    if (currentTab && currentTab.type === 'chat' && (currentTab.title === 'Untitled' || currentTab.title === 'New chat')) {
+      // Fire and forget (don't await) so it runs in parallel with the main stream
+      fetch('/api/research/generate-title', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userQuery: textToSend })
+      })
+      .then(res => res.ok ? res.json() : null)
+      .then(titleData => {
+        if (titleData?.title) {
+          setTabs(prev => {
+            const updatedTabs = prev.map(t => t.id === currentTabId ? { ...t, title: titleData.title } : t);
+            if (currentUser) {
+              const updatedTab = updatedTabs.find(t => t.id === currentTabId);
+              if (updatedTab) saveChatToLibrary(currentUser.uid, updatedTab).catch(console.error);
+            }
+            return updatedTabs;
+          });
+        }
+      })
+      .catch(errTitle => console.error("Failed to generate title", errTitle));
+    }
 
     try {
       // Try hitting our real server-side Gemini research chat endpoint!
@@ -1346,7 +1544,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                      content: `### New Research Mapped: ${p.title}\n\n**Overview:** ${p.summary || "I have successfully indexed this paper. You can now ask me questions about its methodology or findings."}`,
                                      timestamp: Date.now()
                                    };
-                                   updateChatMessages(prev => [...prev, assistantMsg]);
+                                   updateChatMessages(prev => [...prev, assistantMsg], false);
                                  }, 1000);
                                }
                              });
@@ -1498,28 +1696,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
          }
        }
 
-      // Generate a title for this chat session if it's currently "Untitled" or "New chat"
-      const currentTab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
-      if (currentTab && currentTab.type === 'chat' && (currentTab.title === 'Untitled' || currentTab.title === 'New chat')) {
-        try {
-          const titleResponse = await fetch('/api/research/generate-title', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ userQuery: textToSend })
-          });
-          if (titleResponse.ok) {
-            const titleData = await titleResponse.json();
-            if (titleData?.title) {
-              setTabs(prev => prev.map(t => t.id === currentTab.id ? { ...t, title: titleData.title } : t));
-            }
-          }
-        } catch (errTitle) {
-          console.error("Failed to generate title", errTitle);
-        }
-      }
-
+      updateChatMessages(prev => prev, false);
       setIsAiTyping(false);
       aiWritingTabIdRef.current = null;
     } catch (e: any) {
@@ -1529,7 +1706,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
       }
       setIsAiTyping(false);
       aiWritingTabIdRef.current = null;
-      console.warn("Express server Gemini API failed, using deep local simulation rules:", e);
+      console.warn("Express server research LLM failed, using deep local simulation rules:", e);
       // Fallback safely to our local academic intelligence
       const fallbackPayload = getFallbackResponse(textToSend);
       const simulatedAnswer = fallbackPayload.text;
@@ -1584,6 +1761,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
           setTabs(prev => prev.map(t => t.id === currentTab.id ? { ...t, title: generatedFallbackTitle } : t));
         }
 
+        updateChatMessages(prev => prev, false);
         setIsAiTyping(false);
       }, 1000);
       return;
@@ -1648,7 +1826,64 @@ Once you have content, I can help you draft sections, summarize findings, or for
     return valA.localeCompare(valB) * orderMultiplier;
   });
 
+  if (isAuthLoading) {
+    return (
+      <div className="h-screen bg-[#070707] flex flex-col items-center justify-center text-zinc-400 gap-4 font-jakarta animate-none">
+        <Icon icon="ph:spinner-gap" className="w-5 h-5 animate-spin text-emerald-400" />
+        <div className="text-xs font-medium tracking-wide">Connecting Workspace...</div>
+      </div>
+    );
+  }
 
+  if (!currentUser) {
+    return (
+      <div className="h-screen bg-[#070707] flex items-center justify-center p-4 selection:bg-zinc-800 selection:text-white">
+        <motion.div 
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full max-w-md bg-[#0c0c0e] border border-[#27272a] rounded-2xl p-10 flex flex-col items-center relative overflow-hidden"
+        >
+          {/* Subtle line background details, no glowing effects */}
+          <div className="absolute top-0 inset-x-0 h-px bg-[#27272a]/30" />
+          
+          <div className="w-14 h-14 bg-[#121214] border border-[#27272a] rounded-2xl flex items-center justify-center mb-8 relative z-10 transition-colors group">
+            <Icon icon="ph:database-duotone" className="w-7 h-7 text-emerald-400" />
+          </div>
+          
+          <h1 className="text-2xl font-bold text-white mb-2 relative z-10 text-center tracking-tight font-jakarta">
+            Research Workspace
+          </h1>
+          
+          <p className="text-zinc-400 text-sm mb-10 text-center leading-relaxed relative z-10 max-w-xs font-jakarta">
+            A collaborative space to assemble context, analyze literature, and refine hypotheses.
+          </p>
+          
+          <button
+            onClick={async () => {
+              try {
+                await signInWithPopup(auth, googleProvider);
+              } catch (err) {
+                console.error("Sign in failed:", err);
+              }
+            }}
+            className="w-full flex items-center justify-center gap-3 px-4 py-3.5 bg-white hover:bg-zinc-200 text-black rounded-xl text-sm font-semibold transition-all active:scale-[0.99] relative z-10 cursor-pointer border border-transparent"
+          >
+            <Icon icon="logos:google-icon" className="w-4 h-4 shrink-0" />
+            <span className="font-jakarta text-[13px] font-bold">Continue with Google</span>
+          </button>
+          
+          <div className="mt-10 pt-6 border-t border-zinc-900 w-full flex items-center justify-between text-[11px] text-zinc-500 font-mono">
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+              Sync Engine Online
+            </span>
+            <span>v1.2.0</span>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen bg-[#070707] text-[#e4e4e7] font-sans flex selection:bg-[#262626] overflow-hidden">
@@ -1658,6 +1893,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
         className="hidden"
         accept=".pdf,.doc,.docx"
         onChange={async (e) => {
+          const uploaderId = currentUserIdRef.current;
           const file = e.target.files?.[0];
           if (file) {
             const formData = new FormData();
@@ -1667,6 +1903,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 method: "POST",
                 body: formData,
               });
+
+              if (currentUserIdRef.current !== uploaderId) return;
 
               if (!response.ok) {
                 const errorText = await response.text();
@@ -1723,6 +1961,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     console.error("Docx/Text mapping failed", docxErr);
                   }
                 }
+
+                if (currentUserIdRef.current !== uploaderId) return;
 
                 const targetFolder = selectedFolderId || folders[0]?.id || 'f1';
                 const parsedPaper: PaperItem = {
@@ -1796,7 +2036,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     content: `### Document Mapped: ${fileLabel}\n\nI have successfully indexed **${fileLabel}** and mapped it to your workspace. ${extractedText ? "I've analyzed the full text and am ready to answer specific questions or help you draft citations based on its contents." : "The document metadata has been saved."}`,
                     timestamp: Date.now()
                   };
-                  updateChatMessages(prev => [...prev, assistantMsg]);
+                  updateChatMessages(prev => [...prev, assistantMsg], false);
                   setIsAiTyping(false);
                 }, 500);
               }
@@ -1947,13 +2187,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
               <div className="mx-3 mb-4 p-1 bg-[#111111] rounded-lg flex items-center gap-1">
                 <button 
                   onClick={() => setSidebarView('files')}
-                  className={`flex-1 py-1 text-[11px] font-medium rounded-[6px] transition-all ${sidebarView === 'files' ? 'text-[#f4f4f5] bg-[#27272a] shadow-sm' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
+                  className={`flex-1 py-1 text-[11px] font-medium rounded-[6px] transition-all ${sidebarView === 'files' ? 'text-[#f4f4f5] bg-[#27272a]' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
                 >
                   Files
                 </button>
                 <button 
                   onClick={() => setSidebarView('chats')}
-                  className={`flex-1 py-1 text-[11px] font-medium rounded-[6px] transition-all ${sidebarView === 'chats' ? 'text-[#f4f4f5] bg-[#27272a] shadow-sm' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
+                  className={`flex-1 py-1 text-[11px] font-medium rounded-[6px] transition-all ${sidebarView === 'chats' ? 'text-[#f4f4f5] bg-[#27272a]' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
                 >
                   Chats
                 </button>
@@ -2076,8 +2316,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     <button 
                       onClick={() => {
                         const newId = `chat-${Date.now()}`;
-                        setTabs([...tabs, { id: newId, type: 'chat', title: 'Untitled' }]);
+                        const newChatTab: Tab = { id: newId, type: 'chat', title: 'New chat', messages: [] };
+                        setTabs([...tabs, newChatTab]);
                         setActiveTabId(newId);
+                        if (currentUser) {
+                          saveChatToLibrary(currentUser.uid, newChatTab);
+                        }
                       }}
                       className="p-1 hover:bg-[#27272a] rounded text-[#71717a] hover:text-[#f4f4f5] transition-colors cursor-pointer"
                       title="New Chat"
@@ -2085,15 +2329,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       <Icon icon="ph:plus" className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  {tabs.filter(t => t.type === 'chat').length === 0 ? (
+                  {allChats.length === 0 ? (
                     <div className="text-center py-10 border border-dashed border-[#27272a] rounded-xl">
                       <Icon icon="ph:chat-circle-dots" className="w-8 h-8 text-[#27272a] mx-auto mb-2" />
                       <p className="text-[11px] text-[#52525b]">No recent chats</p>
                     </div>
                   ) : (
                     <div className="space-y-1">
-                      {tabs.filter(t => t.type === 'chat').map((chatTab) => {
+                      {allChats.map((chatTab) => {
                         const isCurrent = chatTab.id === activeTabId;
+                        const isOpen = tabs.some(t => t.id === chatTab.id);
                         return (
                           <div 
                             key={chatTab.id}
@@ -2104,7 +2349,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             }`}
                           >
                             <button
-                              onClick={() => setActiveTabId(chatTab.id)}
+                              onClick={() => {
+                                if (isOpen) {
+                                  setActiveTabId(chatTab.id);
+                                } else {
+                                  setTabs(prev => [...prev, chatTab]);
+                                  setActiveTabId(chatTab.id);
+                                }
+                              }}
                               className="flex-1 flex items-center gap-2 min-w-0 text-left cursor-pointer"
                             >
                               <Icon 
@@ -2115,23 +2367,18 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 {chatTab.title}
                               </span>
                             </button>
-                            {tabs.filter(t => t.type === 'chat').length > 1 && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const filtered = tabs.filter(t => t.id !== chatTab.id);
-                                  setTabs(filtered);
-                                  if (isCurrent) {
-                                    const sibling = filtered.find(t => t.type === 'chat') || filtered[0];
-                                    setActiveTabId(sibling.id);
-                                  }
-                                }}
-                                className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#27272a] hover:text-[#ef4444] rounded transition-all cursor-pointer"
-                                title="Delete Chat"
-                              >
-                                <Icon icon="ph:trash" className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (window.confirm("Are you sure you want to delete this chat permanently?")) {
+                                  deleteTab(chatTab.id);
+                                }
+                              }}
+                              className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#27272a] hover:text-[#ef4444] rounded transition-all cursor-pointer"
+                              title="Delete Chat"
+                            >
+                              <Icon icon="ph:trash" className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         );
                       })}
@@ -2265,47 +2512,83 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
               {/* User Profile Header */}
               <div className="p-1 mt-2 relative">
-                <button 
-                  onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
-                  className="w-full flex items-center gap-2.5 text-[#f4f4f5] text-[12px] hover:bg-[#1a1a1a] p-1.5 rounded-lg transition-colors group cursor-pointer"
-                >
-                  <div className="w-6 h-6 rounded-full bg-[#27272a] flex-shrink-0 flex items-center justify-center overflow-hidden border border-[#3f3f46]">
-                     <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Ron" alt="Avatar" className="w-full h-full object-cover" />
-                  </div>
-                  <span className="truncate font-medium flex-1 text-left">Asnahon, Ron Niño Miguel L....</span>
-                  <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 text-[#71717a] group-hover:text-[#f4f4f5] shrink-0 transition-transform duration-200 ${isProfileDropdownOpen ? 'rotate-180' : ''}`} />
-                </button>
+                {currentUser ? (
+                  <>
+                    <button 
+                      onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
+                      className="w-full flex items-center gap-2.5 text-[#f4f4f5] text-[12px] hover:bg-[#1a1a1a] p-1.5 rounded-lg transition-colors group cursor-pointer"
+                    >
+                      <div className="w-6 h-6 rounded-full bg-[#27272a] flex-shrink-0 flex items-center justify-center overflow-hidden border border-[#3f3f46]">
+                         <img 
+                           src={currentUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(currentUser.email || 'Ron')}`} 
+                           alt="Avatar" 
+                           className="w-full h-full object-cover" 
+                           referrerPolicy="no-referrer"
+                         />
+                      </div>
+                      <span className="truncate font-medium flex-1 text-left">{currentUser.displayName || currentUser.email || 'Google Account'}</span>
+                      <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 text-[#71717a] group-hover:text-[#f4f4f5] shrink-0 transition-transform duration-200 ${isProfileDropdownOpen ? 'rotate-180' : ''}`} />
+                    </button>
 
-                <AnimatePresence>
-                  {isProfileDropdownOpen && (
-                    <>
-                      <div 
-                        className="fixed inset-0 z-30" 
-                        onClick={() => setIsProfileDropdownOpen(false)} 
-                      />
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.95, y: -10 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                        transition={{ duration: 0.15 }}
-                        className="absolute left-3 right-3 bottom-full mb-1 z-40 bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 overflow-hidden"
-                      >
-                        <div className="px-3 py-2 border-bottom border-[#2d2d30] mb-1">
-                          <p className="text-[10px] text-[#52525b] uppercase font-bold tracking-wider">Account</p>
-                          <p className="text-[12px] text-[#e4e4e7] truncate">asnahonron@gmail.com</p>
-                        </div>
-                        <button className="w-full text-left px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7] transition-colors flex items-center gap-2">
-                          <Icon icon="ph:user" className="w-3.5 h-3.5" />
-                          Settings
-                        </button>
-                        <button className="w-full text-left px-3 py-1.5 text-[12px] text-red-400 hover:bg-red-950/20 transition-colors flex items-center gap-2">
-                          <Icon icon="ph:sign-out" className="w-3.5 h-3.5" />
-                          Log out
-                        </button>
-                      </motion.div>
-                    </>
-                  )}
-                </AnimatePresence>
+                    <AnimatePresence>
+                      {isProfileDropdownOpen && (
+                        <>
+                          <div 
+                            className="fixed inset-0 z-30" 
+                            onClick={() => setIsProfileDropdownOpen(false)} 
+                          />
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                            transition={{ duration: 0.15 }}
+                            className="absolute left-3 right-3 bottom-full mb-1 z-40 bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 overflow-hidden"
+                          >
+                            <div className="px-3 py-2 border-b border-[#2d2d30] mb-1">
+                              <p className="text-[10px] text-[#52525b] uppercase font-bold tracking-wider">Account</p>
+                              <p className="text-[12px] text-[#e4e4e7] truncate">{currentUser.email}</p>
+                            </div>
+                            <button className="w-full text-left px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7] transition-colors flex items-center gap-2">
+                              <Icon icon="ph:user" className="w-3.5 h-3.5" />
+                              Settings
+                            </button>
+                            <button 
+                              onClick={async () => {
+                                try {
+                                  await signOut(auth);
+                                  setIsProfileDropdownOpen(false);
+                                } catch (err) {
+                                  console.error("Sign out error:", err);
+                                }
+                              }}
+                              className="w-full text-left px-3 py-1.5 text-[12px] text-red-400 hover:bg-red-950/20 transition-colors flex items-center gap-2 cursor-pointer animate-none"
+                            >
+                              <Icon icon="ph:sign-out" className="w-3.5 h-3.5" />
+                              Log out
+                            </button>
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
+                  </>
+                ) : (
+                  <button 
+                    onClick={async () => {
+                      try {
+                        await signInWithPopup(auth, googleProvider);
+                      } catch (err) {
+                        console.error("Sign in failed:", err);
+                      }
+                    }}
+                    className="w-full flex items-center gap-2.5 text-zinc-300 hover:text-white hover:bg-[#1a1a1a] p-1.5 rounded-lg transition-colors group cursor-pointer text-[12px] font-medium"
+                  >
+                    <div className="w-6 h-6 rounded-full bg-[#1c1c1e] border border-[#27272a] flex-shrink-0 flex items-center justify-center text-zinc-400 group-hover:text-zinc-200">
+                      <Icon icon="ph:google-logo" className="w-3.5 h-3.5 text-zinc-400" />
+                    </div>
+                    <span className="truncate flex-1 text-left">Sign in with Google</span>
+                    <Icon icon="ph:sign-in" className="w-3.5 h-3.5 text-[#71717a] group-hover:text-[#f4f4f5] shrink-0" />
+                  </button>
+                )}
               </div>
             </div>
           </motion.div>
@@ -2329,17 +2612,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
           </div>
 
           {/* Tabs Container */}
-          <div className="flex items-end h-full ml-3 gap-[2px] overflow-x-auto no-scrollbar min-w-0">
-    {tabs.map((tab) => (
-      <div 
-        key={tab.id}
-        onClick={() => setActiveTabId(tab.id)}
-        className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[10px] transition-colors cursor-pointer text-[13px] ${
-          activeTabId === tab.id 
-            ? 'bg-[#121212] text-[#e4e4e7]' 
-            : 'bg-[#1a1a1a]/40 hover:bg-[#1a1a1a]/80 text-[#a1a1aa]'
-        }`}
-      >
+          <div className="flex items-end h-full ml-3 gap-[2px] overflow-x-auto custom-scrollbar-h min-w-0">
+            {tabs.map((tab) => (
+              <div 
+                key={tab.id}
+                onClick={() => setActiveTabId(tab.id)}
+                className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[8px] transition-colors cursor-pointer text-[13px] ${
+                  activeTabId === tab.id 
+                    ? 'bg-[#121212] text-[#e4e4e7] border-t border-x border-[#27272a]' 
+                    : 'bg-transparent text-[#a1a1aa] hover:bg-[#121214] border-t border-x border-transparent'
+                }`}
+              >
         {tab.type === 'home' ? (
           <Icon icon="ph:house" className="w-3.5 h-3.5" />
         ) : tab.type === 'library' ? (
@@ -2384,108 +2667,22 @@ Once you have content, I can help you draft sections, summarize findings, or for
   </div>
 
           <div className="flex-1" />
-
+          
           {/* Right Header Navigation & Panel Controls */}
-          <div className="flex items-center gap-2.5 h-full pb-1.5 pt-1.5 text-[#f4f4f5]">
-            {/* Cloud Database Integration Section */}
-            <div className="relative">
-              {isAuthLoading ? (
-                <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-zinc-500 font-medium">
-                  <Icon icon="ph:spinner-gap" className="w-3.5 h-3.5 animate-spin" />
-                  <span>Loading...</span>
-                </div>
-              ) : currentUser ? (
-                <>
-                  <button 
-                    onClick={() => setIsCloudMenuOpen(!isCloudMenuOpen)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#141d17] border border-[#1d3021] text-[#a4fad8] hover:text-[#d2faec] hover:bg-[#1a261c] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98]"
-                    title="Account"
-                  >
-                    <Icon icon="ph:user-circle" className="w-3.5 h-3.5" />
-                    <span className="max-w-[124px] truncate">{currentUser.displayName || currentUser.email || 'User'}</span>
-                  </button>
-
-                  <AnimatePresence>
-                    {isCloudMenuOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 4, scale: 1 }}
-                        exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                        transition={{ duration: 0.1 }}
-                        className="absolute right-0 top-full mt-1 w-64 bg-[#18181b] border border-[#27272a] rounded-xl py-3 z-[100] shadow-xl text-left"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="px-4 py-2 border-b border-zinc-800 pb-3 mb-2">
-                          <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Account</div>
-                          <div className="text-sm font-semibold text-[#f4f4f5] mt-1 truncate">{currentUser.displayName || 'Google Account'}</div>
-                          <div className="text-xs text-zinc-400 truncate">{currentUser.email}</div>
-                        </div>
-
-                        <div className="px-4 py-2 mb-1.5">
-                          <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Library</div>
-                          <div className="flex items-center gap-2 text-xs text-zinc-300 mt-2">
-                            <Icon icon="ph:folder" className="w-4 h-4 text-zinc-500" />
-                            <span>{folders.length} Folders</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-xs text-zinc-300 mt-1">
-                            <Icon icon="ph:file-text" className="w-4 h-4 text-zinc-500" />
-                            <span>{papers.length} Documents</span>
-                          </div>
-                        </div>
-
-                        <div className="h-[1px] bg-[#27272a] my-1" />
-
-                        <div className="px-2">
-                          <button
-                            onClick={async () => {
-                              try {
-                                await signOut(auth);
-                                setIsCloudMenuOpen(false);
-                              } catch (err) {
-                                console.error("Sign out error:", err);
-                              }
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:text-red-300 hover:bg-red-950/20 rounded-lg transition-colors cursor-pointer text-left font-medium"
-                          >
-                            <Icon icon="ph:sign-out" className="w-4 h-4" />
-                            <span>Sign Out</span>
-                          </button>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </>
-              ) : (
-                <button 
-                  onClick={async () => {
-                    try {
-                      await signInWithPopup(auth, googleProvider);
-                    } catch (err) {
-                      console.error("Sign in failed:", err);
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#27272a] border border-[#3f3f46] text-zinc-200 hover:text-white hover:bg-zinc-800 transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98]"
-                  title="Sign In with Google"
-                >
-                  <Icon icon="ph:user-circle" className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Sign In</span>
-                </button>
-              )}
-            </div>
-
+          <div className="flex items-center gap-2 h-full pb-1.5 pt-1.5 text-[#f4f4f5]">
             <button 
               onClick={() => setShowBuyCoffeeModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#1d1614] border border-[#30211d] text-[#e3a088] hover:text-[#fad2c3] hover:bg-[#261d1a] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98]"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#1d1614] border border-[#30211d] text-[#e3a088] hover:text-[#fad2c3] hover:bg-[#261d1a] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98] whitespace-nowrap"
               title="Buy us a coffee"
             >
-              <Coffee className="w-3.5 h-3.5 text-[#e3a088]" />
+              <Coffee className="w-3.5 h-3.5 text-[#e3a088] shrink-0" />
               <span>Buy me a Coffee</span>
             </button>
             {!isAssistantOpen && (
               <button 
                 onClick={() => setIsAssistantOpen(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#222222] hover:border-[#3f3f46] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98]"
-                title="Open Assistant Sidebar"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#222222] hover:border-[#3f3f46] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98] whitespace-nowrap"
+                title="Open Assistant Source"
               >
                 <Icon icon="ph:sparkle" className="w-3.5 h-3.5" />
                 <span>Agent</span>
@@ -2500,7 +2697,18 @@ Once you have content, I can help you draft sections, summarize findings, or for
           {activeTab.type === 'home' ? (
             <div className="flex-1 overflow-y-auto focus:outline-none scroll-smooth">
               <div className="max-w-[800px] mx-auto w-full p-8 md:p-14 lg:p-20 flex flex-col justify-center min-h-full">
-                <h1 className="text-3xl md:text-4xl text-[#f4f4f5] font-medium tracking-tight mb-8">Good afternoon.</h1>
+                {(() => {
+                  const hour = new Date().getHours();
+                  let timeGreeting = 'Good evening';
+                  if (hour < 12) timeGreeting = 'Good morning';
+                  else if (hour < 18) timeGreeting = 'Good afternoon';
+                  const firstName = currentUser?.displayName ? currentUser.displayName.split(' ')[0] : '';
+                  return (
+                    <h1 className="text-3xl md:text-4xl text-[#f4f4f5] font-medium tracking-tight mb-8">
+                      {timeGreeting}{firstName ? `, ${firstName}` : ''}.
+                    </h1>
+                  );
+                })()}
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
                   <button 
@@ -2609,7 +2817,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wider mb-6">Recent Folders</h2>
                 <div className="relative group/carousel">
                   <div 
-                    className="flex overflow-x-auto gap-4 pb-6 scrollbar-hide no-scrollbar scroll-smooth"
+                    className="flex overflow-x-auto gap-4 pb-6 custom-scrollbar-h scroll-smooth"
                     style={{
                       WebkitMaskImage: 'linear-gradient(to right, rgba(0,0,0,1) 82%, rgba(0,0,0,0) 98%)',
                       maskImage: 'linear-gradient(to right, rgba(0,0,0,1) 82%, rgba(0,0,0,0) 98%)'
@@ -2652,58 +2860,71 @@ Once you have content, I can help you draft sections, summarize findings, or for
             <div className="flex-1 flex flex-col bg-[#121212] relative overflow-hidden">
                {/* Chat Header */}
                <header className="h-[52px] flex items-center justify-between px-4 shrink-0 relative border-b border-[#1c1c1f] z-45">
-                 <div className="relative">
-                   <button 
-                     onClick={() => setIsChatDropdownOpen(!isChatDropdownOpen)}
-                     className="flex items-center gap-1.5 text-[#e4e4e7] hover:bg-[#1a1a1a] px-3 py-1.5 rounded-xl transition-colors cursor-pointer group"
-                   >
-                     <span className="font-medium text-[13px]">{activeTab.title}</span>
-                     <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 text-zinc-500 group-hover:text-zinc-300 transition-transform ${isChatDropdownOpen ? 'rotate-180' : ''}`} />
-                   </button>
-
-                   {isChatDropdownOpen && (
-                     <>
-                       <div 
-                         className="fixed inset-0 z-40" 
-                         onClick={() => setIsChatDropdownOpen(false)}
+                 <div className="flex items-center gap-2">
+                   <div className="relative">
+                     {isRenamingChat === activeTab.id ? (
+                       <input
+                         autoFocus
+                         value={renamingChatText}
+                         onChange={(e) => setRenamingChatText(e.target.value)}
+                         onKeyDown={handleRenameChat}
+                         onBlur={handleRenameChat}
+                         className="bg-[#1a1a1a] text-[#e4e4e7] text-[13px] font-medium px-3 py-1.5 rounded-xl border border-[#3f3f46] outline-none w-48"
                        />
-                       <div className="absolute top-full left-0 mt-1.5 w-64 bg-[#1a1a1a] border border-[#2d2d30] rounded-xl shadow-2xl z-50 p-1.5 flex flex-col gap-0.5 max-h-72 overflow-y-auto">
-                         <div className="px-2.5 py-1.5 text-[10px] text-zinc-500 font-bold uppercase tracking-wider select-none">
-                           All Chats
-                         </div>
-                         {tabs.filter(t => t.type === 'chat').map((chatTab) => (
+                     ) : (
+                       <button 
+                         onClick={() => setIsChatDropdownOpen(!isChatDropdownOpen)}
+                         className="flex items-center gap-1.5 text-[#e4e4e7] hover:bg-[#1a1a1a] px-3 py-1.5 rounded-xl transition-colors cursor-pointer group"
+                       >
+                         <span className="font-medium text-[13px]">{activeTab.title}</span>
+                         <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 text-zinc-500 group-hover:text-zinc-300 transition-transform ${isChatDropdownOpen ? 'rotate-180' : ''}`} />
+                       </button>
+                     )}
+
+                     {isChatDropdownOpen && (
+                       <>
+                         <div 
+                           className="fixed inset-0 z-40" 
+                           onClick={() => setIsChatDropdownOpen(false)}
+                         />
+                         <div className="absolute top-full left-0 mt-1.5 w-64 bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1.5 flex flex-col gap-0.5 max-h-72 overflow-y-auto shadow-2xl">
+                           <div className="px-2.5 py-1.5 text-[10px] text-zinc-500 font-bold uppercase tracking-wider select-none">
+                             All Chats
+                           </div>
+                           {tabs.filter(t => t.type === 'chat').map((chatTab) => (
+                             <button
+                               key={chatTab.id}
+                               onClick={() => {
+                                 setActiveTabId(chatTab.id);
+                                 setIsChatDropdownOpen(false);
+                               }}
+                               className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-all cursor-pointer ${
+                                 chatTab.id === activeTabId 
+                                   ? 'bg-[#27272a] text-white' 
+                                   : 'text-zinc-400 hover:text-white hover:bg-[#222222]'
+                               }`}
+                             >
+                               <Icon icon="ph:chat-circle" className="w-4 h-4 shrink-0 text-zinc-500" />
+                               <span className="text-xs font-medium truncate">{chatTab.title}</span>
+                             </button>
+                           ))}
+                           <div className="border-t border-[#2d2d30] my-1" />
                            <button
-                             key={chatTab.id}
                              onClick={() => {
-                               setActiveTabId(chatTab.id);
+                               const newId = `chat-${Date.now()}`;
+                               setTabs([...tabs, { id: newId, type: 'chat', title: 'Untitled' }]);
+                               setActiveTabId(newId);
                                setIsChatDropdownOpen(false);
                              }}
-                             className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-all cursor-pointer ${
-                               chatTab.id === activeTabId 
-                                 ? 'bg-[#27272a] text-white' 
-                                 : 'text-zinc-400 hover:text-white hover:bg-[#222222]'
-                             }`}
+                             className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-[#222222] transition-colors cursor-pointer"
                            >
-                             <Icon icon="ph:chat-circle" className="w-4 h-4 shrink-0 text-zinc-500" />
-                             <span className="text-xs font-medium truncate">{chatTab.title}</span>
+                             <Icon icon="ph:plus" className="w-4 h-4 shrink-0 text-zinc-500" />
+                             <span className="text-xs font-semibold">New Chat</span>
                            </button>
-                         ))}
-                         <div className="border-t border-[#2d2d30] my-1" />
-                         <button
-                           onClick={() => {
-                             const newId = `chat-${Date.now()}`;
-                             setTabs([...tabs, { id: newId, type: 'chat', title: 'Untitled' }]);
-                             setActiveTabId(newId);
-                             setIsChatDropdownOpen(false);
-                           }}
-                           className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-[#222222] transition-colors cursor-pointer"
-                         >
-                           <Icon icon="ph:plus" className="w-4 h-4 shrink-0 text-zinc-500" />
-                           <span className="text-xs font-semibold">New Chat</span>
-                         </button>
-                       </div>
-                     </>
-                   )}
+                         </div>
+                       </>
+                     )}
+                   </div>
                  </div>
 
                  <div className="flex items-center gap-1.5">
@@ -2718,9 +2939,44 @@ Once you have content, I can help you draft sections, summarize findings, or for
                    >
                      <Icon icon="ph:plus" className="w-4 h-4" />
                    </button>
-                   <button className="p-2 text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#1a1a1a] rounded-xl transition-colors cursor-pointer">
-                     <Icon icon="ph:dots-three-outline-fill" className="w-4 h-4" />
-                   </button>
+                   
+                   <div className="relative">
+                     <button 
+                       onClick={() => setIsChatMenuOpen(!isChatMenuOpen)}
+                       className={`p-2 text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#1a1a1a] rounded-xl transition-colors cursor-pointer ${isChatMenuOpen ? 'bg-[#1a1a1a] text-[#e4e4e7]' : ''}`}
+                     >
+                       <Icon icon="ph:dots-three-outline-fill" className="w-4 h-4" />
+                     </button>
+
+                     {isChatMenuOpen && (
+                       <>
+                         <div 
+                           className="fixed inset-0 z-40" 
+                           onClick={() => setIsChatMenuOpen(false)}
+                         />
+                         <div className="absolute top-full right-0 mt-1.5 w-40 bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1 flex flex-col gap-0.5 shadow-2xl">
+                           <button
+                             onClick={() => {
+                               setIsRenamingChat(activeTab.id);
+                               setRenamingChatText(activeTab.title);
+                               setIsChatMenuOpen(false);
+                             }}
+                             className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-[#222222] transition-colors cursor-pointer"
+                           >
+                             <Icon icon="ph:pencil-simple" className="w-4 h-4" />
+                             <span className="text-xs font-medium">Rename</span>
+                           </button>
+                           <button
+                             onClick={() => deleteTab(activeTab.id)}
+                             className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-red-400/80 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                           >
+                             <Icon icon="ph:trash" className="w-4 h-4" />
+                             <span className="text-xs font-medium">Delete chat</span>
+                           </button>
+                         </div>
+                       </>
+                     )}
+                   </div>
                  </div>
                </header>
 
@@ -3259,7 +3515,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                               animate={{ opacity: 1, y: 0, scale: 1 }}
                                               exit={{ opacity: 0, y: openUpward ? -4 : 4, scale: 0.95 }}
                                               transition={{ duration: 0.1 }}
-                                              className={`absolute left-0 ${openUpward ? 'bottom-full mb-1.5' : 'top-full mt-1.5'} w-48 bg-[#18181b] border border-[#27272a] rounded-xl py-1.5 z-[70] shadow-xl`}
+                                              className={`absolute left-0 ${openUpward ? 'bottom-full mb-1.5' : 'top-full mt-1.5'} w-48 bg-[#18181b] border border-[#27272a] rounded-xl py-1.5 z-[70]`}
                                               onClick={(e) => e.stopPropagation()}
                                             >
                                               <button
@@ -3635,7 +3891,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
               {/* Buy Me a Coffee Support Modal */}
               {showBuyCoffeeModal && (
-                <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
+                <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4">
                   <div className="bg-[#121212] border border-[#2d2d30] rounded-2xl w-full max-w-[420px] p-6 relative flex flex-col overflow-hidden select-none animate-scale-up">
                     <button 
                       onClick={() => {
@@ -3901,7 +4157,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   </button>
                 )}
                 {/* Floating Pill Formatting Bar */}
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 text-[12px] text-[#a1a1aa] whitespace-nowrap select-none">
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616] border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 text-[12px] text-[#a1a1aa] whitespace-nowrap select-none">
                 
                 {/* Font Selector */}
                 <div className="flex items-center relative h-full">
@@ -4291,16 +4547,86 @@ Once you have content, I can help you draft sections, summarize findings, or for
       {/* Right Section - AI Assistant Window Panel */}
       {isAssistantOpen && (
         <div className="p-[4px] flex h-full"> 
-          <div className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden shadow-2xl animate-slide-in">
+          <div className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden animate-slide-in">
             
             {/* Assistant Header */}
-            <div className="h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212]">
-              <div className="flex items-center gap-2">
-                <h2 className="text-[#e4e4e7] font-medium text-[13.5px]">AI Research Assistant</h2>
+            <div className="h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212] border-b border-[#1c1c1f] relative">
+              <div className="relative flex-1 min-w-0 pr-4">
+                <button 
+                  onClick={() => setIsAssistantChatDropdownOpen(!isAssistantChatDropdownOpen)}
+                  className="flex items-center gap-2 text-[#e4e4e7] hover:bg-[#1c1c1f] px-3 py-1.5 rounded-xl transition-colors cursor-pointer group max-w-full"
+                >
+                  <span className="font-semibold text-[13px] tracking-tight text-[#f4f4f5] truncate max-w-[240px]">
+                    {(() => {
+                      const chatTabs = tabs.filter(t => t.type === 'chat');
+                      const currentChat = chatTabs.find(t => t.id === (activeAssistantTabId || activeTabIdRef.current)) || (chatTabs.length > 0 ? chatTabs[0] : null);
+                      return currentChat ? currentChat.title : "Research Assistant";
+                    })()}
+                  </span>
+                  <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 shrink-0 text-zinc-500 group-hover:text-zinc-300 transition-transform ${isAssistantChatDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {isAssistantChatDropdownOpen && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setIsAssistantChatDropdownOpen(false)}
+                    />
+                    <div className="absolute top-full left-0 mt-1.5 w-[280px] bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1.5 flex flex-col gap-0.5 max-h-72 overflow-y-auto">
+                      <div className="px-2.5 py-1.5 text-[10px] text-zinc-500 font-bold uppercase tracking-wider select-none">
+                        All Conversations
+                      </div>
+                      {allChats.map((chatTab) => (
+                        <button
+                          key={chatTab.id}
+                          onClick={() => {
+                            const isOpen = tabs.some(t => t.id === chatTab.id);
+                            if (isOpen) {
+                              setActiveTabId(chatTab.id);
+                              setActiveAssistantTabId(chatTab.id);
+                            } else {
+                              setTabs(prev => [...prev, chatTab]);
+                              setActiveTabId(chatTab.id);
+                              setActiveAssistantTabId(chatTab.id);
+                            }
+                            setIsAssistantChatDropdownOpen(false);
+                          }}
+                          className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-all cursor-pointer ${
+                            chatTab.id === (activeAssistantTabId || tabs.find(t => t.type === 'chat')?.id)
+                              ? 'bg-[#27272a] text-white' 
+                              : 'text-zinc-400 hover:text-white hover:bg-[#222222]'
+                          }`}
+                        >
+                          <Icon icon="ph:chat-circle" className="w-4 h-4 shrink-0 text-zinc-500" />
+                          <span className="text-xs font-medium truncate">{chatTab.title}</span>
+                        </button>
+                      ))}
+                      <div className="border-t border-[#2d2d30] my-1" />
+                      <button
+                        onClick={() => {
+                          const newId = `chat-${Date.now()}`;
+                          const newChatTab: Tab = { id: newId, type: 'chat' as const, title: 'New chat', messages: [] };
+                          setTabs([...tabs, newChatTab]);
+                          setActiveAssistantTabId(newId);
+                          setMessages([]);
+                          setIsAssistantChatDropdownOpen(false);
+                          if (currentUser) {
+                            saveChatToLibrary(currentUser.uid, newChatTab);
+                          }
+                        }}
+                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-[#222222] transition-colors cursor-pointer"
+                        title="New Chat"
+                      >
+                        <Icon icon="ph:plus" className="w-4 h-4 shrink-0 text-zinc-500" />
+                        <span className="text-xs font-semibold">New Chat</span>
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
               <button 
                 onClick={() => setIsAssistantOpen(false)}
-                className="text-[#52525b] hover:text-[#e4e4e7] transition-colors p-[4px] rounded-md hover:bg-[#1c1c1e] cursor-pointer" 
+                className="text-[#52525b] hover:text-[#e4e4e7] transition-colors p-[4px] rounded-md hover:bg-[#1c1c1e] cursor-pointer shrink-0" 
                 aria-label="Close Assistant"
                 title="Collapse Panel"
               >
@@ -4533,7 +4859,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
       {showLinkRenameModal && linkToRename && (
         <div 
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-xs select-none"
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 select-none"
           onClick={() => {
             setShowLinkRenameModal(false);
             setLinkToRename(null);
@@ -4649,11 +4975,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
       {/* Folder Deletion Confirmation Modal */}
       {isDeleteFolderModalOpen && folderToDelete && (
         <div 
-          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in"
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/85 p-4 animate-fade-in"
           onClick={() => setIsDeleteFolderModalOpen(false)}
         >
           <div 
-            className="bg-[#1c1c1e] border border-zinc-800 rounded-[20px] w-full max-w-[320px] overflow-hidden shadow-2xl animate-scale-in"
+            className="bg-[#1c1c1e] border border-zinc-800 rounded-[20px] w-full max-w-[320px] overflow-hidden animate-scale-in"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6">
