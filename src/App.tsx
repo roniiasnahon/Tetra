@@ -2725,15 +2725,15 @@ Once you have content, I can help you draft sections, summarize findings, or for
           </div>
 
           {/* Tabs Container */}
-          <div className="flex items-end h-full ml-3 gap-[2px] overflow-x-auto custom-scrollbar-h min-w-0">
+          <div className="flex items-end h-full ml-2 overflow-x-auto no-scrollbar min-w-0 pr-8">
             {tabs.map((tab) => (
               <div 
                 key={tab.id}
                 onClick={() => setActiveTabId(tab.id)}
-                className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[8px] transition-colors cursor-pointer text-[13px] ${
+                className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[10px] transition-all cursor-pointer text-[13px] relative z-20 ${
                   activeTabId === tab.id 
-                    ? 'bg-[#121212] text-[#e4e4e7] border-t border-x border-[#27272a]' 
-                    : 'bg-transparent text-[#a1a1aa] hover:bg-[#121214] border-t border-x border-transparent'
+                    ? 'chrome-tab-active text-[#f4f4f5] z-30' 
+                    : 'bg-transparent text-[#71717a] hover:text-[#a1a1aa] hover:bg-[#1a1a1a]/50'
                 }`}
               >
         {tab.type === 'home' ? (
@@ -2773,20 +2773,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
         setTabs([...tabs, { id: newId, type: 'home', title: 'Home' }]);
         setActiveTabId(newId);
       }}
-      className="flex items-center justify-center p-2 mb-0.5 ml-1 rounded-md hover:bg-[#1a1a1a] text-[#86868b] hover:text-[#e4e4e7] transition-colors cursor-pointer"
+      className="flex items-center justify-center w-7 h-7 mb-1 mx-1.5 rounded-full hover:bg-[#1a1a1a] text-[#71717a] hover:text-[#f4f4f5] transition-all cursor-pointer shrink-0"
     >
-      <Icon icon="ph:plus-circle" className="w-4 h-4" />
+      <Icon icon="ph:plus" className="w-3.5 h-3.5" />
     </div>
   </div>
 
           <div className="flex-1" />
           
           {/* Right Header Navigation & Panel Controls */}
-          <div className="flex items-center gap-2 h-full pb-1.5 pt-1.5 text-[#f4f4f5]">
+          <div className="flex items-center gap-2 h-full pb-1.5 pt-1.5 text-[#f4f4f5] border-b border-transparent">
             {!isAssistantOpen && (
               <button 
                 onClick={() => setIsAssistantOpen(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#222222] hover:border-[#3f3f46] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98] whitespace-nowrap"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1a1a1a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#222222] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98] whitespace-nowrap"
                 title="Open Assistant Source"
               >
                 <Icon icon="ph:sparkle" className="w-3.5 h-3.5" />
@@ -2797,7 +2797,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
         </header>
 
         {/* Main Editor Component Container */}
-        <div className="relative flex-1 bg-[#121212] rounded-2xl flex flex-row overflow-hidden min-w-0 transition-all">
+        <div className="relative flex-1 bg-[#121212] flex flex-row overflow-hidden min-w-0 transition-all">
           <div className="flex-1 flex flex-col min-w-0">
           {activeTab.type === 'home' ? (
             <div className="flex-1 overflow-y-auto focus:outline-none scroll-smooth">
@@ -2964,7 +2964,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
           ) : activeTab.type === 'chat' ? (
             <div className="flex-1 flex flex-col bg-[#121212] relative overflow-hidden">
                {/* Chat Header */}
-               <header className="h-[52px] flex items-center justify-between px-4 shrink-0 relative border-b border-[#1c1c1f] z-45">
+               <header className="h-[52px] flex items-center justify-between px-4 shrink-0 relative z-45">
                  <div className="flex items-center gap-2">
                    <div className="relative">
                      {isRenamingChat === activeTab.id ? (
@@ -4658,7 +4658,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
           <div className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden animate-slide-in">
             
             {/* Assistant Header */}
-            <div className="h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212] border-b border-[#1c1c1f] relative">
+            <div className="h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212] relative">
               <div className="relative flex-1 min-w-0 pr-4">
                 <button 
                   onClick={() => setIsAssistantChatDropdownOpen(!isAssistantChatDropdownOpen)}

@@ -60,6 +60,35 @@ body {
   .custom-scrollbar-h:hover::-webkit-scrollbar-thumb {
     background: #3f3f46;
   }
+
+  .chrome-tab-active {
+    position: relative;
+    background-color: #121212 !important;
+  }
+
+  .chrome-tab-active::before,
+  .chrome-tab-active::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    width: 14px;
+    height: 14px;
+    background-color: transparent;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .chrome-tab-active::before {
+    left: -14px;
+    border-bottom-right-radius: 14px;
+    box-shadow: 7px 0 0 0 #121212;
+  }
+
+  .chrome-tab-active::after {
+    right: -14px;
+    border-bottom-left-radius: 14px;
+    box-shadow: -7px 0 0 0 #121212;
+  }
 }
 
 @keyframes shimmer {
