@@ -20,6 +20,331 @@ import { parseStringPromise } from "xml2js";
 import { Storage } from 'megajs';
 import admin from "firebase-admin";
 import firebaseConfig from "./firebase-applet-config.json" assert { type: "json" };
+import zlib from "zlib";
+
+function decompressResponse(buffer: Buffer, contentEncoding?: string): Buffer {
+  if (!buffer || buffer.length === 0) return buffer;
+  const encoding = (contentEncoding || "").toLowerCase().trim();
+  
+  if (encoding === "gzip") {
+    try {
+      return zlib.gunzipSync(buffer);
+    } catch (e: any) {
+      console.error("[DECOMPRESS] Failed to gunzip based on header:", e.message);
+    }
+  } else if (encoding === "deflate") {
+    try {
+      return zlib.inflateSync(buffer);
+    } catch (e: any) {
+      console.error("[DECOMPRESS] Failed to deflate based on header:", e.message);
+    }
+  } else if (encoding === "br") {
+    try {
+      return zlib.brotliDecompressSync(buffer);
+    } catch (e: any) {
+      console.error("[DECOMPRESS] Failed to brotli decompress based on header:", e.message);
+    }
+  }
+
+  // Fallback signature-based checks:
+  if (buffer[0] === 0x1f && buffer[1] === 0x8b) {
+    try {
+      console.log("[DECOMPRESS] Detected GZIP signature. Decompressing...");
+      return zlib.gunzipSync(buffer);
+    } catch (e: any) {
+      console.error("[DECOMPRESS] Failed signature check gunzip:", e.message);
+    }
+  }
+  
+  if (buffer[0] === 0x78 && (buffer[1] === 0x01 || buffer[1] === 0x9c || buffer[1] === 0xda)) {
+    try {
+      console.log("[DECOMPRESS] Detected Deflate signature. Decompressing...");
+      return zlib.inflateSync(buffer);
+    } catch (e: any) {
+      console.error("[DECOMPRESS] Failed signature check deflate:", e.message);
+    }
+  }
+
+  return buffer;
+}
+
+function tryDecompressFallback(buffer: Buffer): Buffer {
+  if (!buffer || buffer.length < 4) return buffer;
+  if (buffer.length >= 4 && buffer.toString('utf-8', 0, 4) === '%PDF') {
+    return buffer;
+  }
+
+  // Try Brotli
+  try {
+    const brotliOut = zlib.brotliDecompressSync(buffer);
+    if (brotliOut.length >= 4 && brotliOut.toString('utf-8', 0, 4) === '%PDF') {
+      console.log("[DECOMPRESS] Fallback Brotli decompression succeeded!");
+      return brotliOut;
+    }
+  } catch (e) {}
+
+  // Try Gzip
+  try {
+    const gzipOut = zlib.gunzipSync(buffer);
+    if (gzipOut.length >= 4 && gzipOut.toString('utf-8', 0, 4) === '%PDF') {
+      console.log("[DECOMPRESS] Fallback Gzip decompression succeeded!");
+      return gzipOut;
+    }
+  } catch (e) {}
+
+  // Try Deflate
+  try {
+    const deflateOut = zlib.inflateSync(buffer);
+    if (deflateOut.length >= 4 && deflateOut.toString('utf-8', 0, 4) === '%PDF') {
+      console.log("[DECOMPRESS] Fallback Deflate decompression succeeded!");
+      return deflateOut;
+    }
+  } catch (e) {}
+
+  return buffer;
+}
+
+function sniffMimeType(buffer: Buffer): { mimetype: string, extension: string } {
+  if (buffer.length >= 4 && buffer.toString('utf-8', 0, 4) === '%PDF') {
+    return { mimetype: 'application/pdf', extension: 'pdf' };
+  }
+  
+  const sample = buffer.toString('utf-8', 0, Math.min(buffer.length, 1024)).trim().toLowerCase();
+  
+  if (sample.startsWith('<') || sample.includes('<html') || sample.includes('<!doctype') || sample.includes('<head') || sample.includes('<body') || sample.includes('<title')) {
+    return { mimetype: 'text/html', extension: 'html' };
+  }
+  
+  if (sample.startsWith('{') || sample.startsWith('[')) {
+    try {
+      JSON.parse(sample);
+      return { mimetype: 'application/json', extension: 'json' };
+    } catch (_) {
+      if (sample.includes('"') && sample.includes(':')) {
+        return { mimetype: 'application/json', extension: 'json' };
+      }
+    }
+  }
+  
+  if (sample.startsWith('<?xml') || sample.includes('<xml') || sample.includes('<rss') || sample.includes('<feed')) {
+    return { mimetype: 'application/xml', extension: 'xml' };
+  }
+  
+  let isText = true;
+  const checkLen = Math.min(buffer.length, 512);
+  for (let i = 0; i < checkLen; i++) {
+    const charCode = buffer[i];
+    if (charCode === 0 || (charCode < 32 && charCode !== 9 && charCode !== 10 && charCode !== 13)) {
+      isText = false;
+      break;
+    }
+  }
+  
+  if (isText && buffer.length > 0) {
+    return { mimetype: 'text/plain', extension: 'txt' };
+  }
+  
+  return { mimetype: 'application/octet-stream', extension: 'bin' };
+}
+
+async function extractDirectPdfFromLandingPage(landingPageUrl: string, htmlContent: string): Promise<Buffer | null> {
+  try {
+    const matches = htmlContent.match(/href=["']([^"']+)["']/gi) || [];
+    const candidateUrls: string[] = [];
+    
+    for (const match of matches) {
+      const parts = match.match(/href=["']([^"']+)["']/i);
+      if (parts && parts[1]) {
+        const link = parts[1];
+        const lowerLink = link.toLowerCase();
+        
+        // Match common repository and direct PDF landing page triggers
+        if (
+          lowerLink.includes('bitstream') || 
+          lowerLink.includes('bitstreams') ||
+          lowerLink.includes('/download') || 
+          lowerLink.includes('/retrieve/') ||
+          lowerLink.includes('/datastream/') || 
+          lowerLink.includes('/stream/') ||
+          lowerLink.includes('/files/') ||
+          lowerLink.endsWith('.pdf') || 
+          lowerLink.includes('.pdf?') ||
+          lowerLink.includes('paper-pdf') ||
+          lowerLink.includes('article-pdf')
+        ) {
+          // Resolve relative URL
+          let resolved = link;
+          if (link.startsWith('//')) {
+            resolved = `https:${link}`;
+          } else if (link.startsWith('/')) {
+            try {
+              const u = new URL(landingPageUrl);
+              resolved = `${u.protocol}//${u.host}${link}`;
+            } catch (_) {}
+          } else if (!link.startsWith('http')) {
+            try {
+              const u = new URL(landingPageUrl);
+              const pathBase = u.origin + u.pathname.substring(0, u.pathname.lastIndexOf('/') + 1);
+              resolved = `${pathBase}${link}`;
+            } catch (_) {}
+          }
+          if (!candidateUrls.includes(resolved)) {
+            candidateUrls.push(resolved);
+          }
+        }
+      }
+    }
+    
+    console.log(`[CRAWLER] Found ${candidateUrls.length} candidate PDF download URLs on the landing page: ${landingPageUrl}`);
+    
+    // Attempt download sequentially for candidates
+    for (const link of candidateUrls) {
+      if (link === landingPageUrl) continue;
+      
+      console.log(`[CRAWLER] Trying candidate download URL: ${link}`);
+      try {
+        const res = await axios.get(link, {
+          responseType: 'arraybuffer',
+          timeout: 10000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/pdf,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Referer': landingPageUrl
+          }
+        });
+        const buf = Buffer.from(res.data);
+        if (buf.length >= 4 && buf.toString('utf-8', 0, 4) === '%PDF') {
+          console.log(`[CRAWLER] Success! Downloaded robust PDF from fallback candidate: ${link}`);
+          return buf;
+        }
+      } catch (err: any) {
+        console.warn(`[CRAWLER] Failed candidate download for ${link}: ${err.message}`);
+      }
+    }
+  } catch (err: any) {
+    console.error(`[CRAWLER] Landing page PDF extraction failed:`, err);
+  }
+  return null;
+}
+
+async function robustDownloadPdf(url: string): Promise<Buffer> {
+  const headers: any = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/pdf,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://www.google.com/',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
+    'Upgrade-Insecure-Requests': '1'
+  };
+
+  try {
+    const domain = new URL(url).hostname;
+    if (domain.includes('ajpmonline.org') || domain.includes('sciencedirect.com') || domain.includes('elsevier.com') || domain.includes('pubs.aip.org')) {
+      headers['Referer'] = `https://${domain}/`;
+      headers['User-Agent'] = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+    }
+  } catch (e) {}
+
+  console.log(`[ROBUST_DOWNLOAD] Attempting download from: ${url}`);
+  const response = await axios.get(url, {
+    responseType: 'arraybuffer',
+    headers: headers,
+    timeout: 15000
+  });
+
+  const contentEncodingRaw = response.headers ? (response.headers['content-encoding'] || response.headers['Content-Encoding'] || '') : '';
+  const contentEncoding = Array.isArray(contentEncodingRaw) ? contentEncodingRaw[0] : String(contentEncodingRaw);
+  
+  let decompressed = decompressResponse(Buffer.from(response.data), contentEncoding);
+  decompressed = tryDecompressFallback(decompressed);
+
+  const magic = decompressed.toString('utf-8', 0, 5);
+  const isHtml = magic.trim().startsWith('<') || magic.trim().toLowerCase().startsWith('!doc') || magic.toLowerCase().includes('<html');
+  
+  if (isHtml) {
+    console.log(`[ROBUST_DOWNLOAD] Loaded page is HTML, not PDF. Crawling for direct PDF attachments...`);
+    const crawledPdf = await extractDirectPdfFromLandingPage(url, decompressed.toString('utf-8'));
+    if (crawledPdf) {
+      return crawledPdf;
+    }
+  }
+
+  return decompressed;
+}
+
+async function attemptBypassDownload(url: string): Promise<Buffer> {
+  try {
+    const buffer = await robustDownloadPdf(url);
+    const magic = buffer.toString('utf-8', 0, 4);
+    if (magic === '%PDF' || buffer.length > 100) {
+      return buffer;
+    }
+    throw new Error("Downloaded file is empty or not a valid format");
+  } catch (firstErr: any) {
+    console.warn(`[BYPASS] Primary download of ${url} failed: ${firstErr.message}. Attempting OpenAlex alternative lookup...`);
+    
+    try {
+      // Look up URL in OpenAlex locations using both full URL and any extracted DOI
+      const lookupsUrls = [
+        `https://api.openalex.org/works?filter=locations.landing_page_url:${encodeURIComponent(url)}&mailto=asnahonron@gmail.com`
+      ];
+
+      // Try DOI extraction too as DOIs are robust identifiers
+      const doiMatch = url.match(/(10\.\d{4,9}\/[-._;()/:A-Z0-9]+)/i);
+      if (doiMatch) {
+        let doi = doiMatch[1];
+        if (doi.endsWith(')')) doi = doi.substring(0, doi.length - 1);
+        lookupsUrls.unshift(`https://api.openalex.org/works/https://doi.org/${doi}?mailto=asnahonron@gmail.com`);
+      }
+
+      for (const queryOaUrl of lookupsUrls) {
+        console.log(`[BYPASS] Querying OpenAlex fallback index: ${queryOaUrl}`);
+        try {
+          const oaRes = await axios.get(queryOaUrl, { timeout: 10000 });
+          const workData = oaRes.data;
+          
+          let entry = null;
+          if (workData && workData.results && workData.results.length > 0) {
+            entry = workData.results[0];
+          } else if (workData && workData.id) {
+            entry = workData;
+          }
+
+          if (entry) {
+            console.log(`[BYPASS] Found matching OpenAlex paper: "${entry.title}"`);
+            const locations = entry.locations || [];
+            console.log(`[BYPASS] Paper has ${locations.length} alternative locations to try.`);
+            
+            for (const loc of locations) {
+              const fallbackUrl = loc.pdf_url || loc.landing_page_url;
+              if (fallbackUrl && fallbackUrl !== url) {
+                console.log(`[BYPASS] Attempting fallback download from: ${fallbackUrl}`);
+                try {
+                  const buffer = await robustDownloadPdf(fallbackUrl);
+                  const magic = buffer.toString('utf-8', 0, 4);
+                  if (magic === '%PDF') {
+                    console.log(`[BYPASS] Successfully bypassed 403 and retrieved PDF from alternative location: ${fallbackUrl}`);
+                    return buffer;
+                  }
+                } catch (fallbackErr: any) {
+                  console.warn(`[BYPASS] Fallback URL failed: ${fallbackUrl} - ${fallbackErr.message}`);
+                }
+              }
+            }
+          }
+        } catch (itemErr: any) {
+          console.warn(`[BYPASS] Single OpenAlex candidate lookup failed: ${itemErr.message}`);
+        }
+      }
+    } catch (oaErr: any) {
+      console.error(`[BYPASS] OpenAlex work backup resolution failed:`, oaErr.message);
+    }
+    
+    // Re-throw first error if match/fallback fails
+    throw firstErr;
+  }
+}
 
 // Initialize Firebase Admin
 if (!admin.apps.length) {
@@ -238,18 +563,21 @@ async function ensureUploadsDir() {
 const uploadedFiles = new Map<string, { buffer: Buffer, mimetype: string, originalname: string }>();
 
 async function saveFile(fileId: string, data: { buffer: Buffer, mimetype: string, originalname: string }) {
+  // Defensive deep copy to prevent in-place mutations (e.g., from Mega JS) from destroying the cached/disk buffer
+  const safeBuffer = Buffer.alloc(data.buffer.length);
+  Buffer.from(data.buffer).copy(safeBuffer);
+
   // 0. Validate PDF content if applicable
-  if (data.mimetype === 'application/pdf' && data.buffer.length > 4) {
-    const magic = data.buffer.toString('utf-8', 0, 4);
-    if (magic !== '%PDF') {
-      const errorMsg = `[STORAGE] File ${fileId} claims to be PDF but magic bytes are: ${magic}. Aborting save to prevent corrupt files.`;
-      console.error(errorMsg);
-      throw new Error(errorMsg);
+  if ((data.mimetype === 'application/pdf' || data.originalname.toLowerCase().endsWith('.pdf')) && safeBuffer.length > 4) {
+    const magic = safeBuffer.toString('utf-8', 0, 5);
+    if (!magic.startsWith('%PDF')) {
+      const errorMsg = `[STORAGE] File ${fileId} (${data.originalname}) claims to be PDF or has .pdf extension but does not start with %PDF. Magic bytes: ${magic}. This file might not be a valid PDF.`;
+      console.warn(errorMsg);
     }
   }
 
   // 1. Update cache
-  uploadedFiles.set(fileId, data);
+  uploadedFiles.set(fileId, { ...data, buffer: safeBuffer });
   
   // 2. Save to Disk (Fallback)
   try {
@@ -259,7 +587,7 @@ async function saveFile(fileId: string, data: { buffer: Buffer, mimetype: string
       originalname: data.originalname
     };
     await writeFile(path.join(UPLOADS_DIR, `${fileId}.json`), JSON.stringify(diskMetadata));
-    await writeFile(path.join(UPLOADS_DIR, `${fileId}.bin`), data.buffer);
+    await writeFile(path.join(UPLOADS_DIR, `${fileId}.bin`), safeBuffer);
     console.log(`[STORAGE] Successfully saved ${fileId} to disk`);
   } catch (diskErr) {
     console.error(`[STORAGE] Disk save failed for ${fileId}:`, diskErr);
@@ -269,7 +597,9 @@ async function saveFile(fileId: string, data: { buffer: Buffer, mimetype: string
   try {
     const mega = await getMegaClient();
     console.log(`[STORAGE] Uploading ${fileId} to Mega Storage...`);
-    const file = mega.root.upload(fileId, data.buffer);
+    const uploadBuffer = Buffer.alloc(safeBuffer.length); // extra defensive deep copy for mega
+    safeBuffer.copy(uploadBuffer);
+    const file = mega.root.upload(fileId, uploadBuffer);
     await new Promise<void>((resolve, reject) => {
       file.on('complete', resolve);
       file.on('error', reject);
@@ -321,14 +651,24 @@ async function getFile(fileId: string) {
     }
     
     const buffer = await new Promise<Buffer>((resolve, reject) => {
-      file.download((err: any, stream: any) => {
+      // In MegaJS, if a callback is passed to download(), it buffers the entire file and passes err, data (Buffer).
+      file.download((err: any, dataOrStream: any) => {
         if (err) return reject(err);
+        if (Buffer.isBuffer(dataOrStream)) {
+          return resolve(dataOrStream);
+        }
+        // Fallback for older/stream behavior
         const bufs: Buffer[] = [];
-        stream.on('data', (chunk: any) => bufs.push(chunk));
-        stream.on('end', () => resolve(Buffer.concat(bufs)));
-        stream.on('error', reject);
+        dataOrStream.on('data', (chunk: any) => bufs.push(chunk));
+        dataOrStream.on('end', () => resolve(Buffer.concat(bufs)));
+        dataOrStream.on('error', reject);
       });
     });
+
+    const magic = buffer.toString('utf-8', 0, 5);
+    if (!magic.startsWith('%PDF')) {
+      console.warn(`[STORAGE] WARNING: Retrieved file ${fileId} from Mega storage is NOT a PDF! Starts with: '${magic.replace(/[^ -~]+/g, '?')}'`);
+    }
     
     const data = {
       buffer,
@@ -436,33 +776,41 @@ async function startServer() {
     if (!url) return res.status(400).json({ error: "URL is required" });
     try {
       new URL(url); // Validate URL
-      const response = await axios.get(url, { 
-        responseType: 'arraybuffer', 
-        headers: { 
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/pdf,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Referer': 'https://www.google.com/'
-        } 
-      });
       
-    const contentType = response.headers['content-type'];
-    const dataBuffer = Buffer.from(response.data);
+      const dataBuffer = await attemptBypassDownload(url);
+      const sniffed = sniffMimeType(dataBuffer);
+      
+      let extension = sniffed.extension;
+      let mimetype = sniffed.mimetype;
+      let originalname = `document.${extension}`;
+      
+      try {
+        const parsedUrl = new URL(url);
+        const pathname = parsedUrl.pathname;
+        const lastPart = pathname.substring(pathname.lastIndexOf('/') + 1);
+        if (lastPart && lastPart.includes('.')) {
+          originalname = lastPart;
+          const extFromUrl = lastPart.split('.').pop()?.toLowerCase();
+          if (extFromUrl) {
+            extension = extFromUrl;
+            if (sniffed.mimetype === 'text/html' || sniffed.mimetype === 'text/plain') {
+              mimetype = sniffed.mimetype;
+            }
+          }
+        } else {
+          originalname = `downloaded_file.${extension}`;
+        }
+      } catch (e) {
+        originalname = `downloaded_file.${extension}`;
+      }
 
-    if (typeof contentType === 'string' && contentType.includes('text/html')) {
-        throw new Error(`The URL returned HTML instead of a PDF. It might be behind a login or blocked.`);
-    }
-
-    if (dataBuffer.length < 4 || dataBuffer.toString('utf-8', 0, 4) !== '%PDF') {
-      throw new Error(`Invalid PDF signature. The source returned something that isn't a PDF.`);
-    }
-
-    const fileId = `file-${Date.now()}`;
-    await saveFile(fileId, {
-      buffer: dataBuffer,
-      mimetype: 'application/pdf',
-      originalname: 'document.pdf'
-    });
-      res.json({ success: true, fileId });
+      const fileId = `file-${Date.now()}`;
+      await saveFile(fileId, {
+        buffer: dataBuffer,
+        mimetype: mimetype,
+        originalname: originalname
+      });
+      res.json({ success: true, fileId, fileName: originalname, mimetype });
     } catch (err: any) {
       console.error("[PDF Download] Error:", err);
       res.status(500).json({ success: false, error: err.message });
@@ -522,7 +870,7 @@ Use a professional, encouraging tone. Do not use markdown headers; use bolding f
 
       const client = getMistralClient();
       const completion = await client.chat.completions.create({
-        model: "mistral-small-latest",
+        model: "ministral-8b-latest",
         messages: [
           {
             role: "system",
@@ -676,7 +1024,7 @@ Keep the 'fileType' as either 'Note' or 'Document'.`;
 
       const client = getMistralClient();
       const completion = await client.chat.completions.create({
-        model: "mistral-small-latest",
+        model: "ministral-8b-latest",
         messages: [
           {
             role: "system",
@@ -731,7 +1079,7 @@ Keep the 'fileType' as either 'Note' or 'Document'.`;
       try {
         const client = getMistralClient();
         const completion = await client.chat.completions.create({
-          model: "mistral-small-latest",
+          model: "ministral-8b-latest",
           messages: [
             {
               role: "system",
@@ -766,56 +1114,9 @@ Keep the 'fileType' as either 'Note' or 'Document'.`;
     }
   });
 
-  // Local helper to generate a fallback academic metadata briefing PDF using PDFKit
-  async function generateLocalFallbackPdfBuffer(title: string, author: string, year: string, abstract: string, venue: string): Promise<Buffer> {
-    const doc = new PDFDocument({ margin: 50 });
-    const buffers: Buffer[] = [];
-    doc.on('data', buffers.push.bind(buffers));
-    
-    doc.fontSize(22).font('Helvetica-Bold').fillColor('#0f172a').text(title, { align: 'center' });
-    doc.moveDown(0.5);
-    doc.fontSize(12).font('Helvetica-Oblique').fillColor('#475569').text(`${author || 'Unknown Author'} (${year || '2026'}) ${venue ? `• ${venue}` : ''}`, { align: 'center' });
-    doc.moveDown(2);
-    
-    doc.fontSize(10).font('Helvetica-Bold').fillColor('#b45309').text('[ACCESS NOTE: The original full-text PDF for this paper is hosted behind a publisher portal. Direct automated scholar-sync returned a security token check. An interactive Scholar Note has been generated based on the metadata index.]', { align: 'center' });
-    doc.moveDown(1.5);
+  // Helper for delays
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-    const sectionTitleColor = '#1e293b';
-    const bodyTextColor = '#334155';
-
-    if (abstract && abstract !== "No abstract available.") {
-      doc.fontSize(14).font('Helvetica-Bold').fillColor(sectionTitleColor).text('Research Abstract');
-      doc.moveDown(0.5);
-      doc.fontSize(11).font('Helvetica').fillColor(bodyTextColor).text(abstract, { align: 'justify', lineGap: 3 });
-      doc.moveDown(1.5);
-    }
-
-    doc.fontSize(14).font('Helvetica-Bold').fillColor(sectionTitleColor).text('Paper Metadata & Reference');
-    doc.moveDown(0.5);
-    doc.fontSize(10).font('Helvetica').fillColor(bodyTextColor).text(`Year: ${year || 'N/A'}`);
-    doc.text(`Venue/Journal: ${venue || 'Academic Index'}`);
-    doc.moveDown(1.5);
-
-    doc.fontSize(14).font('Helvetica-Bold').fillColor(sectionTitleColor).text('Scholarly Insight & Context');
-    doc.moveDown(0.5);
-    const synthesizedOverview = `This document represents a metadata-enriched Scholar Note. 
-
-How to proceed with this interactive workspace:
-1. Annotation: Use sidebar tools to mark sections of interest in this abstract.
-2. Citation Management: This paper is indexed in your workspace with its DOI/PaperID.
-3. Analysis: If you have access to the physical PDF, you can manually upload it to replace this placeholder.
-
-The synthesis engine has verified this reference as a valid citation for your current research draft.`;
-    doc.fontSize(11).font('Helvetica').fillColor(bodyTextColor).text(synthesizedOverview, { align: 'justify', lineGap: 3 });
-
-    doc.end();
-
-    return new Promise<Buffer>((resolve) => {
-      doc.on('end', () => {
-        resolve(Buffer.concat(buffers));
-      });
-    });
-  }
 
   // Research Chat & Academic Draft Optimizer Route
   app.post("/api/research/chat", async (req, res) => {
@@ -828,7 +1129,7 @@ The synthesis engine has verified this reference as a valid citation for your cu
       }
 
       const lastMessage = messages[messages.length - 1]?.content || "";
-      const isSearchRequest = /find|search|research|papers|articles|studies|scholar|source|lookup|download|internet|web|document/i.test(lastMessage) && lastMessage.length < 250;
+      const isSearchRequest = false;
 
       let researchContext = "";
       if (isSearchRequest) {
@@ -837,25 +1138,35 @@ The synthesis engine has verified this reference as a valid citation for your cu
         
         // 1. Try Semantic Scholar
         try {
-          console.log(`[AUTO-SEARCH] Querying Semantic Scholar for: "${lastMessage}"`);
-          const searchResponse = await axios.get(`https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(lastMessage)}&limit=3&fields=title,authors,year,abstract,venue,url,openAccessPdf`, {
-            timeout: 6000,
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-          });
-          if (searchResponse.status === 200) {
-            papers = searchResponse.data?.data || [];
-            console.log(`[AUTO-SEARCH] Semantic Scholar found ${papers.length} papers.`);
-          } else {
-            console.warn(`[AUTO-SEARCH] Semantic Scholar returned status ${searchResponse.status}`);
+          let searchResponse;
+          let attempt = 0;
+          while (attempt < 2) {
+            try {
+                searchResponse = await axios.get(`https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(lastMessage)}&limit=3&fields=title,authors,year,abstract,venue,url,openAccessPdf`, {
+                    timeout: 5000,
+                    headers: { 'User-Agent': 'Mozilla/5.0' }
+                });
+                break;
+            } catch (e: any) {
+                if (e.response && e.response.status === 429) {
+                    // Rate limited, break out to use OpenAlex instantly
+                    break;
+                }
+                attempt++;
+                if (attempt >= 2) break;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+          if (searchResponse?.status === 200) {
+            papers = (searchResponse.data?.data || []).filter((p: any) => !!p.openAccessPdf?.url);
           }
         } catch (e: any) {
-          console.error("[AUTO-SEARCH] Semantic Scholar failed, moving to fallback:", e.message || e);
+          // Silent fallback
         }
 
         // 2. OpenAlex Fallback
         if (papers.length === 0) {
           try {
-            console.log("[AUTO-SEARCH] Semantic Scholar failed/returned empty. Falling back to OpenAlex...");
             let cleanQuery = lastMessage.replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim();
             if (!cleanQuery) cleanQuery = "machine learning";
             const openAlexUrl = `https://api.openalex.org/works?search=${encodeURIComponent(cleanQuery)}&filter=has_pdf_url:true&per-page=3&mailto=asnahonron@gmail.com`;
@@ -865,7 +1176,6 @@ The synthesis engine has verified this reference as a valid citation for your cu
             });
             if (alexResponse.status === 200) {
               const results = alexResponse.data?.results || [];
-              console.log(`[AUTO-SEARCH] OpenAlex found ${results.length} papers.`);
               papers = results.map((entry: any) => {
                 let abstract = "No abstract available.";
                 if (entry.abstract_inverted_index) {
@@ -902,6 +1212,34 @@ The synthesis engine has verified this reference as a valid citation for your cu
           }
         }
 
+        // 3. CORE API Fallback
+        if (papers.length === 0 && process.env.CORE_API_KEY) {
+          try {
+            console.log("[AUTO-SEARCH] OpenAlex failed/returned empty. Falling back to CORE API...");
+            const coreResponse = await axios.get(`https://api.core.ac.uk/v3/works/search?q=${encodeURIComponent(lastMessage)}&limit=3`, {
+              headers: { 'Authorization': `Bearer ${process.env.CORE_API_KEY}` },
+              timeout: 6000
+            });
+            if (coreResponse.status === 200) {
+              const results = coreResponse.data?.results || [];
+              console.log(`[AUTO-SEARCH] CORE API found ${results.length} papers.`);
+              papers = results.map((entry: any) => {
+                return {
+                  title: entry.title || 'Unknown Title',
+                  authors: entry.authors?.map((a:any) => ({ name: a.name })) || [{ name: 'Unknown Author' }],
+                  year: entry.yearPublished || 2026,
+                  abstract: entry.abstract || 'No abstract available.',
+                  venue: entry.publisher || 'CORE Index',
+                  url: entry.downloadUrl,
+                  openAccessPdf: entry.downloadUrl ? { url: entry.downloadUrl } : null
+                };
+              }).filter((p: any) => !!p.openAccessPdf?.url);
+            }
+          } catch (coreErr: any) {
+            console.error("[AUTO-SEARCH] CORE API fallback failed:", coreErr.message || coreErr);
+          }
+        }
+
         if (papers.length > 0) {
           // Try to auto-download the top paper or generate a fallback PDF note
           let autoDownloadedInfo = "";
@@ -914,15 +1252,42 @@ The synthesis engine has verified this reference as a valid citation for your cu
           if (pdfUrl) {
             try {
               console.log(`[AUTO-DOWNLOAD] Attempting auto-download: ${pdfUrl}`);
-              const response = await axios.get(pdfUrl, { 
-                responseType: 'arraybuffer', 
-                headers: { 'User-Agent': 'Mozilla/5.0' },
-                timeout: 10000 
-              });
+              
+              // Exponential backoff for downloads
+              let response;
+              let attempt = 0;
+              while (attempt < 3) {
+                  try {
+                    response = await axios.get(pdfUrl, { 
+                        responseType: 'arraybuffer', 
+                        headers: { 
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                            'Accept': 'application/pdf',
+                            'Referer': 'https://scholar.google.com/',
+                            'Accept-Language': 'en-US,en;q=0.9',
+                            'Upgrade-Insecure-Requests': '1'
+                        },
+                        timeout: 15000 
+                    });
+                    break;
+                  } catch (e: any) {
+                      attempt++;
+                      if (attempt >= 3) throw e;
+                      await sleep(2000 * attempt);
+                  }
+              }
+              
+              // Check Content-Type header
+              const contentType = response?.headers['content-type']?.toLowerCase() || '';
+              if (!contentType.includes('pdf')) {
+                throw new Error(`Content-Type is ${contentType}, not application/pdf`);
+              }
               
               // Validate content signature
-              const dataBuffer = Buffer.from(response.data);
-              if (dataBuffer.length >= 4 && dataBuffer.toString('utf-8', 0, 4) === '%PDF') {
+              const dataBuffer = Buffer.from(response!.data);
+              
+              // Check specifically for PDF header at the very beginning
+              if (dataBuffer.length > 5 && dataBuffer.toString('utf-8', 0, 5) === '%PDF-') {
                 const fileId = `file-${Date.now()}`;
                 await saveFile(fileId, {
                   buffer: dataBuffer,
@@ -932,51 +1297,15 @@ The synthesis engine has verified this reference as a valid citation for your cu
                 autoDownloadedInfo = `\n\n[AUTO-SAVED PDF]: "${topPaper.title}" has been automatically downloaded and is available in your workspace (File ID: ${fileId}). You can now cite it.`;
                 console.log(`[AUTO-DOWNLOAD] File downloaded and stored successfully as ${fileId}`);
               } else {
-                throw new Error("Returned content is not a PDF");
+                 // Check if it's an error page
+                 const startText = dataBuffer.toString('utf-8', 0, 1024).toLowerCase();
+                 if (startText.includes('<html') || startText.includes('<!doctype') || startText.includes('error') || startText.includes('login')) {
+                     throw new Error("Returned content is likely an error/login page, not a PDF");
+                 }
+                 throw new Error("Returned content signature is not a PDF");
               }
             } catch (e: any) {
-              console.warn(`[AUTO-DOWNLOAD] Direct download failed for ${topPaper.title}:`, e.message || e, ". Creating metadata briefing note...");
-              try {
-                const fallbackBuffer = await generateLocalFallbackPdfBuffer(
-                  topPaper.title,
-                  authorStr,
-                  topPaper.year?.toString() || '2026',
-                  topPaper.abstract || 'No abstract available.',
-                  topPaper.venue || 'Academic Index'
-                );
-                const fileId = `file-${Date.now()}`;
-                await saveFile(fileId, {
-                  buffer: fallbackBuffer,
-                  mimetype: 'application/pdf',
-                  originalname: `${cleanTitle}_Note.pdf`
-                });
-                autoDownloadedInfo = `\n\n[AUTO-SAVED PDF]: A research briefing document for "${topPaper.title}" has been generated and auto-saved in your workspace (File ID: ${fileId}). This includes the paper's full meta-details and abstract. You can now cite it.`;
-                console.log(`[AUTO-DOWNLOAD] Succeeded in generating fallback PDF note as ${fileId}`);
-              } catch (fallbackErr) {
-                console.error("[AUTO-DOWNLOAD] Fallback PDF generation failed", fallbackErr);
-              }
-            }
-          } else {
-            // No direct URL: generate fallback PDF Note
-            try {
-              console.log(`[AUTO-DOWNLOAD] No direct PDF URL. Generating briefing note for ${topPaper.title}...`);
-              const fallbackBuffer = await generateLocalFallbackPdfBuffer(
-                topPaper.title,
-                authorStr,
-                topPaper.year?.toString() || '2026',
-                topPaper.abstract || 'No abstract available.',
-                topPaper.venue || 'Academic Index'
-              );
-              const fileId = `file-${Date.now()}`;
-              await saveFile(fileId, {
-                buffer: fallbackBuffer,
-                mimetype: 'application/pdf',
-                originalname: `${cleanTitle}_Note.pdf`
-              });
-              autoDownloadedInfo = `\n\n[AUTO-SAVED PDF]: A research briefing document for "${topPaper.title}" has been generated and auto-saved in your workspace (File ID: ${fileId}). This includes the paper's full meta-details and abstract. You can now cite it.`;
-              console.log(`[AUTO-DOWNLOAD] Succeeded in generating fallback PDF note as ${fileId}`);
-            } catch (fallbackErr) {
-              console.error("[AUTO-DOWNLOAD] Fallback PDF generation failed", fallbackErr);
+              console.warn(`[AUTO-DOWNLOAD] Direct download failed for ${topPaper.title}:`, e.message || e);
             }
           }
 
@@ -1032,7 +1361,7 @@ ${researchContext}
       const openaiMessages = messages.map((m: any) => ({
         role: m.role,
         content: m.content
-      }));
+      })).filter((m: any) => m.content && typeof m.content === 'string' && m.content.trim().length > 0);
 
       // Inject current workspace context
       openaiMessages.unshift({
@@ -1040,17 +1369,19 @@ ${researchContext}
         content: `Here is my current workspace state:\n${formattedContext}\nTreat this as background info. I am specifically asking you to help me with my document.`
       });
 
-      // Mistral client API call
-      const client = getMistralClient();
-      const completion = await client.chat.completions.create({
-        model: "mistral-small-latest",
-        messages: [
+      console.log(`[LLM] Preparing completion request with ${openaiMessages.length + 1} messages.`);
+      const messagesPayload = [
           {
             role: "system",
             content: systemInstruction,
           },
           ...openaiMessages
-        ],
+        ];
+      
+      const client = getMistralClient();
+      const completion = await client.chat.completions.create({
+        model: "ministral-8b-latest",
+        messages: messagesPayload,
         temperature: 0.7,
         stream: true
       });
@@ -1147,37 +1478,15 @@ ${researchContext}
         }
 
         let fileId = null;
+        let mimetype = 'application/pdf';
         if (pdfLink) {
           try {
             // wait a little bit to respect rate limits
             await new Promise(resolve => setTimeout(resolve, 500));
 
             const attemptDownload = async (url: string) => {
-              const headers: any = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'application/pdf,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Referer': 'https://www.google.com/',
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache',
-                'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                'sec-ch-ua-mobile': '?0',
-                'sec-ch-ua-platform': '"Windows"',
-                'Upgrade-Insecure-Requests': '1'
-              };
-              
-              try {
-                const domain = new URL(url).hostname;
-                if (domain.includes('ajpmonline.org') || domain.includes('sciencedirect.com') || domain.includes('elsevier.com')) {
-                   headers['Referer'] = `https://${domain}/`;
-                   headers['User-Agent'] = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-                }
-              } catch (e) {}
-
-              return await fetchWithRetry(url, { 
-                responseType: 'arraybuffer',
-                headers: headers
-              }, 1);
+              const buffer = await attemptBypassDownload(url);
+              return { data: buffer, headers: { 'content-type': 'application/pdf' } };
             };
 
             const generateFallbackPdf = async (title: string, author: string, year: string, abstract: string, paperId: string, venue?: string) => {
@@ -1223,13 +1532,16 @@ How to proceed with this interactive workspace:
 The synthesis engine has verified this reference as a valid citation for your current research draft.`;
                 doc.fontSize(11).font('Helvetica').fillColor(bodyTextColor).text(synthesizedOverview, { align: 'justify', lineGap: 3 });
 
-                doc.end();
-
-                const pdfData = await new Promise<Buffer>((resolve) => {
+                const pdfDataPromise = new Promise<Buffer>((resolve) => {
                   doc.on('end', () => {
                     resolve(Buffer.concat(buffers));
                   });
                 });
+
+                doc.end();
+
+                const pdfData = await pdfDataPromise;
+                console.log(`[PDF_GEN] Generated PDF buffer size 1: ${pdfData.length} bytes, starts with: ${pdfData.toString('utf-8', 0, 5)}`);
 
                 const fallbackId = `semantic-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
                 await saveFile(fallbackId, {
@@ -1247,16 +1559,6 @@ The synthesis engine has verified this reference as a valid citation for your cu
             let pdfRes;
             try {
               pdfRes = await attemptDownload(pdfLink);
-              
-              // Validate content is actually PDF
-              if (pdfRes && pdfRes.data) {
-                const buffer = Buffer.from(pdfRes.data);
-                const magic = buffer.toString('utf-8', 0, 4);
-                if (magic !== '%PDF') {
-                  const statusInfo = pdfRes.status ? ` (Status: ${pdfRes.status})` : '';
-                  throw new Error(`Invalid PDF signature (${magic})${statusInfo}. Likely fetched HTML or error page.`);
-                }
-              }
             } catch (pdfErr: any) {
               const statusStr = pdfErr.response ? ` [Status ${pdfErr.response.status}]` : '';
               console.warn(`Primary download failed for ${title} from ${pdfLink}:${statusStr} ${pdfErr.message}. Trying fallbacks.`);
@@ -1267,15 +1569,6 @@ The synthesis engine has verified this reference as a valid citation for your cu
                   try {
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     pdfRes = await attemptDownload(loc.pdf_url);
-                    
-                    if (pdfRes && pdfRes.data) {
-                      const buffer = Buffer.from(pdfRes.data);
-                      const magic = buffer.toString('utf-8', 0, 4);
-                      if (magic !== '%PDF') {
-                        throw new Error(`Invalid fallback signature (${magic}).`);
-                      }
-                    }
-                    
                     pdfLink = loc.pdf_url;
                     break;
                   } catch (e) {
@@ -1290,18 +1583,31 @@ The synthesis engine has verified this reference as a valid citation for your cu
             if (pdfRes) {
               try {
                 fileId = `semantic-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-                await saveFile(fileId, {
-                  buffer: Buffer.from(pdfRes.data),
-                  mimetype: 'application/pdf',
-                  originalname: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
-                });
+                const buffer = Buffer.from(pdfRes.data);
+                const sniffed = sniffMimeType(buffer);
+                
+                if (sniffed.mimetype === 'application/pdf' || sniffed.mimetype === 'text/html' || sniffed.mimetype === 'text/plain' || sniffed.mimetype.includes('word') || sniffed.mimetype.includes('docx')) {
+                  console.log(`[DOWNLOAD-MIME] Successfully resolved readable document type: ${sniffed.mimetype} for ${title}`);
+                  await saveFile(fileId, {
+                    buffer: buffer,
+                    mimetype: sniffed.mimetype,
+                    originalname: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.${sniffed.extension}`
+                  });
+                  mimetype = sniffed.mimetype;
+                } else {
+                  console.warn(`Downloaded content for ${title} has unsupported mime type: ${sniffed.mimetype} (starts with ${buffer.toString('utf-8', 0, 15)}). Falling back to summary PDF.`);
+                  fileId = await generateFallbackPdf(title, author, year, abstract, entry.paperId, entry.venue);
+                  mimetype = 'application/pdf';
+                }
               } catch (saveErr) {
-                console.error(`Failed to save real PDF for ${title}, falling back to summary:`, saveErr);
+                console.error(`Failed to save real file for ${title}, falling back to summary:`, saveErr);
                 fileId = await generateFallbackPdf(title, author, year, abstract, entry.paperId, entry.venue);
+                mimetype = 'application/pdf';
               }
             } else {
-              console.warn(`All PDF download attempts failed for ${title}. Creating elegant summary PDF fallback...`);
+              console.warn(`All download attempts failed for ${title}. Creating elegant summary PDF fallback...`);
               fileId = await generateFallbackPdf(title, author, year, abstract, entry.paperId, entry.venue);
+              mimetype = 'application/pdf';
             }
           } catch (outerErr: any) {
              console.error(`Outer error for ${title}:`, outerErr.message);
@@ -1314,7 +1620,8 @@ The synthesis engine has verified this reference as a valid citation for your cu
           abstract,
           year,
           url: entry.url || pdfLink,
-          fileId
+          fileId,
+          mimetype
         });
       }
 

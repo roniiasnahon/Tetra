@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Icon } from '@iconify/react';
 import { Edit2, ExternalLink, Unlink, Link as LinkIcon, PanelRight, Coffee, X } from 'lucide-react';
 import { SidePanel } from './components/SidePanel';
+import { AuthenticationScreen } from './components/AuthenticationScreen';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -14,6 +15,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 // Firebase imports
 import { auth, db, OperationType, handleFirestoreError, signInWithPopup, googleProvider, signOut } from './firebase';
 import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocFromServer } from 'firebase/firestore';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -256,8 +258,6 @@ const parseAssistantResponse = (text: string) => {
     );
     if (firstTagIdx > 0 && firstTagIdx !== Infinity) {
       thoughtStartIdx = 0;
-    } else if (firstTagIdx === Infinity) {
-      thoughtStartIdx = 0;
     }
   }
 
@@ -288,7 +288,7 @@ const parseAssistantResponse = (text: string) => {
   const chatStartTagIdx = lowerText.indexOf("<chat>", chatStartSearchIdx);
   let chatStartIdx = chatStartTagIdx !== -1 ? chatStartTagIdx + 6 : -1;
 
-  if (chatStartIdx === -1 && chatStartSearchIdx > 0) {
+  if (chatStartIdx === -1 && chatStartSearchIdx >= 0) {
     const nextTagIdx = Math.min(
       lowerText.indexOf("<title>", chatStartSearchIdx) !== -1 ? lowerText.indexOf("<title>", chatStartSearchIdx) : Infinity,
       lowerText.indexOf("<replacecontent>", chatStartSearchIdx) !== -1 ? lowerText.indexOf("<replacecontent>", chatStartSearchIdx) : Infinity
@@ -303,6 +303,12 @@ const parseAssistantResponse = (text: string) => {
   let chatEndIdx = -1;
   let titleStartSearchIdx = chatStartSearchIdx;
 
+  const stripSearchTags = (str: string) => {
+    const idx = str.toLowerCase().indexOf("<searchrealpapers");
+    if (idx !== -1) return str.substring(0, idx).trim();
+    return str;
+  };
+
   if (chatStartIdx !== -1) {
     const chatEndTagIdx = lowerText.indexOf("</chat>", chatStartIdx);
     if (chatEndTagIdx !== -1) {
@@ -313,10 +319,12 @@ const parseAssistantResponse = (text: string) => {
       // to parse any following <title> or <replacecontent> blocks because we are still
       // actively streaming the chat segment. This prevents any mentioned markdown tags in conversational text.
       chat = text.substring(chatStartIdx).trim();
+      chat = stripSearchTags(chat);
       return { thought, chat, title: "", replaceContent: "", searchRealPapersQuery: "" };
     }
 
     chat = text.substring(chatStartIdx, chatEndIdx).trim();
+    chat = stripSearchTags(chat);
   }
 
   // 3. Parse <title> and <replacecontent> starting from after the chat block ends
@@ -377,6 +385,14 @@ const parseAssistantResponse = (text: string) => {
      searchRealPapersQuery = searchRealPapersQuery.substring(0, 100);
   }
 
+  // Strip tags from chat if model hallucinates <searchRealPapers> inside chat
+  if (chat) {
+    const srIdx = chat.toLowerCase().indexOf("<searchrealpapers>");
+    if (srIdx !== -1) {
+      chat = chat.substring(0, srIdx).trim();
+    }
+  }
+
   return { thought, chat, title, replaceContent, searchRealPapersQuery };
 };
 
@@ -402,8 +418,51 @@ const extractTextFromPdf = async (url: string): Promise<string> => {
     
     // Quick validation of PDF header
     const header = new TextDecoder().decode(new Uint8Array(arrayBuffer.slice(0, 4)));
-    if (header !== '%PDF') {
-      throw new Error(`Invalid PDF structure: the file starts with "${header}" instead of "%PDF". It might be a protected page or an error message.`);
+    if (!header.startsWith('%PDF')) {
+      const sample = new TextDecoder().decode(new Uint8Array(arrayBuffer.slice(0, 10)));
+      console.warn(`File is not a valid PDF. Expected %PDF, got: '${header}'. Sample: '${sample}'. Falling back to raw text/HTML extraction.`);
+      
+      const fileIdMatch = pdfUrlToLoad.match(/\/api\/files\/([^\/]+)/);
+      if (fileIdMatch) {
+        const fileId = fileIdMatch[1];
+        try {
+          const rawTextRes = await fetch(`/api/files/${fileId}/raw-text`);
+          if (rawTextRes.ok) {
+            const rawTextData = await rawTextRes.json();
+            if (rawTextData.success && rawTextData.text) {
+              let cleanText = rawTextData.text;
+              if (cleanText.toLowerCase().includes('<html') || cleanText.toLowerCase().includes('<!doctype')) {
+                cleanText = cleanText
+                  .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                  .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+                  .replace(/<[^>]+>/g, ' ')
+                  .replace(/\s+/g, ' ')
+                  .trim();
+              }
+              return cleanText;
+            }
+          }
+        } catch (e) {
+          console.error("Failed raw-text fallback fetch:", e);
+        }
+      }
+
+      // Final fallback: decode arrayBuffer directly as UTF-8 string
+      try {
+        let cleanText = new TextDecoder().decode(arrayBuffer);
+        if (cleanText.toLowerCase().includes('<html') || cleanText.toLowerCase().includes('<!doctype')) {
+          cleanText = cleanText
+            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+            .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        }
+        return cleanText;
+      } catch (decodeErr) {
+        console.error("Failed arrayBuffer string decode:", decodeErr);
+      }
+      return "";
     }
 
     const loadingTask = pdfjs.getDocument({
@@ -427,6 +486,30 @@ const extractTextFromPdf = async (url: string): Promise<string> => {
     console.error("Error extracting PDF text:", error);
     return "";
   }
+};
+
+const formatAbstractText = (text: string) => {
+  if (!text) return "";
+  let cleanText = text.replace(/^Abstract\s*[:\-]*\s*/i, '').trim();
+  if (cleanText.includes('\n\n')) return cleanText;
+  
+  const sentences = cleanText.match(/[^.!?]+[.!?]+(?:\s|$)/g);
+  if (!sentences || sentences.length <= 4) return cleanText;
+  
+  let formatted = "";
+  for (let i = 0; i < sentences.length; i++) {
+    formatted += sentences[i].trim() + " ";
+    if ((i + 1) % 4 === 0 && i !== sentences.length - 1) {
+      formatted += "\n\n";
+    }
+  }
+  
+  const formattedLength = sentences.join('').length;
+  if (formattedLength < cleanText.length) {
+    formatted += cleanText.substring(formattedLength).trim();
+  }
+  
+  return formatted.trim();
 };
 
 export default function App() {
@@ -1024,7 +1107,7 @@ export default function App() {
     try {
       const resp = await fetch(`/api/research/papers?q=${encodeURIComponent(searchQuery)}`);
       const data = await resp.json();
-      setSearchResults(data);
+      setSearchResults(data.papers || (Array.isArray(data) ? data : []));
     } catch (err) {
       console.error("Search failed:", err);
     } finally {
@@ -1050,35 +1133,78 @@ export default function App() {
     }
   };
 
-  const addPaperToLibrary = (paper: any) => {
+  const addPaperToLibrary = async (paper: any) => {
     const authors = paper.authors?.map((a: any) => a.name).join(', ') || 'Unknown Author';
     const targetFolder = selectedFolderId || folders[0]?.id || 'f1';
+    
+    // Extract actual text if file exists and it is not a pdf
+    let extractedText = "";
+    if (paper.fileId) {
+      try {
+        extractedText = await extractTextFromPdf(`/api/files/${paper.fileId}`);
+      } catch (err) {
+        console.error("Failed to extract text for paper saved to library:", err);
+      }
+    }
+
     const newPaper: PaperItem = {
       author: authors,
       title: paper.title,
       description: paper.abstract || `Paper from ${paper.venue || 'Academic Repository'}`,
       added: "Today",
-      fullTextStatus: "Available",
+      fullTextStatus: paper.fileId ? "Mapped" : "Available",
       viewed: "Just now",
       fileType: "Document",
-      summary: "",
+      summary: paper.abstract || "",
+      fileId: paper.fileId || "",
+      mimetype: paper.mimetype || "",
+      extractedText: extractedText,
       folderId: targetFolder
     };
     dbSetPaper(newPaper);
 
     // Auto-create and switch to a new document tab with the added document's content
-    const newTabId = `added-${Date.now()}`;
-    setTabs(prev => [
-      ...prev,
-      {
-        id: newTabId,
-        type: 'document',
-        title: paper.title,
-        content: `<h3>${paper.title}</h3><p><em>${authors}</em></p><p>${newPaper.description}</p>`,
-        folderId: targetFolder
+    const newTabId = paper.fileId ? `view-${paper.fileId}` : `added-${Date.now()}`;
+    
+    let initialContent = "";
+    const isPdfValue = paper.mimetype === 'application/pdf' || paper.title.toLowerCase().endsWith('.pdf');
+    if (extractedText && !isPdfValue) {
+      initialContent = `<div class="p-6 text-zinc-300 max-w-3xl mx-auto">
+        <h1 class="text-3xl font-medium tracking-tight mb-2 text-white">${paper.title}</h1>
+        <p class="text-[11px] font-mono text-zinc-500 mb-6 uppercase tracking-wider">Document File: ${paper.title}</p>
+        <div class="h-[1px] bg-zinc-800 mb-6"></div>
+        <div class="space-y-4 leading-relaxed">${extractedText.split('\n\n').map((p: string) => p.trim() ? `<p>${p.replace(/\n/g, '<br/>')}</p>` : '').join('')}</div>
+      </div>`;
+    } else {
+      initialContent = `<h3>${paper.title}</h3><p><em>${authors}</em></p><p>${newPaper.description}</p>`;
+    }
+
+    setTabs(prev => {
+      // Avoid adding duplicate tabs if already open
+      const existing = prev.find(t => t.title === paper.title);
+      if (existing) {
+        return prev;
       }
-    ]);
-    setActiveTabId(newTabId);
+      return [
+        ...prev,
+        {
+          id: newTabId,
+          type: 'document',
+          title: paper.title,
+          content: initialContent,
+          fileId: paper.fileId || '',
+          mimetype: paper.mimetype || '',
+          folderId: targetFolder
+        }
+      ];
+    });
+    
+    const existingTab = tabs.find(t => t.title === paper.title);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+    } else {
+      setActiveTabId(newTabId);
+    }
   };
 
   // AI Assistant Chat Messages
@@ -1211,7 +1337,13 @@ export default function App() {
     if (!markdown) return "";
     try {
       // Replace literal escaped newlines with actual newline characters
-      const formattedMarkdown = markdown.replace(/\\n/g, '\n');
+      let formattedMarkdown = markdown.replace(/\\n/g, '\n');
+      
+      // Attempt to add spacing to massive walls of text
+      if (formattedMarkdown.length > 500 && !formattedMarkdown.includes('\n\n')) {
+        formattedMarkdown = formatAbstractText(formattedMarkdown);
+      }
+      
       // Trim outer whitespace so that heading tags (like ## Introduction) 
       // placed at the start/ends are parsed as actual headings, not inline text.
       const trimmedMarkdown = formattedMarkdown.trim();
@@ -1406,16 +1538,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          messages: [...messages, userMessage].map(m => ({ role: m.role, content: m.content })),
+          messages: [...messages, userMessage].slice(-20).map(m => ({ role: m.role, content: m.content })),
           context: {
             notes: [`Document Title: ${documentTitle}`, `Saved under folder: ${folderName}`, `Note context: ${savedNoteName}`],
-            citations: papers.map(p => ({
+            citations: papers.map((p, idx) => ({
               title: p.title,
               authors: p.author,
               source: "Academic Import Database",
               year: p.author.match(/\d{4}/)?.[0] || '2023',
               format: 'APA',
-              fullText: p.extractedText || p.summary || ""
+              fullText: idx < 15 ? (p.extractedText || p.summary || "").substring(0, 15000) : (p.summary || "").substring(0, 3000)
             })),
             outline: [{
               id: "sec-main",
@@ -1520,7 +1652,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                fileType: "Document",
                                summary: p.abstract || "",
                                fileId: p.fileId,
-                               mimetype: "application/pdf",
+                               mimetype: p.mimetype || "application/pdf",
                                extractedText: p.fileId ? await extractTextFromPdf(`/api/files/${p.fileId}`) : "",
                                folderId: selectedFolderId || folders[0]?.id || 'f1'
                              };
@@ -1541,7 +1673,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                    const assistantMsg: ChatMessage = {
                                      id: String(Date.now() + Math.random()),
                                      role: 'assistant',
-                                     content: `### New Research Mapped: ${p.title}\n\n**Overview:** ${p.summary || "I have successfully indexed this paper. You can now ask me questions about its methodology or findings."}`,
+                                     content: `### New Research Mapped: ${p.title}\n\n**Overview:**\n\n${formatAbstractText(p.summary || "I have successfully indexed this paper. You can now ask me questions about its methodology or findings.")}`,
                                      timestamp: Date.now()
                                    };
                                    updateChatMessages(prev => [...prev, assistantMsg], false);
@@ -1744,15 +1876,23 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
 
       setTimeout(() => {
-        updateChatMessages(prev => [
-          ...prev,
-          {
-            id: String(Date.now() + 1),
-            role: 'assistant',
-            content: simulatedAnswer,
-            timestamp: Date.now()
+        updateChatMessages(prev => {
+          const idx = prev.findIndex(m => m.id === assistantMessageIdRef.current);
+          if (idx !== -1) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], content: simulatedAnswer };
+            return next;
           }
-        ]);
+          return [
+            ...prev,
+            {
+              id: String(Date.now() + 1),
+              role: 'assistant',
+              content: simulatedAnswer,
+              timestamp: Date.now()
+            }
+          ];
+        });
         
         // Generate fallback title
         const currentTab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
@@ -1836,53 +1976,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
   }
 
   if (!currentUser) {
-    return (
-      <div className="h-screen bg-[#070707] flex items-center justify-center p-4 selection:bg-zinc-800 selection:text-white">
-        <motion.div 
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-          className="w-full max-w-md bg-[#0c0c0e] border border-[#27272a] rounded-2xl p-10 flex flex-col items-center relative overflow-hidden"
-        >
-          {/* Subtle line background details, no glowing effects */}
-          <div className="absolute top-0 inset-x-0 h-px bg-[#27272a]/30" />
-          
-          <div className="w-14 h-14 bg-[#121214] border border-[#27272a] rounded-2xl flex items-center justify-center mb-8 relative z-10 transition-colors group">
-            <Icon icon="ph:database-duotone" className="w-7 h-7 text-emerald-400" />
-          </div>
-          
-          <h1 className="text-2xl font-bold text-white mb-2 relative z-10 text-center tracking-tight font-jakarta">
-            Research Workspace
-          </h1>
-          
-          <p className="text-zinc-400 text-sm mb-10 text-center leading-relaxed relative z-10 max-w-xs font-jakarta">
-            A collaborative space to assemble context, analyze literature, and refine hypotheses.
-          </p>
-          
-          <button
-            onClick={async () => {
-              try {
-                await signInWithPopup(auth, googleProvider);
-              } catch (err) {
-                console.error("Sign in failed:", err);
-              }
-            }}
-            className="w-full flex items-center justify-center gap-3 px-4 py-3.5 bg-white hover:bg-zinc-200 text-black rounded-xl text-sm font-semibold transition-all active:scale-[0.99] relative z-10 cursor-pointer border border-transparent"
-          >
-            <Icon icon="logos:google-icon" className="w-4 h-4 shrink-0" />
-            <span className="font-jakarta text-[13px] font-bold">Continue with Google</span>
-          </button>
-          
-          <div className="mt-10 pt-6 border-t border-zinc-900 w-full flex items-center justify-between text-[11px] text-zinc-500 font-mono">
-            <span className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-              Sync Engine Online
-            </span>
-            <span>v1.2.0</span>
-          </div>
-        </motion.div>
-      </div>
-    );
+    return <AuthenticationScreen />;
   }
 
   return (
@@ -1945,20 +2039,36 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   } catch (pdfErr) {
                     console.error("PDF mapping failed", pdfErr);
                   }
-                } else if (fileLabel.toLowerCase().endsWith('.docx') || fileLabel.toLowerCase().endsWith('.txt') || fileLabel.toLowerCase().endsWith('.md')) {
+                } else if (
+                  fileLabel.toLowerCase().endsWith('.docx') || 
+                  fileLabel.toLowerCase().endsWith('.txt') || 
+                  fileLabel.toLowerCase().endsWith('.md') ||
+                  fileLabel.toLowerCase().endsWith('.html') ||
+                  fileLabel.toLowerCase().endsWith('.htm')
+                ) {
                   try {
                     const textRes = await fetch(`/api/files/${data.fileId}/raw-text`);
                     if (textRes.ok) {
                       const textData = await textRes.json();
                       if (textData.success && textData.text) {
-                        extractedText = textData.text;
+                        let cleanText = textData.text;
+                        if (fileLabel.toLowerCase().endsWith('.html') || fileLabel.toLowerCase().endsWith('.htm')) {
+                          // Strip script / style tags and HTML tags for elegant context
+                          cleanText = cleanText
+                            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                            .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+                            .replace(/<[^>]+>/g, ' ')
+                            .replace(/\s+/g, ' ')
+                            .trim();
+                        }
+                        extractedText = cleanText;
                         summaryInfo = `This document is parsed and mapped successfully. You can start synthesizing your notes, analyzing findings, and asking the Assistant specifically about its claims.`;
                         const words = extractedText.trim().split(/\s+/).filter(Boolean).length;
                         pagesCountString = ` (${words} words mapped)`;
                       }
                     }
                   } catch (docxErr) {
-                    console.error("Docx/Text mapping failed", docxErr);
+                    console.error("Docx/Text/HTML mapping failed", docxErr);
                   }
                 }
 
@@ -2505,9 +2615,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
             {/* Bottom Section */}
             <div className="mt-auto p-3">
-              <button className="w-full flex items-center gap-2 px-2 py-2 text-[#71717a] hover:text-[#a1a1aa] text-[12px] font-medium transition-colors">
-                <Icon icon="ph:question" className="w-3.5 h-3.5" />
-                <span>Support</span>
+              <button 
+                onClick={() => setShowBuyCoffeeModal(true)}
+                className="w-full flex items-center gap-2.5 px-2 py-2 text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#1a1a1a] rounded-lg text-[12px] font-medium transition-all cursor-pointer group"
+              >
+                <Coffee className="w-3.5 h-3.5 text-[#52525b] group-hover:text-[#e3a088]" />
+                <span>Buy me a coffee</span>
               </button>
 
               {/* User Profile Header */}
@@ -2633,7 +2746,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
           <Icon icon="ph:pencil-line" className="w-3.5 h-3.5" />
         )}
         <span className="truncate max-w-[130px]">
-          {tab.type === 'home' ? 'Home' : tab.type === 'library' ? 'Library' : (tab.id === activeTabId && tab.type === 'document' && (!tab.fileId || !(tab.mimetype === 'application/pdf' || tab.title.toLowerCase().endsWith('.pdf'))) ? documentTitle : tab.title) || 'Untitled'}
+          {tab.type === 'home' ? 'Home' : tab.type === 'library' ? 'Library' : (tab.id === activeTabId && tab.type === 'document' && (!tab.fileId || tab.mimetype !== 'application/pdf') ? documentTitle : tab.title) || 'Untitled'}
         </span>
         {tabs.length > 1 && (
           <button 
@@ -2670,14 +2783,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
           
           {/* Right Header Navigation & Panel Controls */}
           <div className="flex items-center gap-2 h-full pb-1.5 pt-1.5 text-[#f4f4f5]">
-            <button 
-              onClick={() => setShowBuyCoffeeModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#1d1614] border border-[#30211d] text-[#e3a088] hover:text-[#fad2c3] hover:bg-[#261d1a] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98] whitespace-nowrap"
-              title="Buy us a coffee"
-            >
-              <Coffee className="w-3.5 h-3.5 text-[#e3a088] shrink-0" />
-              <span>Buy me a Coffee</span>
-            </button>
             {!isAssistantOpen && (
               <button 
                 onClick={() => setIsAssistantOpen(true)}
@@ -3004,15 +3109,18 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               : 'w-full text-[#d4d4d8] py-2'
                           } text-[15px] leading-[1.6]`}>
                             {m.role === 'assistant' && m.thought && (
-                              <details className="mb-3 group">
-                                <summary className="text-[11px] font-medium text-[#71717a] hover:text-[#a1a1aa] cursor-pointer transition-colors list-none outline-none inline-flex items-center gap-1.5 font-jakarta uppercase tracking-widest select-none">
-                                  <div className="w-1.5 h-1.5 rounded-full bg-[#71717a] group-hover:bg-[#a1a1aa] transition-colors" />
-                                  Thought Process
-                                </summary>
-                                <div className="mt-3 text-[13.5px] text-[#a1a1aa] pb-4 leading-relaxed font-jakarta">
-                                  {m.thought}
-                                </div>
-                              </details>
+                              <div className="mb-4">
+                                <details className="group [&_summary::-webkit-details-marker]:hidden">
+                                  <summary className="flex items-center gap-2 cursor-pointer text-xs font-medium text-zinc-500 hover:text-zinc-400 transition-colors select-none w-fit">
+                                    <Icon icon="ph:brain" className="w-4 h-4" />
+                                    <span>Thought Process</span>
+                                    <Icon icon="ph:caret-right" className="w-3 h-3 group-open:rotate-90 transition-transform" />
+                                  </summary>
+                                  <div className="mt-2 pl-3.5 border-l border-zinc-800 text-[13px] text-zinc-500 font-mono whitespace-pre-wrap leading-relaxed">
+                                    {m.thought}
+                                  </div>
+                                </details>
+                              </div>
                             )}
                             <div className={`select-text break-words ${m.role === 'user' ? 'whitespace-pre-wrap' : 'markdown-body text-[#d4d4d8]'}`}>
                               {m.role === 'user' ? (
@@ -3855,11 +3963,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     <div className="space-y-4 text-sm leading-relaxed max-h-[350px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-zinc-800">
                       {activeViewingPaper.summary ? (
                         <div className="markdown-body prose prose-invert max-w-none text-sm text-[#d4d4d8] font-sans">
-                          <ReactMarkdown>{activeViewingPaper.summary.replace(/\\n/g, '\n')}</ReactMarkdown>
+                          <ReactMarkdown>{formatAbstractText(activeViewingPaper.summary).replace(/\\n/g, '\n')}</ReactMarkdown>
                         </div>
                       ) : (
                         <p className="text-[#d4d4d8] font-sans whitespace-pre-wrap">
-                          {activeViewingPaper.description ? activeViewingPaper.description.replace(/\\n/g, '\n') : ''}
+                          {activeViewingPaper.description ? formatAbstractText(activeViewingPaper.description).replace(/\\n/g, '\n') : ''}
                         </p>
                       )}
                     </div>
@@ -4104,7 +4212,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
               )}
             </div>
           ) : (
-            (activeTab.fileId && (activeTab.mimetype === 'application/pdf' || activeTab.title.toLowerCase().endsWith('.pdf'))) ? (
+            (activeTab.fileId && activeTab.mimetype === 'application/pdf') ? (
               <div className="flex-1 flex flex-col bg-[#0b0b0c] h-full overflow-hidden">
                 {/* PDF Viewer Display Body */}
                 <div className="flex-1 w-full bg-[#1e1e1e] relative min-h-0 overflow-hidden">
@@ -4651,19 +4759,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         : 'self-start max-w-full bg-transparent text-[#d4d4d8] py-2'
                     } text-[13px] leading-relaxed transition-all`}
                   >
-                    {/* Reasoning Process */}
                     {m.role === 'assistant' && m.thought && (
-                      <details className="mb-2 group">
-                        <summary className="text-[11px] font-medium text-[#71717a] hover:text-[#a1a1aa] cursor-pointer transition-colors list-none outline-none inline-flex items-center gap-1">
-                          <div className="w-1 h-1 rounded-full bg-[#71717a] group-hover:bg-[#a1a1aa] transition-colors" />
-                          Thought
-                        </summary>
-                        <div className="mt-1.5 text-[12px] text-[#71717a] pb-2 leading-relaxed max-w-[95%]">
-                          {m.thought}
-                        </div>
-                      </details>
+                      <div className="mb-3">
+                        <details className="group [&_summary::-webkit-details-marker]:hidden">
+                          <summary className="flex items-center gap-2 cursor-pointer text-xs font-medium text-[#71717a] hover:text-[#a1a1aa] transition-colors select-none w-fit">
+                            <Icon icon="ph:lightbulb" className="w-3.5 h-3.5" />
+                            <span>Thinking</span>
+                            <Icon icon="ph:caret-right" className="w-[10px] h-[10px] group-open:rotate-90 transition-transform" />
+                          </summary>
+                          <div className="mt-2 pl-3 border-l border-zinc-800 text-xs text-zinc-500 font-mono whitespace-pre-wrap leading-relaxed">
+                            {m.thought}
+                          </div>
+                        </details>
+                      </div>
                     )}
-
                     {/* Text message */}
                     <div className={`select-text break-words ${m.role === 'user' ? 'whitespace-pre-wrap' : 'markdown-body text-[#d4d4d8]'}`}>
                       {m.role === 'user' ? (

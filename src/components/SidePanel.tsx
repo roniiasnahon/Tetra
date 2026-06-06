@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { AudioVisualizerPlayer } from './AudioVisualizerPlayer';
 import { 
   X, 
   FileText, 
@@ -19,7 +20,12 @@ import {
   FileQuestion,
   User,
   Info,
-  ChevronDown
+  ChevronDown,
+  Music,
+  Image as ImageIcon,
+  Paperclip,
+  File,
+  Download
 } from 'lucide-react';
 
 interface SidePanelProps {
@@ -55,7 +61,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   activeTab, 
   papers 
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'notes' | 'details' | 'sources' | 'quizzes'>('notes');
+  const [activeSubTab, setActiveSubTab] = useState<'notes' | 'details' | 'sources' | 'quizzes' | 'attachments'>('notes');
 
   // Notes state
   const [notes, setNotes] = useState<string>('');
@@ -73,6 +79,11 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const [newSourceUrl, setNewSourceUrl] = useState('');
   const [sourceError, setSourceError] = useState('');
   const [isAddSourceModalOpen, setIsAddSourceModalOpen] = useState(false);
+
+  // Attachments state
+  const [attachments, setAttachments] = useState<{ id: string; name: string; mimetype: string; timestamp: number }[]>([]);
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+  const [attachmentError, setAttachmentError] = useState('');
 
   // Quiz state
   const [quizData, setQuizData] = useState<QuizData | null>(null);
@@ -149,6 +160,18 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       setQuizData(null);
     }
 
+    // 5. Load Attachments state
+    const savedAttachmentsStr = localStorage.getItem(`attachments_${docStorageKey}`);
+    if (savedAttachmentsStr) {
+      try {
+        setAttachments(JSON.parse(savedAttachmentsStr));
+      } catch {
+        setAttachments([]);
+      }
+    } else {
+      setAttachments([]);
+    }
+
     // Reset quiz runtime state upon document switch
     setCurrentQuestionIndex(0);
     setSelectedOptionIndex(null);
@@ -156,6 +179,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     setQuizFinished(false);
     setQuizHistory({});
     setQuizError('');
+    setAttachmentError('');
 
   }, [docStorageKey, isOpen, matchingPaper, activeTab]);
 
@@ -243,6 +267,57 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     const updated = sources.filter(s => s.id !== idToDelete);
     setSources(updated);
     localStorage.setItem(`sources_${docStorageKey}`, JSON.stringify(updated));
+  };
+
+  // Attachments management
+  const handleAttachmentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingAttachment(true);
+    setAttachmentError('');
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to upload attachment");
+      }
+
+      const data = await response.json();
+      if (data.success) {
+        const newAttachment = {
+          id: data.fileId,
+          name: data.fileName,
+          mimetype: data.mimetype,
+          timestamp: Date.now()
+        };
+
+        const updated = [newAttachment, ...attachments];
+        setAttachments(updated);
+        localStorage.setItem(`attachments_${docStorageKey}`, JSON.stringify(updated));
+      } else {
+        throw new Error(data.error || "Upload response success false");
+      }
+    } catch (err: any) {
+      setAttachmentError(err.message || "Error uploading attachment");
+    } finally {
+      setIsUploadingAttachment(false);
+      // Reset input value
+      e.target.value = '';
+    }
+  };
+
+  const handleDeleteAttachment = (idToDelete: string) => {
+    const updated = attachments.filter(a => a.id !== idToDelete);
+    setAttachments(updated);
+    localStorage.setItem(`attachments_${docStorageKey}`, JSON.stringify(updated));
   };
 
   // Quizzes logic
@@ -365,20 +440,21 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="w-[340px] bg-[#0c0c0d] border-l border-[#222224] h-full flex flex-col shrink-0 overflow-hidden select-none animate-slide-in">
+    <div className="w-[340px] bg-[#121212] border-l border-[#1c1c1f] h-full flex flex-col shrink-0 overflow-hidden select-none animate-slide-in">
       {/* Tab Navigation Menu */}
-      <div className="flex items-center gap-1.5 px-4 h-[56px] bg-[#0c0c0d] shrink-0">
-        <div className="flex-1 flex items-center gap-1.5 overflow-hidden">
-          {(['quizzes', 'notes', 'details', 'sources'] as const).map(tab => {
+      <div className="flex items-center gap-1.5 px-4 h-[56px] bg-[#121212] shrink-0">
+        <div className="flex-1 flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden py-1">
+          {(['quizzes', 'notes', 'details', 'sources', 'attachments'] as const).map(tab => {
             let label = tab as string;
             if (tab === 'quizzes') label = 'Test';
             if (tab === 'sources') label = 'Sources';
+            if (tab === 'attachments') label = 'Files';
 
             return (
               <button 
                 key={tab}
                 onClick={() => setActiveSubTab(tab)}
-                className={`px-3 py-1.5 rounded-full text-[13px] font-medium capitalize transition-all duration-150 cursor-pointer text-center whitespace-nowrap ${
+                className={`px-2.5 py-1.5 rounded-full text-[12px] font-medium capitalize transition-all duration-150 cursor-pointer text-center whitespace-nowrap ${
                   activeSubTab === tab 
                     ? 'text-[#f4f4f5] bg-[#27272a]' 
                     : 'text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#18181b]'
@@ -392,7 +468,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         
         <button 
           onClick={onClose} 
-          className="p-1 px-1.5 ml-2 hover:bg-[#1a1a1c] rounded-md cursor-pointer transition-all text-[#71717a] hover:text-[#f2f2f3]"
+          className="p-1 px-1.5 ml-1 hover:bg-[#1a1a1c] rounded-md cursor-pointer transition-all text-[#71717a] hover:text-[#f2f2f3]"
           aria-label="Close Side Panel"
         >
           <X className="w-4 h-4" />
@@ -400,7 +476,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       </div>
 
       {/* Main Tab Scrolling Viewer container */}
-      <div className="flex-1 overflow-y-auto flex flex-col min-h-0 bg-[#0c0c0d]">
+      <div className="flex-1 overflow-y-auto flex flex-col min-h-0 bg-[#121212]">
         
         {/* TAB 1: NOTES */}
         {activeSubTab === 'notes' && (
@@ -808,6 +884,134 @@ export const SidePanel: React.FC<SidePanelProps> = ({
               </div>
             )}
 
+          </div>
+        )}
+
+        {/* TAB 5: ATTACHMENTS */}
+        {activeSubTab === 'attachments' && (
+          <div className="flex-1 flex flex-col p-4 bg-transparent text-[13px] h-full min-h-0">
+            <div className="flex items-center justify-between mb-4 shrink-0">
+              <span className="text-[11px] font-mono tracking-wider uppercase text-zinc-400 font-medium">Linked Attachments ({attachments.length})</span>
+              <label 
+                className={`p-1.5 hover:bg-[#1a1a1c] border border-zinc-800 rounded-lg cursor-pointer transition-all text-[#a1a1aa] hover:text-[#f4f4f5] flex items-center justify-center ${isUploadingAttachment ? 'opacity-50 pointer-events-none' : ''}`}
+                title="Attach other file"
+              >
+                <input 
+                  type="file" 
+                  onChange={handleAttachmentUpload} 
+                  className="hidden" 
+                  disabled={isUploadingAttachment}
+                />
+                <Paperclip className="w-3.5 h-3.5" />
+              </label>
+            </div>
+
+            {attachmentError && (
+              <div className="mb-4 p-2.5 rounded-lg bg-red-950/20 border border-red-900/30 text-red-400 text-[11px] flex items-start gap-2 text-left shrink-0">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" />
+                <span>{attachmentError}</span>
+              </div>
+            )}
+
+            {isUploadingAttachment && (
+              <div className="mb-4 p-3 rounded-lg bg-zinc-900/40 border border-zinc-800/40 text-zinc-400 text-xs flex items-center gap-3 shrink-0">
+                <div className="w-3.5 h-3.5 border-2 border-zinc-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                <span className="font-medium animate-pulse">Uploading attachment...</span>
+              </div>
+            )}
+
+            {attachments.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center py-12 text-center select-none">
+                <Paperclip className="w-6 h-6 text-zinc-600 mb-2" />
+                <span className="text-[11px] text-zinc-500 max-w-[200px] leading-relaxed">
+                  No attachments yet. Link audio recordings, images, templates, or spreadsheets.
+                </span>
+                <label className="mt-4 px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white rounded-lg cursor-pointer transition-colors font-semibold">
+                  <input 
+                    type="file" 
+                    onChange={handleAttachmentUpload} 
+                    className="hidden" 
+                    disabled={isUploadingAttachment}
+                  />
+                  Select File
+                </label>
+              </div>
+            ) : (
+              <div className="space-y-3 overflow-y-auto flex-1 pr-1 pb-10 scrollbar-thin scrollbar-thumb-zinc-800">
+                {attachments.map((att) => {
+                  const isAudio = att.mimetype.startsWith('audio/') || 
+                                  att.name.toLowerCase().endsWith('.mp3') || 
+                                  att.name.toLowerCase().endsWith('.wav') || 
+                                  att.name.toLowerCase().endsWith('.m4a');
+                  const isImage = att.mimetype.startsWith('image/');
+
+                  return (
+                    <div 
+                      key={att.id} 
+                      className="p-3 bg-[#18181b] border border-[#27272a] rounded-xl flex flex-col gap-2 group hover:border-zinc-700 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="p-1 px-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 shrink-0">
+                            {isAudio ? (
+                              <Music className="w-3.5 h-3.5" />
+                            ) : isImage ? (
+                              <ImageIcon className="w-3.5 h-3.5" />
+                            ) : (
+                              <File className="w-3.5 h-3.5" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <span className="block text-[12px] font-medium text-zinc-200 truncate leading-tight" title={att.name}>
+                              {att.name}
+                            </span>
+                            <span className="block text-[9px] text-[#71717a] font-mono mt-0.5 uppercase tracking-wider">
+                              {att.mimetype.split('/')[1] || 'FILE'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          <a 
+                            href={`/api/files/${att.id}`}
+                            download={att.name}
+                            className="p-1 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors"
+                            title="Download reference"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </a>
+                          <button 
+                            onClick={() => handleDeleteAttachment(att.id)}
+                            className="p-1 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded transition-colors cursor-pointer"
+                            title="Delete attachment"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Display players/previews dynamically */}
+                      {isAudio && (
+                        <div className="pt-2 border-t border-zinc-900/40">
+                          <AudioVisualizerPlayer src={`/api/files/${att.id}`} />
+                        </div>
+                      )}
+
+                      {isImage && (
+                        <div className="mt-1 relative rounded-lg overflow-hidden max-h-36 border border-zinc-900 flex justify-center bg-zinc-950">
+                          <img 
+                            src={`/api/files/${att.id}`} 
+                            alt={att.name} 
+                            className="max-w-full max-h-32 object-contain rounded pointer-events-none" 
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
