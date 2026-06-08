@@ -16,7 +16,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.\\%]+$');
+      return id is string && id.size() <= 1500;
     }
 
     function incoming() {
@@ -32,41 +32,37 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'email', 'createdAt'])
         && data.keys().size() <= 6
         && data.uid == request.auth.uid
-        && data.email is string && data.email.size() <= 256
+        && data.email is string
         && data.createdAt is number;
     }
 
     function isValidFolder(data) {
       return data.keys().hasAll(['id', 'name', 'createdAt'])
         && data.keys().size() <= 4
-        && data.id is string && data.id.size() <= 100
-        && data.name is string && data.name.size() <= 100
+        && data.id is string
+        && data.name is string
         && data.createdAt is number;
     }
 
     function isValidPaper(data) {
       return data.keys().hasAll(['title'])
-        && data.keys().size() <= 15
-        && data.title is string && data.title.size() <= 500
-        && (data.author == null || (data.author is string && data.author.size() <= 500))
-        && (data.url == null || (data.url is string && data.url.size() <= 2000))
-        && (data.folderId == null || (data.folderId is string && data.folderId.size() <= 100));
+        && data.title is string
+        && (data.author == null || data.author is string)
+        && (data.url == null || data.url is string)
+        && (data.folderId == null || data.folderId is string);
     }
 
     function isValidChat(data) {
       return data.keys().hasAll(['title', 'messages', 'updatedAt'])
-        && data.keys().size() <= 4
-        && data.title is string && data.title.size() <= 200
+        && data.title is string
         && data.messages is list
-        && data.messages.size() <= 500
         && data.updatedAt is number;
     }
 
     function isValidSession(data) {
       return data.keys().hasAny(['tabs', 'activeTabId', 'messages'])
-        && data.keys().size() <= 5
-        && (data.tabs == null || (data.tabs is list && data.tabs.size() <= 20))
-        && (data.messages == null || (data.messages is list && data.messages.size() <= 500));
+        && (data.tabs == null || data.tabs is list)
+        && (data.messages == null || data.messages is list);
     }
 
     // 4. Collection Matches

@@ -6,6 +6,7 @@ import { marked } from 'marked';
 import { motion, AnimatePresence } from 'motion/react';
 import { Icon } from '@iconify/react';
 import { Edit2, ExternalLink, Unlink, Link as LinkIcon, PanelRight, Coffee, X } from 'lucide-react';
+import { StatisticsTools } from './components/StatisticsTools';
 import { SidePanel } from './components/SidePanel';
 import { AuthenticationScreen } from './components/AuthenticationScreen';
 import { Document, Page, pdfjs } from 'react-pdf';
@@ -43,7 +44,7 @@ interface PaperItem {
 
 interface Tab {
   id: string;
-  type: 'home' | 'document' | 'library' | 'chat';
+  type: 'home' | 'document' | 'library' | 'chat' | 'tools';
   title: string;
   content?: string;
   fileId?: string;
@@ -513,12 +514,92 @@ const formatAbstractText = (text: string) => {
 };
 
 export default function App() {
+  const cleanTitleStr = (t?: string) => t ? t.replace(/[*#]/g, '').trim() : '';
+
   const [isAssistantOpen, setIsAssistantOpen] = useState(true);
   const [showBuyCoffeeModal, setShowBuyCoffeeModal] = useState(false);
   const [supportAmountPaid, setSupportAmountPaid] = useState<string | null>(null);
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [sidebarView, setSidebarView] = useState<'files' | 'chats' | 'search' | 'library'>('files');
+  const [sidebarView, setSidebarView] = useState<'files' | 'chats' | 'tools' | 'library'>('files');
+  
+  const [activeToolsTab, setActiveToolsTab] = useState<'slovin' | 'percentage' | 'weighted' | 'likert' | 'ai' | 'citation'>('slovin');
+  const [isStatsSectionOpen, setIsStatsSectionOpen] = useState(true);
+  const [isHistorySectionOpen, setIsHistorySectionOpen] = useState(true);
+  
+  const openToolsTab = (toolType: 'slovin' | 'percentage' | 'weighted' | 'likert' | 'ai' | 'citation') => {
+    setActiveToolsTab(toolType);
+    const toolsTab = tabs.find(t => t.type === 'tools');
+    if (!toolsTab) {
+      const newId = `tools-${Date.now()}`;
+      setTabs(prev => [...prev, { id: newId, type: 'tools', title: 'Statistics Tools' }]);
+      setActiveTabId(newId);
+    } else {
+      setActiveTabId(toolsTab.id);
+    }
+  };
+  
+  const [toolsHistory, setToolsHistory] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('toolsHistory');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  
+  const [selectedToolsHistoryItem, setSelectedToolsHistoryItem] = useState<any | null>(null);
+
+  const addToolsHistoryItem = (item: any) => {
+    const newItem = {
+      ...item,
+      id: `tool-hist-${Date.now()}`,
+      timestamp: Date.now()
+    };
+    setToolsHistory(prev => {
+      // Avoid duplicate computations with active parameters
+      const filtered = prev.filter(p => !(p.type === item.type && JSON.stringify(p.parameters) === JSON.stringify(item.parameters)));
+      const updated = [newItem, ...filtered].slice(0, 30);
+      try {
+        localStorage.setItem('toolsHistory', JSON.stringify(updated));
+      } catch (e) {
+        console.error('Failed to save tools history to localStorage:', e);
+      }
+      return updated;
+    });
+  };
+
+  const deleteToolsHistoryItem = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setToolsHistory(prev => {
+      const updated = prev.filter(item => item.id !== id);
+      try {
+        localStorage.setItem('toolsHistory', JSON.stringify(updated));
+      } catch (err) {
+        console.error('Failed to update tools history in localStorage:', err);
+      }
+      return updated;
+    });
+    if (selectedToolsHistoryItem?.id === id) {
+      setSelectedToolsHistoryItem(null);
+    }
+  };
+
+  const loadToolsHistoryItem = (item: any) => {
+    setSelectedToolsHistoryItem(item);
+    setActiveToolsTab(item.type);
+    
+    // Select the active tools tab or insert a new tab of type tools
+    const toolsTab = tabs.find(t => t.type === 'tools');
+    if (!toolsTab) {
+      const newId = `tools-${Date.now()}`;
+      setTabs(prev => [...prev, { id: newId, type: 'tools', title: 'Statistics Tools' }]);
+      setActiveTabId(newId);
+    } else {
+      setActiveTabId(toolsTab.id);
+    }
+    setSidebarView('tools');
+  };
   
   // Tab Management
   const [tabs, setTabs] = useState<Tab[]>([
@@ -1238,14 +1319,29 @@ export default function App() {
       if (!skipTabsUpdate) {
         let targetTabId = activeAssistantTabIdRef.current || activeTabIdRef.current;
         const currentTab = tabsRef.current.find(t => t.id === targetTabId);
+        let foundChat = false;
+
         if (!currentTab || currentTab.type !== 'chat') {
           const firstChat = tabsRef.current.find(t => t.type === 'chat');
           if (firstChat) {
             targetTabId = firstChat.id;
+            foundChat = true;
           }
+        } else {
+          foundChat = true;
         }
-        
-        const updatedTabs = tabsRef.current.map(t => t.id === targetTabId ? { ...t, messages: next } : t);
+
+        let updatedTabs = tabsRef.current;
+        if (!foundChat) {
+          const newChatId = `chat-${Date.now()}`;
+          targetTabId = newChatId;
+          const newChatTab: Tab = { id: newChatId, type: 'chat', title: 'New chat', messages: next };
+          updatedTabs = [...updatedTabs, newChatTab];
+          // We can't setState inside setState cleanly, but we can setTabs:
+          setTimeout(() => setActiveAssistantTabId(newChatId), 0);
+        }
+
+        updatedTabs = updatedTabs.map(t => t.id === targetTabId ? { ...t, messages: next } : t);
         setTabs(updatedTabs);
 
         // Also save to persistent chat library
@@ -2137,18 +2233,23 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 setActiveTabId(newId);
                 setSidebarView('files');
                 setIsCreateDropdownOpen(false);
+                setIsAssistantOpen(true);
 
-                setIsAiTyping(true);
-                setTimeout(() => {
-                  const assistantMsg: ChatMessage = {
-                    id: String(Date.now()),
-                    role: 'assistant',
-                    content: `### Document Mapped: ${fileLabel}\n\nI have successfully indexed **${fileLabel}** and mapped it to your workspace. ${extractedText ? "I've analyzed the full text and am ready to answer specific questions or help you draft citations based on its contents." : "The document metadata has been saved."}`,
-                    timestamp: Date.now()
-                  };
-                  updateChatMessages(prev => [...prev, assistantMsg], false);
-                  setIsAiTyping(false);
-                }, 500);
+                if (extractedText) {
+                  setTimeout(() => {
+                    handleSendMessage(`Please thoroughly analyze the newly uploaded document titled "${fileLabel}". Here are the contents: \n\n${extractedText.substring(0, 10000)}\n\nProvide a comprehensive summary, highlight the main findings, and explain key claims in detail.`, { isHidden: true });
+                  }, 500);
+                } else {
+                  setTimeout(() => {
+                    const assistantMsg: ChatMessage = {
+                      id: String(Date.now()),
+                      role: 'assistant',
+                      content: `### Document Mapped: ${fileLabel}\n\nI have successfully indexed **${fileLabel}** and mapped it to your workspace. The document metadata has been saved.`,
+                      timestamp: Date.now()
+                    };
+                    updateChatMessages(prev => [...prev, assistantMsg], false);
+                  }, 500);
+                }
               }
             } catch (err: any) {
               console.error("Upload failed", err);
@@ -2180,7 +2281,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
             className="flex flex-col h-full shrink-0 overflow-hidden bg-[#070707] font-jakarta"
           >
             {/* Primary Navigation Grid */}
-            <nav className="px-3 grid grid-cols-4 gap-2 mb-6 relative">
+            <nav className="px-3 grid grid-cols-4 gap-2 mb-3 relative">
               {[
                 { icon: 'ph:pencil-line', label: 'Create', onClick: (e: React.MouseEvent) => {
                   e.stopPropagation();
@@ -2201,7 +2302,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     setActiveTabId(newId);
                   }
                 }, active: activeTab.type === 'library' },
-                { icon: 'ph:magnifying-glass', label: 'Search', onClick: () => setSidebarView('search'), active: sidebarView === 'search' }
+                { icon: 'ph:calculator', label: 'Tools', onClick: () => {
+                  let toolsTab = tabs.find(t => t.type === 'tools');
+                  if (!toolsTab) {
+                    const newId = `tools-${Date.now()}`;
+                    setTabs([...tabs, { id: newId, type: 'tools', title: 'Statistics Tools' }]);
+                    setActiveTabId(newId);
+                  } else {
+                    setActiveTabId(toolsTab.id);
+                  }
+                  setSidebarView('tools');
+                }, active: sidebarView === 'tools' || activeTab.type === 'tools' }
               ].map((item) => (
                 <button 
                   key={item.label} 
@@ -2388,9 +2499,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                         {/* Nested Items */}
                         {isExpanded && (
-                          <div className="pl-6 space-y-0.5 border-l border-[#27272a]/40 ml-3.5 my-1">
+                          <div className="pl-3.5 space-y-0.5 border-l border-[#27272a]/40 ml-3.5 my-1">
                             {folderFiles.length === 0 ? (
-                              <div className="py-1.5 px-2 text-[10.5px] italic text-[#52525b] select-none">
+                              <div className="py-1 px-1.5 text-[10.5px] italic text-[#52525b] select-none">
                                 Empty folder
                               </div>
                             ) : (
@@ -2398,7 +2509,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 <button
                                   key={fIdx}
                                   onClick={() => handlePaperClick(file)}
-                                  className="w-full flex items-center gap-2 pr-1.5 pl-2 py-2 rounded-lg text-[#71717a] hover:text-[#f4f4f5] hover:bg-[#161616]/40 transition-all text-left min-w-0 cursor-pointer group"
+                                  className="w-full flex items-center gap-1.5 pr-1 pl-1 py-1 rounded-[6px] text-[#71717a] hover:text-[#f4f4f5] hover:bg-[#161616]/40 transition-all text-left min-w-0 cursor-pointer group"
                                   title={file.title}
                                 >
                                   <Icon 
@@ -2469,12 +2580,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               }}
                               className="flex-1 flex items-center gap-2 min-w-0 text-left cursor-pointer"
                             >
-                              <Icon 
-                                icon="ph:chat-circle" 
-                                className={`w-3.5 h-3.5 shrink-0 ${isCurrent ? 'text-zinc-300' : 'text-[#71717a] group-hover:text-zinc-400'}`} 
-                              />
                               <span className="text-xs truncate font-medium">
-                                {chatTab.title}
+                                {cleanTitleStr(chatTab.title)}
                               </span>
                             </button>
                             <button
@@ -2524,90 +2631,138 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 </div>
               )}
 
-              {sidebarView === 'search' && (
-                <div className="space-y-4">
-                  <form onSubmit={handleSearchPapers} className="relative">
-                    <input 
-                      autoFocus
-                      placeholder="Search Semantic Scholar..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full bg-[#161616] border border-[#27272a] focus:border-blue-500 rounded-xl px-9 py-2 text-[12px] text-[#f4f4f5] placeholder-[#52525b] outline-none transition-all"
-                    />
-                    <Icon icon="ph:magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#52525b]" />
-                    {isSearching && (
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                        <Icon icon="svg-spinners:ring-resize" className="w-4 h-4 text-blue-500" />
+              {sidebarView === 'tools' && (
+                <div className="space-y-4 px-2 text-left select-none">
+                  {/* Statistics Nest */}
+                  <div className="space-y-1">
+                    <button
+                      onClick={() => setIsStatsSectionOpen(!isStatsSectionOpen)}
+                      className="w-full flex items-center justify-between px-1.5 py-1 text-[10px] text-[#71717a] hover:text-zinc-200 font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Icon icon="ph:folders-fill" className="w-3.5 h-3.5" />
+                        <span>Statistics</span>
+                      </div>
+                      <Icon icon="ph:caret-down" className={`w-3 h-3 transition-transform duration-200 ${isStatsSectionOpen ? '' : '-rotate-90'}`} />
+                    </button>
+                    
+                    {isStatsSectionOpen && (
+                      <div className="space-y-0.5 pl-1.5 border-l border-zinc-850 ml-2 mt-1">
+                        {[
+                          { id: 'slovin', label: "Slovin's Formula", icon: "ph:calculator-fill", color: "text-[#38bdf8]" },
+                          { id: 'percentage', label: "Percentage Calc", icon: "ph:percent-fill", color: "text-[#10b981]" },
+                          { id: 'weighted', label: "Weighted Mean", icon: "ph:scales-fill", color: "text-[#60a5fa]" },
+                          { id: 'likert', label: "Likert Scale", icon: "ph:check-square-fill", color: "text-[#f59e0b]" },
+                          { id: 'ai', label: "Cosmi AI Audit", icon: "ph:sparkles-fill", color: "text-[#c084fc]" },
+                          { id: 'citation', label: "Citation Generator", icon: "ph:article-fill", color: "text-[#fb7185]" }
+                        ].map(item => {
+                          const isCurrentlySelected = activeToolsTab === item.id && activeTab.type === 'tools';
+                          return (
+                            <button
+                              key={item.id}
+                              onClick={() => openToolsTab(item.id as any)}
+                              className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] transition-all cursor-pointer text-left ${
+                                isCurrentlySelected 
+                                  ? 'bg-[#27272a] text-[#f4f4f5] font-medium' 
+                                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#161617]/50'
+                              }`}
+                            >
+                              <Icon icon={item.icon} className={`w-3.5 h-3.5 ${item.color}`} />
+                              <span className="truncate">{item.label}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
-                  </form>
+                  </div>
 
-                  {searchResults.length > 0 && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between px-1">
-                        <h3 className="text-[10px] text-[#52525b] uppercase font-bold tracking-wider">Results</h3>
-                        <button 
-                          onClick={handleSynthesize}
-                          disabled={isSynthesizing}
-                          className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-50"
-                        >
-                          {isSynthesizing ? (
-                             <Icon icon="svg-spinners:ring-resize" className="w-3 h-3" />
-                          ) : (
-                             <Icon icon="ph:sparkle" className="w-3 h-3" />
-                          )}
-                          Synthesize
-                        </button>
+                  {/* History Nest */}
+                  <div className="space-y-1 pt-2 border-t border-[#1e1e20]">
+                    <button
+                      onClick={() => setIsHistorySectionOpen(!isHistorySectionOpen)}
+                      className="w-full flex items-center justify-between px-1.5 py-1 text-[10px] text-[#71717a] hover:text-zinc-200 font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Icon icon="ph:clock-counter-clockwise-fill" className="w-3.5 h-3.5" />
+                        <span>History</span>
                       </div>
+                      <div className="flex items-center gap-2">
+                        {toolsHistory.length > 0 && (
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setToolsHistory([]);
+                              localStorage.removeItem('toolsHistory');
+                            }}
+                            className="text-[9px] text-[#52525b] hover:text-[#a1a1aa] transition-colors cursor-pointer lowercase font-normal tracking-normal"
+                          >
+                            clear all
+                          </span>
+                        )}
+                        <Icon icon="ph:caret-down" className={`w-3 h-3 transition-transform duration-200 ${isHistorySectionOpen ? '' : '-rotate-90'}`} />
+                      </div>
+                    </button>
 
-                      {synthesis && (
-                        <motion.div 
-                          initial={{ opacity: 0, scale: 0.98 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-xl mb-4"
-                        >
-                          <p className="text-[10px] text-blue-400 font-bold mb-1.5 uppercase flex items-center gap-1">
-                            <Icon icon="ph:brain" className="w-3 h-3" />
-                            LLM Synthesis
-                          </p>
-                          <div className="text-[11px] text-[#e4e4e7] leading-relaxed italic prose prose-invert">
-                            <ReactMarkdown>{synthesis}</ReactMarkdown>
+                    {isHistorySectionOpen && (
+                      <div className="space-y-1 mt-1 pl-1.5 border-l border-zinc-850 ml-2">
+                        {toolsHistory.length === 0 ? (
+                          <div className="px-2 py-4 border border-dashed border-[#27272a]/60 rounded-xl text-center bg-[#0c0c0d]/40 my-1">
+                            <p className="text-[10px] text-[#52525b]">No computations saved</p>
                           </div>
-                        </motion.div>
-                      )}
-                      
-                      <div className="space-y-2">
-                        {searchResults.map((paper, idx) => (
-                          <div key={idx} className="p-2.5 bg-[#161616] border border-[#27272a] rounded-xl group hover:border-[#3f3f46] transition-all">
-                            <p className="text-[11px] text-[#f4f4f5] font-medium leading-tight mb-1">{paper.title}</p>
-                            <p className="text-[9.5px] text-[#71717a] mb-2">
-                              {paper.authors?.slice(0, 2).map((a: any) => a.name).join(', ')}
-                              {paper.authors?.length > 2 ? ' et al.' : ''} 
-                              {paper.year ? ` • ${paper.year}` : ''}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <button 
-                                onClick={() => addPaperToLibrary(paper)}
-                                className="px-2 py-1 bg-[#27272a] hover:bg-[#3f3f46] text-[9.5px] font-medium text-[#e4e4e7] rounded-md transition-colors"
-                              >
-                                Save to Library
-                              </button>
-                              {paper.url && (
-                                <a 
-                                  href={paper.url} 
-                                  target="_blank" 
-                                  rel="noreferrer"
-                                  className="text-[9.5px] text-[#52525b] hover:text-[#a1a1aa] transition-colors"
+                        ) : (
+                          <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
+                            {toolsHistory.map((item) => {
+                              let iconName = "ph:calculator-fill";
+                              let colorClass = "text-zinc-400";
+                              if (item.type === 'percentage') {
+                                iconName = "ph:percent-fill";
+                                colorClass = "text-[#10b981]";
+                              } else if (item.type === 'weighted') {
+                                iconName = "ph:scales-fill";
+                                colorClass = "text-[#38bdf8]";
+                              } else if (item.type === 'likert') {
+                                iconName = "ph:check-square-fill";
+                                colorClass = "text-[#f59e0b]";
+                              } else if (item.type === 'ai') {
+                                iconName = "ph:sparkles-fill";
+                                colorClass = "text-[#c084fc]";
+                              } else if (item.type === 'citation') {
+                                iconName = "ph:article-fill";
+                                colorClass = "text-[#fb7185]";
+                              }
+
+                              return (
+                                <div
+                                  key={item.id}
+                                  onClick={() => loadToolsHistoryItem(item)}
+                                  className="group p-2 bg-[#0e0e0f]/80 hover:bg-[#121213] border border-[#1e1e20] hover:border-zinc-850 rounded-lg transition-all cursor-pointer relative"
                                 >
-                                  View Source
-                                </a>
-                              )}
-                            </div>
+                                  <button
+                                    onClick={(e) => deleteToolsHistoryItem(item.id, e)}
+                                    className="absolute top-1 right-1 p-1 text-zinc-650 hover:text-red-400 rounded transition-colors opacity-0 group-hover:opacity-100"
+                                    title="Delete history item"
+                                  >
+                                    <Icon icon="ph:trash" className="w-2.5 h-2.5" />
+                                  </button>
+                                  <div className="flex items-start gap-1.5 text-left">
+                                    <Icon icon={iconName} className={`w-3 h-3 mt-0.5 shrink-0 ${colorClass}`} />
+                                    <div className="flex-1 min-w-0 pr-3 text-left">
+                                      <div className="text-[10px] font-medium text-zinc-300 truncate leading-tight">
+                                        {item.title}
+                                      </div>
+                                      <div className="text-[9px] text-[#71717a] font-mono mt-0.5 truncate uppercase">
+                                        {item.result}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
-                        ))}
+                        )}
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -2725,15 +2880,15 @@ Once you have content, I can help you draft sections, summarize findings, or for
           </div>
 
           {/* Tabs Container */}
-          <div className="flex items-end h-full ml-2 overflow-x-auto no-scrollbar min-w-0 pr-8">
+          <div className="flex items-end h-full ml-3 gap-[2px] overflow-x-auto custom-scrollbar-h min-w-0">
             {tabs.map((tab) => (
               <div 
                 key={tab.id}
                 onClick={() => setActiveTabId(tab.id)}
-                className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[10px] transition-all cursor-pointer text-[13px] relative z-20 ${
+                className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[8px] transition-colors cursor-pointer text-[13px] ${
                   activeTabId === tab.id 
-                    ? 'chrome-tab-active text-[#f4f4f5] z-30' 
-                    : 'bg-transparent text-[#71717a] hover:text-[#a1a1aa] hover:bg-[#1a1a1a]/50'
+                    ? 'bg-[#121212] text-[#e4e4e7] border-t border-x border-[#27272a]' 
+                    : 'bg-transparent text-[#a1a1aa] hover:bg-[#121214] border-t border-x border-transparent'
                 }`}
               >
         {tab.type === 'home' ? (
@@ -2742,11 +2897,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
           <Icon icon="ph:books" className="w-3.5 h-3.5" />
         ) : tab.type === 'chat' ? (
           <Icon icon="ph:chat-circle" className="w-3.5 h-3.5" />
+        ) : tab.type === 'tools' ? (
+          <Icon icon="ph:calculator" className="w-3.5 h-3.5" />
         ) : (
           <Icon icon="ph:pencil-line" className="w-3.5 h-3.5" />
         )}
         <span className="truncate max-w-[130px]">
-          {tab.type === 'home' ? 'Home' : tab.type === 'library' ? 'Library' : (tab.id === activeTabId && tab.type === 'document' && (!tab.fileId || tab.mimetype !== 'application/pdf') ? documentTitle : tab.title) || 'Untitled'}
+          {tab.type === 'home' ? 'Home' : tab.type === 'library' ? 'Library' : tab.type === 'tools' ? 'Tools' : (tab.id === activeTabId && tab.type === 'document' && (!tab.fileId || tab.mimetype !== 'application/pdf') ? documentTitle : cleanTitleStr(tab.title)) || 'Untitled'}
         </span>
         {tabs.length > 1 && (
           <button 
@@ -2773,20 +2930,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
         setTabs([...tabs, { id: newId, type: 'home', title: 'Home' }]);
         setActiveTabId(newId);
       }}
-      className="flex items-center justify-center w-7 h-7 mb-1 mx-1.5 rounded-full hover:bg-[#1a1a1a] text-[#71717a] hover:text-[#f4f4f5] transition-all cursor-pointer shrink-0"
+      className="flex items-center justify-center p-2 mb-0.5 ml-1 rounded-md hover:bg-[#1a1a1a] text-[#86868b] hover:text-[#e4e4e7] transition-colors cursor-pointer"
     >
-      <Icon icon="ph:plus" className="w-3.5 h-3.5" />
+      <Icon icon="ph:plus-circle" className="w-4 h-4" />
     </div>
   </div>
 
           <div className="flex-1" />
           
           {/* Right Header Navigation & Panel Controls */}
-          <div className="flex items-center gap-2 h-full pb-1.5 pt-1.5 text-[#f4f4f5] border-b border-transparent">
+          <div className="flex items-center gap-2 h-full pb-1.5 pt-1.5 text-[#f4f4f5]">
             {!isAssistantOpen && (
               <button 
                 onClick={() => setIsAssistantOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1a1a1a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#222222] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98] whitespace-nowrap"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#222222] hover:border-[#3f3f46] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98] whitespace-nowrap"
                 title="Open Assistant Source"
               >
                 <Icon icon="ph:sparkle" className="w-3.5 h-3.5" />
@@ -2797,7 +2954,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
         </header>
 
         {/* Main Editor Component Container */}
-        <div className="relative flex-1 bg-[#121212] flex flex-row overflow-hidden min-w-0 transition-all">
+        <div className="relative flex-1 bg-[#121212] rounded-2xl flex flex-row overflow-hidden min-w-0 transition-all">
           <div className="flex-1 flex flex-col min-w-0">
           {activeTab.type === 'home' ? (
             <div className="flex-1 overflow-y-auto focus:outline-none scroll-smooth">
@@ -2964,7 +3121,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
           ) : activeTab.type === 'chat' ? (
             <div className="flex-1 flex flex-col bg-[#121212] relative overflow-hidden">
                {/* Chat Header */}
-               <header className="h-[52px] flex items-center justify-between px-4 shrink-0 relative z-45">
+               <header className="h-[52px] flex items-center justify-between px-4 shrink-0 relative border-b border-[#1c1c1f] z-45">
                  <div className="flex items-center gap-2">
                    <div className="relative">
                      {isRenamingChat === activeTab.id ? (
@@ -2981,7 +3138,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                          onClick={() => setIsChatDropdownOpen(!isChatDropdownOpen)}
                          className="flex items-center gap-1.5 text-[#e4e4e7] hover:bg-[#1a1a1a] px-3 py-1.5 rounded-xl transition-colors cursor-pointer group"
                        >
-                         <span className="font-medium text-[13px]">{activeTab.title}</span>
+                         <span className="font-medium text-[13px]">{cleanTitleStr(activeTab.title)}</span>
                          <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 text-zinc-500 group-hover:text-zinc-300 transition-transform ${isChatDropdownOpen ? 'rotate-180' : ''}`} />
                        </button>
                      )}
@@ -3010,7 +3167,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                }`}
                              >
                                <Icon icon="ph:chat-circle" className="w-4 h-4 shrink-0 text-zinc-500" />
-                               <span className="text-xs font-medium truncate">{chatTab.title}</span>
+                               <span className="text-xs font-medium truncate">{cleanTitleStr(chatTab.title)}</span>
                              </button>
                            ))}
                            <div className="border-t border-[#2d2d30] my-1" />
@@ -3087,13 +3244,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
               {/* Chat Content Area */}
               <div className="flex-1 overflow-y-auto flex flex-col">
-                <div className="flex-1 flex flex-col items-center justify-center py-6 px-6">
+                <div className="flex-1 flex flex-col items-center pt-2 pb-6 px-4 md:px-6">
                   {messages.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center w-full max-w-3xl">
                       <img src="/cosmi.png" alt="Cosmi Logo" className="w-48 h-48 md:w-64 md:h-64 opacity-40 select-none grayscale invert" />
                     </div>
                   ) : (
-                    <div className="w-full max-w-3xl flex flex-col gap-8 pb-32">
+                    <div className="w-full max-w-3xl flex flex-col gap-4 pb-8">
                        {messages.filter(m => !m.isHidden).map((m) => (
                         <div 
                           key={m.id} 
@@ -3116,8 +3273,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     <span>Thought Process</span>
                                     <Icon icon="ph:caret-right" className="w-3 h-3 group-open:rotate-90 transition-transform" />
                                   </summary>
-                                  <div className="mt-2 pl-3.5 border-l border-zinc-800 text-[13px] text-zinc-500 font-mono whitespace-pre-wrap leading-relaxed">
-                                    {m.thought}
+                                  <div className="mt-2 pl-3.5 border-l border-zinc-800 text-[13px] text-zinc-400 font-sans leading-relaxed markdown-body">
+                                    <ReactMarkdown>{m.thought}</ReactMarkdown>
                                   </div>
                                 </details>
                               </div>
@@ -3361,7 +3518,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                       }}
                                       className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                                     >
-                                      <Icon icon="ph:google-logo" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
+                                      <img 
+                                        src="https://www.gstatic.com/images/branding/product/1x/docs_2020q4_48dp.png" 
+                                        alt="Google Docs" 
+                                        className="w-4 h-4 object-contain" 
+                                        referrerPolicy="no-referrer"
+                                      />
                                       <span className="font-medium">Google Docs</span>
                                     </button>
                                     <button 
@@ -3376,7 +3538,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                       }}
                                       className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                                     >
-                                      <Icon icon="ph:youtube-logo" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
+                                      <img 
+                                        src="https://www.gstatic.com/images/branding/product/1x/youtube_64dp.png" 
+                                        alt="YouTube" 
+                                        className="w-4 h-4 object-contain" 
+                                        referrerPolicy="no-referrer"
+                                      />
                                       <span className="font-medium">YouTube</span>
                                     </button>
                                   </motion.div>
@@ -3825,22 +3992,23 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </button>
                     
                     <div className="flex items-center gap-2 mb-1.5">
-                      <Icon 
-                        icon={
-                          importType === 'youtube' 
-                            ? 'ph:youtube-logo' 
-                            : importType === 'gdoc' 
-                              ? 'ph:google-logo' 
-                              : 'ph:link'
-                        } 
-                        className={`w-5 h-5 ${
-                          importType === 'youtube' 
-                            ? 'text-[#ef4444]' 
-                            : importType === 'gdoc' 
-                              ? 'text-[#3b82f6]' 
-                              : 'text-zinc-400'
-                        }`} 
-                      />
+                      {importType === 'youtube' ? (
+                        <img 
+                          src="https://www.gstatic.com/images/branding/product/1x/youtube_64dp.png" 
+                          alt="YouTube" 
+                          className="w-5 h-5 object-contain" 
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : importType === 'gdoc' ? (
+                        <img 
+                          src="https://www.gstatic.com/images/branding/product/1x/docs_2020q4_48dp.png" 
+                          alt="Google Docs" 
+                          className="w-5 h-5 object-contain" 
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <Icon icon="ph:link" className="w-5 h-5 text-zinc-400" />
+                      )}
                       <h3 className="text-[#f4f4f5] text-lg font-medium">
                         {importType === 'youtube' 
                           ? 'Import & Summarize YouTube Video' 
@@ -4210,6 +4378,28 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   </div>
                 </div>
               )}
+            </div>
+          ) : activeTab.type === 'tools' ? (
+            <div className="flex-1 overflow-hidden focus:outline-none bg-[#0c0c0d] flex flex-col pt-8 w-full h-full min-h-0">
+               <div className="w-full h-full flex flex-col min-h-0">
+                  <h1 className="text-xl text-[#f4f4f5] font-semibold tracking-tight pb-4 border-b border-[#222225] px-8 shrink-0">
+                    {activeToolsTab === 'slovin' ? "Slovin's Margin of Error & Sample Size" :
+                     activeToolsTab === 'percentage' ? "Percentage Calculator & Distribution" :
+                     activeToolsTab === 'weighted' ? "Weighted Arithmetic Mean" :
+                     activeToolsTab === 'likert' ? "Likert Scale Response Indexer" :
+                     activeToolsTab === 'citation' ? "Academic Citation Generator" :
+                     "Cosmi AI Data Analyst"}
+                  </h1>
+                  <div className="flex-1 min-h-0 flex flex-col">
+                    <StatisticsTools 
+                      onAddHistory={addToolsHistoryItem}
+                      selectedHistoryItem={selectedToolsHistoryItem}
+                      onClearSelectedHistoryItem={() => setSelectedToolsHistoryItem(null)}
+                      activeTab={activeToolsTab}
+                      onChangeActiveTab={setActiveToolsTab}
+                    />
+                  </div>
+               </div>
             </div>
           ) : (
             (activeTab.fileId && activeTab.mimetype === 'application/pdf') ? (
@@ -4658,7 +4848,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
           <div className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden animate-slide-in">
             
             {/* Assistant Header */}
-            <div className="h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212] relative">
+            <div className="h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212] border-b border-[#1c1c1f] relative">
               <div className="relative flex-1 min-w-0 pr-4">
                 <button 
                   onClick={() => setIsAssistantChatDropdownOpen(!isAssistantChatDropdownOpen)}
@@ -4706,7 +4896,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           }`}
                         >
                           <Icon icon="ph:chat-circle" className="w-4 h-4 shrink-0 text-zinc-500" />
-                          <span className="text-xs font-medium truncate">{chatTab.title}</span>
+                          <span className="text-xs font-medium truncate">{cleanTitleStr(chatTab.title)}</span>
                         </button>
                       ))}
                       <div className="border-t border-[#2d2d30] my-1" />
@@ -4750,7 +4940,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   <img src="/cosmi.png" alt="Cosmi Logo" className="w-24 h-24 md:w-32 md:h-32 opacity-25 select-none grayscale invert animate-fade-in" />
                 </div>
               ) : (
-                messages.map((m) => (
+                messages.filter(m => !m.isHidden).map((m) => (
                   <div 
                     key={m.id} 
                     className={`flex flex-col ${
@@ -4767,8 +4957,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             <span>Thinking</span>
                             <Icon icon="ph:caret-right" className="w-[10px] h-[10px] group-open:rotate-90 transition-transform" />
                           </summary>
-                          <div className="mt-2 pl-3 border-l border-zinc-800 text-xs text-zinc-500 font-mono whitespace-pre-wrap leading-relaxed">
-                            {m.thought}
+                          <div className="mt-2 pl-3 border-l border-zinc-800 text-xs text-zinc-400 font-sans leading-relaxed markdown-body">
+                            <ReactMarkdown>{m.thought}</ReactMarkdown>
                           </div>
                         </details>
                       </div>
