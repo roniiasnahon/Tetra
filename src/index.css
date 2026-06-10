@@ -213,4 +213,27 @@ body {
   margin: 2.5em 0;
 }
 
+/* Streaming Blinking Cursor */
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.streaming-cursor p:last-child::after,
+.streaming-cursor li:last-child::after,
+.streaming-cursor h1:last-child::after,
+.streaming-cursor h2:last-child::after,
+.streaming-cursor h3:last-child::after,
+.streaming-cursor blockquote:last-child p:last-child::after,
+.streaming-cursor th:last-child::after,
+.streaming-cursor td:last-child::after {
+  content: "▍";
+  display: inline-block;
+  margin-left: 2px;
+  animation: cursor-blink 1s step-start infinite;
+  color: #60a5fa;
+  vertical-align: middle;
+}
+
+
 

@@ -923,8 +923,10 @@ The synthesis engine has verified this reference as a valid citation for your cu
   return null;
 }
 
+const app = express();
+export { app };
+
 async function startServer() {
-  const app = express();
   await ensureUploadsDir();
 
   // Request logger middleware
@@ -2544,11 +2546,13 @@ ${textToAnalyze}
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Research Draft & Outline Server running securely on http://localhost:${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Research Draft & Outline Server running securely on http://localhost:${PORT}`);
+    });
+  }
 }
 
-startServer().catch((err) => {
+export const startPromise = startServer().catch((err) => {
   console.error("Error starting server:", err);
 });

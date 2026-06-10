@@ -503,6 +503,10 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             </div>
 
             <textarea
+              key={`notes-textarea-${tabId}`}
+              id={`notes-textarea-${tabId}`}
+              name={`notes-textarea-${tabId}`}
+              autoComplete="off"
               className="flex-1 w-full min-h-[300px] bg-transparent text-[#cfcfd4] p-4 pt-1 focus:outline-none text-[13px] leading-relaxed resize-none font-sans placeholder-[#52525b] border-none outline-none focus:ring-0"
               placeholder="Paste relevant excerpts, frame your primary thesis, outline sections, or capture spontaneous ideas about this document..."
               value={notes}

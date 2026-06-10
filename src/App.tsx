@@ -3,6 +3,8 @@ import TextareaAutosize from 'react-textarea-autosize';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { marked } from 'marked';
+import { MainChat } from './components/MainChat';
+import { TypewriterMarkdown } from './components/TypewriterMarkdown';
 import { motion, AnimatePresence } from 'motion/react';
 import { Icon } from '@iconify/react';
 import { Edit2, ExternalLink, Unlink, Link as LinkIcon, PanelRight, Coffee, X } from 'lucide-react';
@@ -42,7 +44,7 @@ interface PaperItem {
   folderId?: string;
 }
 
-interface Tab {
+export interface Tab {
   id: string;
   type: 'home' | 'document' | 'library' | 'chat' | 'tools';
   title: string;
@@ -52,9 +54,10 @@ interface Tab {
   mimetype?: string;
   messages?: ChatMessage[];
   folderId?: string;
+  chatInput?: string;
 }
 
-interface ChatMessage {
+export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
@@ -130,99 +133,7 @@ const renderLinkifiedText = (text: string) => {
   });
 };
 
-const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationClick, isStreaming }: { content: string, timestamp: number, onCitationClick?: (page: number, title: string) => void, isStreaming?: boolean }) => {
-  const [displayedContent, setDisplayedContent] = useState('');
-  const contentRef = useRef(content);
-  const shouldAnimate = useRef(Date.now() - timestamp < 2000);
-
-  useEffect(() => {
-    contentRef.current = content;
-    if (!shouldAnimate.current) {
-       setDisplayedContent(content);
-    }
-  }, [content]);
-
-  useEffect(() => {
-    if (!shouldAnimate.current) {
-      setDisplayedContent(contentRef.current);
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setDisplayedContent(prev => {
-        const target = contentRef.current;
-        if (prev.length < target.length) {
-          return target.substring(0, prev.length + 5);
-        }
-        
-        if (prev.length >= target.length && !isStreaming) {
-          clearInterval(interval);
-          return target;
-        }
-
-        return prev;
-      });
-    }, 15);
-
-    return () => clearInterval(interval);
-  }, [timestamp, isStreaming]);
-
-  // Transform custom syntax [[page:N|Title]] into markdown links with special prefix
-  // We use encodeURIComponent for the title to handle spaces and special chars in the hash URL
-  const processedContent = displayedContent.replace(/\[\[page:(\d+)\|(.+?)\]\]/g, (_, p, t) => {
-    // Escape potentially breaking characters in title label for markdown
-    const safeTitle = t.replace(/\]/g, '\\]');
-    return `[${safeTitle} (p. ${p})](#cite-page-${p}-${encodeURIComponent(t)})`;
-  });
-
-  return (
-    <ReactMarkdown 
-      remarkPlugins={[remarkGfm]}
-      components={{
-        a: ({ href, children, ...props }) => {
-          if (href?.startsWith('#cite-page-')) {
-            // Remove the prefix
-            const dataStr = href.replace('#cite-page-', '');
-            // Split by the first hyphen (which separates page from title)
-            const firstHyphen = dataStr.indexOf('-');
-            if (firstHyphen === -1) return <a href={href} {...props}>{children}</a>;
-            
-            const page = parseInt(dataStr.substring(0, firstHyphen));
-            const encodedTitle = dataStr.substring(firstHyphen + 1);
-            try {
-              const title = decodeURIComponent(encodedTitle);
-              const cleanLabel = title.replace(/_/g, ' ');
-              return (
-                <button 
-                  onClick={() => onCitationClick?.(page, title)}
-                  className="inline-flex items-center gap-1 bg-zinc-800 hover:bg-zinc-700 text-blue-400 px-1.5 py-0.5 rounded text-[11px] font-mono border border-zinc-700 transition-colors mx-0.5 cursor-pointer align-middle"
-                >
-                  <Icon icon="ph:bookmark-simple-fill" className="w-3 h-3" />
-                  📄 {cleanLabel} (p. {page})
-                </button>
-              );
-            } catch (e) {
-              return <a href={href} {...props}>{children}</a>;
-            }
-          }
-          return <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>;
-        },
-        table: ({ children }) => (
-          <div className="overflow-x-auto my-4 custom-scrollbar-h">
-            <table className="w-full border-collapse border border-zinc-800 text-[12px] leading-snug">
-              {children}
-            </table>
-          </div>
-        ),
-        thead: ({ children }) => <thead className="bg-zinc-900/50">{children}</thead>,
-        th: ({ children }) => <th className="border border-zinc-800 p-2 text-left font-bold text-zinc-100">{children}</th>,
-        td: ({ children }) => <td className="border border-zinc-800 p-2 text-zinc-300">{children}</td>,
-      }}
-    >
-      {processedContent}
-    </ReactMarkdown>
-  );
-});
+// Unified TypewriterMarkdown is now imported from original component file
 
 const parseAssistantResponse = (text: string) => {
   let thought = "";
@@ -317,12 +228,28 @@ const parseAssistantResponse = (text: string) => {
       chatEndIdx = chatEndTagIdx;
       titleStartSearchIdx = chatEndTagIdx + 7;
     } else {
-      // If we haven't reached the </chat> tag yet, we shouldn't attempt
-      // to parse any following <title> or <replacecontent> blocks because we are still
-      // actively streaming the chat segment. This prevents any mentioned markdown tags in conversational text.
-      chat = text.substring(chatStartIdx).trim();
-      chat = stripSearchTags(chat);
-      return { thought, chat, title: "", replaceContent: "", searchRealPapersQuery: "" };
+      // If </chat> is missing, but they started a <title> or <replacecontent> or <searchrealpapers>,
+      // we can use those as the end of the chat!
+      const titleTagIdx = lowerText.indexOf("<title>", chatStartIdx);
+      const contentTagIdx = lowerText.indexOf("<replacecontent>", chatStartIdx);
+      const paperTagIdx = lowerText.indexOf("<searchrealpapers>", chatStartIdx);
+      
+      const candidates = [titleTagIdx, contentTagIdx, paperTagIdx].filter(idx => idx !== -1);
+      
+      if (candidates.length > 0) {
+        chatEndIdx = Math.min(...candidates);
+        titleStartSearchIdx = chatEndIdx;
+      } else {
+        // If we haven't reached the </chat> tag yet, we shouldn't attempt
+        // to parse any following <title> or <replacecontent> blocks because we are still
+        // actively streaming the chat segment. This prevents any mentioned markdown tags in conversational text.
+        chat = text.substring(chatStartIdx).trim();
+        chat = stripSearchTags(chat);
+        
+        // Clean any leaking unclosed tags from streaming chat in progress
+        chat = chat.replace(/<(title|replacecontent|searchrealpapers|thought)[\s\S]*/gi, "").trim();
+        return { thought, chat, title: "", replaceContent: "", searchRealPapersQuery: "" };
+      }
     }
 
     chat = text.substring(chatStartIdx, chatEndIdx).trim();
@@ -387,12 +314,22 @@ const parseAssistantResponse = (text: string) => {
      searchRealPapersQuery = searchRealPapersQuery.substring(0, 100);
   }
 
-  // Strip tags from chat if model hallucinates <searchRealPapers> inside chat
+  // Clean any hallucinated or unclosed tags from chat, title, and replaceContent
   if (chat) {
     const srIdx = chat.toLowerCase().indexOf("<searchrealpapers>");
     if (srIdx !== -1) {
       chat = chat.substring(0, srIdx).trim();
     }
+    chat = chat.replace(/<\/?(title|replacecontent|searchrealpapers|thought|chat)[^>]*>?/gi, "").trim();
+  }
+
+  if (title) {
+    title = title.replace(/<\/?(title|replacecontent|searchrealpapers|thought|chat)[^>]*>?/gi, "").trim();
+  }
+
+  if (replaceContent) {
+    replaceContent = replaceContent.replace(/<\/replacecontent>[\s\S]*/gi, "").trim();
+    replaceContent = replaceContent.replace(/<\/?(title|replacecontent|searchrealpapers|thought|chat)[^>]*>?/gi, "").trim();
   }
 
   return { thought, chat, title, replaceContent, searchRealPapersQuery };
@@ -1508,6 +1445,7 @@ export default function App() {
     }
   });
   const [chatInput, setChatInput] = useState('');
+  const [assistantInput, setAssistantInput] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [researchStatus, setResearchStatus] = useState<'fetching' | 'downloading' | 'polishing' | null>(null);
   const aiWritingTabIdRef = useRef<string | null>(null);
@@ -1515,7 +1453,7 @@ export default function App() {
   const [selectedFileLabel, setSelectedFileLabel] = useState<string | null>(null);
 
   const saveDraftToLibrary = async (tab: Tab) => {
-    if (!currentUser || tab.type !== 'document') return;
+    if (tab.type !== 'document') return;
     
     // We do not auto-save PDF documents as drafts, they are managed via upload/import.
     if (tab.fileId || tab.mimetype === 'application/pdf') return;
@@ -1525,11 +1463,13 @@ export default function App() {
 
     // If the title changed, delete the old document
     if (tab.originalTitle && tab.originalTitle !== paperTitle) {
-      const oldPaperId = encodeURIComponent(tab.originalTitle).replace(/\./g, '%2E');
-      try {
-        await deleteDoc(doc(db, 'users', currentUser.uid, 'papers', oldPaperId));
-      } catch (err) {
-        console.error("Failed to delete renamed draft", err);
+      if (currentUser) {
+        const oldPaperId = encodeURIComponent(tab.originalTitle).replace(/\./g, '%2E');
+        try {
+          await deleteDoc(doc(db, 'users', currentUser.uid, 'papers', oldPaperId));
+        } catch (err) {
+          console.error("Failed to delete renamed draft", err);
+        }
       }
       
       // Update tab's originalTitle so we don't try to delete it again
@@ -1548,19 +1488,20 @@ export default function App() {
       folderId: tab.folderId || folders[0]?.id || 'f1'
     };
 
-    const path = `users/${currentUser.uid}/papers/${paperId}`;
-    try {
-      await setDoc(doc(db, 'users', currentUser.uid, 'papers', paperId), draftPaper);
-      
-      // Reflect the change locally in the papers array to prevent flashing
-      setPapers(prev => {
-        const filtered = prev.filter(p => encodeURIComponent(p.title).replace(/\./g, '%2E') !== paperId && p.title !== tab.originalTitle);
-        return [draftPaper, ...filtered];
-      });
-      
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, path);
+    if (currentUser) {
+      const path = `users/${currentUser.uid}/papers/${paperId}`;
+      try {
+        await setDoc(doc(db, 'users', currentUser.uid, 'papers', paperId), draftPaper);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, path);
+      }
     }
+
+    // Reflect the change locally in the papers array (triggers LocalStorage sync useEffect automatically)
+    setPapers(prev => {
+      const filtered = prev.filter(p => encodeURIComponent(p.title).replace(/\./g, '%2E') !== paperId && p.title !== tab.originalTitle);
+      return [draftPaper, ...filtered];
+    });
   };
 
   const saveChatToLibrary = async (targetUserId: string, chatTab: Tab) => {
@@ -1699,6 +1640,7 @@ export default function App() {
     if (isDocNotPdf) {
       setDocumentTitle(targetTab.title || 'Untitled');
       setDocumentContent(targetTab.content || '');
+      setChatInput('');
       if (editorRef.current) {
         editorRef.current.innerHTML = targetTab.content || '';
         lastContentRef.current = targetTab.content || '';
@@ -1706,7 +1648,9 @@ export default function App() {
     } else if (targetTab && targetTab.type === 'chat') {
       setMessages(targetTab.messages || []);
       setActiveAssistantTabId(targetTab.id);
+      setChatInput(targetTab.chatInput || '');
     } else {
+      setChatInput('');
       if (activeTabId !== 'initial-home') {
         setDocumentTitle('Untitled');
         setDocumentContent('');
@@ -1870,8 +1814,15 @@ Once you have content, I can help you draft sections, summarize findings, or for
   }, [tabs, activeTabId, papers]);
 
   // Sending chat messages
-  const handleSendMessage = async (customText?: string, options: { isHidden?: boolean } = {}) => {
-    const textToSend = customText || chatInput;
+  const handleSendMessage = async (customText?: string, options: { isHidden?: boolean; fromSidePanel?: boolean } = {}) => {
+    let textToSend = '';
+    if (customText) {
+      textToSend = customText;
+    } else {
+      const isFromAssistant = options.fromSidePanel || activeTab.type !== 'chat';
+      textToSend = isFromAssistant ? assistantInput : chatInput;
+    }
+
     if (!textToSend.trim()) return;
 
     const userMessage: ChatMessage = {
@@ -1884,7 +1835,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
     updateChatMessages(prev => [...prev, userMessage], false);
     if (!customText) {
-      setChatInput('');
+      const isFromAssistant = options.fromSidePanel || activeTab.type !== 'chat';
+      if (isFromAssistant) {
+        setAssistantInput('');
+      } else {
+        setChatInput('');
+        setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, chatInput: '' } : t));
+      }
     }
     
     const controller = new AbortController();
@@ -1973,6 +1930,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
       let targetTabIdForAi: string | undefined;
       let streamBuffer = "";
       let hasTriggeredDownloadPaper = false;
+      let lastGeneratedHtml = "";
+      let lastGeneratedTitle = "";
       
       aiWritingTabIdRef.current = null;
 
@@ -2013,6 +1972,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                    if (parsedTitle) {
                      setDocumentTitle(parsedTitle);
+                     lastGeneratedTitle = parsedTitle;
                    }
 
                    // Process real paper search
@@ -2178,6 +2138,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                       rawContent = rawContent.trim();
                       const htmlContent = markdownToHtml(rawContent);
+                      lastGeneratedHtml = htmlContent;
                       
                       // Update the tabs array directly to ensure it preserves across navigation
                       if (targetTabIdForAi) {
@@ -2219,6 +2180,18 @@ Once you have content, I can help you draft sections, summarize findings, or for
       updateChatMessages(prev => prev, false);
       setIsAiTyping(false);
       aiWritingTabIdRef.current = null;
+
+      if (targetTabIdForAi && lastGeneratedHtml) {
+        const finalTitle = lastGeneratedTitle || 'Untitled Document';
+        const finalTabObj: Tab = {
+          id: targetTabIdForAi,
+          type: 'document',
+          title: finalTitle,
+          content: lastGeneratedHtml,
+          folderId: selectedFolderId || folders[0]?.id || 'f1'
+        };
+        saveDraftToLibrary(finalTabObj);
+      }
     } catch (e: any) {
       if (e.name === 'AbortError') {
         console.log("AI streaming was aborted by the user.");
@@ -2932,7 +2905,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </button>
                     
                     {isStatsSectionOpen && (
-                      <div className="space-y-0.5 pl-1.5 ml-2 mt-1">
+                      <div className="space-y-0.5 mt-1">
                         {[
                           { id: 'slovin', label: "Slovin's Formula", icon: "ph:calculator-fill", color: "text-[#38bdf8]" },
                           { id: 'percentage', label: "Percentage Calc", icon: "ph:percent-fill", color: "text-[#10b981]" },
@@ -2993,7 +2966,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </button>
 
                     {isHistorySectionOpen && (
-                      <div className="space-y-1 mt-1 pl-1.5 ml-2">
+                      <div className="space-y-1 mt-1">
                         {toolsHistory.length === 0 ? (
                           <div className="px-2 py-4 border border-dashed border-[#27272a]/60 rounded-xl text-center bg-[#0c0c0d]/40 my-1">
                             <p className="text-[10px] text-[#52525b]">No computations saved</p>
@@ -3024,7 +2997,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 <div
                                   key={item.id}
                                   onClick={() => loadToolsHistoryItem(item)}
-                                  className="group p-2 bg-[#0e0e0f]/80 hover:bg-[#121213] border border-[#1e1e20] hover:border-zinc-850 rounded-lg transition-all cursor-pointer relative"
+                                  className="group p-2 bg-[#0e0e0f]/80 hover:bg-[#121213] rounded-lg transition-all cursor-pointer relative"
                                 >
                                   <button
                                     onClick={(e) => deleteToolsHistoryItem(item.id, e)}
@@ -3537,123 +3510,19 @@ Once you have content, I can help you draft sections, summarize findings, or for
                  </div>
                </header>
 
-              {/* Chat Content Area */}
-              <div className="flex-1 overflow-y-auto flex flex-col">
-                <div className="flex-1 flex flex-col items-center pt-2 pb-6 px-4 md:px-6">
-                  {messages.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center w-full max-w-3xl">
-                      <img src="/cosmi.png" alt="Cosmi Logo" className="w-48 h-48 md:w-64 md:h-64 opacity-40 select-none grayscale invert" />
-                    </div>
-                  ) : (
-                    <div className="w-full max-w-3xl flex flex-col gap-4 pb-8">
-                       {messages.filter(m => !m.isHidden).map((m) => (
-                        <div 
-                          key={m.id} 
-                          className={`flex flex-col ${
-                            m.role === 'user' 
-                              ? 'items-end' 
-                              : 'items-start'
-                          } w-full`}
-                        >
-                          <div className={`max-w-[85%] ${
-                            m.role === 'user' 
-                              ? 'bg-[#1a1a1a] text-white rounded-2xl px-5 py-3.5 border border-[#27272a]' 
-                              : 'w-full text-[#d4d4d8] py-2'
-                          } text-[15px] leading-[1.6]`}>
-                            {m.role === 'assistant' && m.thought && (
-                              <div className="mb-4">
-                                <details className="group [&_summary::-webkit-details-marker]:hidden">
-                                  <summary className="flex items-center gap-2 cursor-pointer text-xs font-medium text-zinc-500 hover:text-zinc-400 transition-colors select-none w-fit">
-                                    <Icon icon="ph:brain" className="w-4 h-4" />
-                                    <span>Thought Process</span>
-                                    <Icon icon="ph:caret-right" className="w-3 h-3 group-open:rotate-90 transition-transform" />
-                                  </summary>
-                                  <div className="mt-2 pl-3.5 border-l border-zinc-800 text-[13px] text-zinc-400 font-sans leading-relaxed markdown-body">
-                                    <ReactMarkdown>{m.thought}</ReactMarkdown>
-                                  </div>
-                                </details>
-                              </div>
-                            )}
-                            <div className={`select-text break-words ${m.role === 'user' ? 'whitespace-pre-wrap' : 'markdown-body text-[#d4d4d8]'}`}>
-                              {m.role === 'user' ? (
-                                renderLinkifiedText(m.content)
-                              ) : (
-                                <TypewriterMarkdown 
-                                  content={m.content} 
-                                  timestamp={m.timestamp} 
-                                  onCitationClick={handleCitationClick}
-                                  isStreaming={isAiTyping && m.id === messages[messages.length - 1]?.id} 
-                                />
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                      {isAiTyping && (
-                        <div className="self-start py-2 max-w-full text-[14px] leading-relaxed select-none">
-                          <span className="shimmer-text font-medium text-zinc-500">Processing input...</span>
-                        </div>
-                      )}
-                      <div ref={messagesEndRef} />
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Chat Input Dock with Suggestions Above */}
-              <div className="shrink-0 p-6 flex flex-col items-center gap-4">
-                <div className="w-full max-w-3xl bg-[#1a1a1a] border border-[#2d2d30] rounded-[28px] p-1.5 flex flex-col transition-all focus-within:border-zinc-700">
-                  <TextareaAutosize 
-                    placeholder="Ask about anything, / for skills, @ for context..."
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendMessage();
-                      }
-                    }}
-                    className="w-full bg-transparent text-[15px] text-[#e4e4e7] placeholder-[#52525b] py-3 px-4 resize-none focus:outline-none min-h-[52px] max-h-[300px] leading-relaxed"
-                  />
-                  
-                  <div className="flex items-center justify-between px-2 pb-2 pt-1">
-                    <div className="flex items-center gap-1">
-                      <button className="flex items-center gap-1 px-2.5 py-1.5 hover:bg-[#222222] rounded-xl transition-colors text-[13px] text-[#71717a] hover:text-[#e4e4e7] cursor-pointer">
-                        <span className="font-medium">Auto</span>
-                        <Icon icon="ph:caret-down" className="w-3 h-3" />
-                      </button>
-                      <button className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-[#222222] rounded-xl transition-colors text-[13px] text-[#71717a] hover:text-[#e4e4e7] cursor-pointer font-medium">
-                        <Icon icon="ph:books" className="w-4 h-4" />
-                        <span>Library</span>
-                      </button>
-                      <button className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-[#222222] rounded-xl transition-colors text-[13px] text-[#71717a] hover:text-[#e4e4e7] cursor-pointer font-medium">
-                        <Icon icon="ph:globe" className="w-4 h-4" />
-                        <span>Web</span>
-                      </button>
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                       <button 
-                        onClick={handlePaperclipClick}
-                        className="p-2.5 text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#222222] rounded-full transition-colors cursor-pointer"
-                       >
-                         <Icon icon="ph:plus" className="w-5 h-5" />
-                       </button>
-                       <button 
-                         onClick={() => handleSendMessage()}
-                         disabled={!chatInput.trim()}
-                         className={`p-2 bg-white text-zinc-950 rounded-full transition-all flex items-center justify-center w-9 h-9 ${
-                           chatInput.trim() 
-                             ? 'opacity-100 hover:bg-zinc-200 cursor-pointer' 
-                             : 'opacity-40 cursor-not-allowed'
-                         }`}
-                       >
-                         <Icon icon="ph:arrow-up-bold" className="w-5 h-5" />
-                       </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              {/* Chat Content Area replaced */}
+               <MainChat 
+                 tab={activeTab} 
+                 messages={messages}
+                 chatInput={chatInput}
+                 setChatInput={setChatInput}
+                 isAiTyping={isAiTyping}
+                 handleSendMessage={async (customText, options) => {
+                   await handleSendMessage(customText, options);
+                 }}
+                 researchStatus={researchStatus}
+                 currentUser={currentUser} 
+               />
             </div>
           ) : activeTab.type === 'library' ? (
             <div className="flex-1 overflow-y-auto focus:outline-none bg-[#121212] flex flex-col">
@@ -5080,6 +4949,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   
                   {/* Main Document Title */}
                   <TextareaAutosize 
+                    key={`doc-title-${activeTabId}`}
+                    id={`doc-title-${activeTabId}`}
+                    name={`doc-title-${activeTabId}`}
+                    autoComplete="off"
                     value={documentTitle}
                     onChange={(e) => {
                       const newTitle = e.target.value;
@@ -5207,7 +5080,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
           <div className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden animate-slide-in">
             
             {/* Assistant Header */}
-            <div className="h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212] border-b border-[#1c1c1f] relative">
+            <div className="h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212] relative">
               <div className="relative flex-1 min-w-0 pr-4">
                 <button 
                   onClick={() => setIsAssistantChatDropdownOpen(!isAssistantChatDropdownOpen)}
@@ -5368,13 +5241,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
               <div className="bg-[#222222] rounded-[10px] flex flex-col border border-transparent transition-colors">
                 <textarea 
+                  key={`assistant-chat-input-${activeTabId}`}
+                  id={`assistant-chat-input-${activeTabId}`}
+                  name={`assistant-chat-input-${activeTabId}`}
+                  autoComplete="off"
                   placeholder="Ask about your research, sources, or draft content..."
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
+                  value={assistantInput}
+                  onChange={(e) => setAssistantInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
-                      handleSendMessage();
+                      handleSendMessage(undefined, { fromSidePanel: true });
                     }
                   }}
                   className="w-full bg-transparent text-[13.5px] text-[#e4e4e7] placeholder-[#71717a] py-3 px-3.5 resize-none focus:outline-none min-h-[70px] leading-relaxed"
@@ -5389,7 +5266,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   >
                     <Icon icon="ph:paperclip" className="w-[18px] h-[18px]" />
                   </button>
-
+ 
                   {isAiTyping ? (
                     <button 
                       onClick={() => {
@@ -5405,10 +5282,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </button>
                   ) : (
                     <button 
-                      onClick={() => handleSendMessage()}
-                      disabled={!chatInput.trim()}
+                      onClick={() => handleSendMessage(undefined, { fromSidePanel: true })}
+                      disabled={!assistantInput.trim()}
                       className={`transition-colors p-[6px] rounded-md cursor-pointer ${
-                        chatInput.trim() 
+                        assistantInput.trim() 
                           ? 'text-[#f4f4f5] hover:bg-[#2d2d30]' 
                           : 'text-[#52525b] cursor-not-allowed'
                       }`}

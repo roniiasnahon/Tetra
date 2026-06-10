@@ -2,6 +2,23 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
+import fs from 'fs';
+
+// Ensure the public directory exists and has cosmi.png for static asset serving and build output
+try {
+  const publicDir = path.resolve(process.cwd(), 'public');
+  if (!fs.existsSync(publicDir)) {
+    fs.mkdirSync(publicDir, { recursive: true });
+  }
+  const srcIcon = path.resolve(process.cwd(), 'cosmi.png');
+  const destIcon = path.resolve(publicDir, 'cosmi.png');
+  if (fs.existsSync(srcIcon)) {
+    fs.copyFileSync(srcIcon, destIcon);
+    console.log('[Vite config] Successfully copied cosmi.png to public/');
+  }
+} catch (e) {
+  console.error('[Vite config] Failed to copy cosmi.png to public:', e);
+}
 
 export default defineConfig(() => {
   return {
