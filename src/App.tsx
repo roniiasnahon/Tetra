@@ -3173,9 +3173,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
       <div className="flex-1 flex flex-col min-w-0">
         
         {/* Header Bar */}
-        <header className="h-[38px] flex items-end shrink-0 bg-[#070707] px-2">
+        <header className="relative h-[38px] flex items-end shrink-0 bg-[#070707] px-2">
           
-          <div className="flex items-center gap-3 h-full pb-1.5 pt-1.5 group">
+          <div className="flex items-center gap-3 h-full pb-1.5 pt-1.5 group z-20 bg-[#070707] pr-2">
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
               className={`transition-all duration-300 cursor-pointer p-1 rounded-md ${isSidebarOpen ? 'opacity-0 group-hover:opacity-100 bg-[#1a1a1a] text-[#f4f4f5]' : 'text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1a1a1a]'}`}
@@ -3186,7 +3186,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
           </div>
 
           {/* Tabs Container */}
-          <div className="flex items-end h-full ml-3 gap-[2px] overflow-x-auto custom-scrollbar-h min-w-0">
+          <div 
+            className="flex-1 flex items-end h-full ml-1 gap-[2px] overflow-x-auto custom-scrollbar-h min-w-0 pr-24"
+            style={{
+              WebkitMaskImage: !isAssistantOpen ? 'linear-gradient(to right, rgba(0,0,0,1) calc(100% - 90px), rgba(0,0,0,0) 100%)' : 'none',
+              maskImage: !isAssistantOpen ? 'linear-gradient(to right, rgba(0,0,0,1) calc(100% - 90px), rgba(0,0,0,0) 100%)' : 'none'
+            }}
+          >
             {tabs.map((tab) => (
               <div 
                 key={tab.id}
@@ -3247,23 +3253,21 @@ Once you have content, I can help you draft sections, summarize findings, or for
       <Icon icon="ph:plus-circle" className="w-4 h-4" />
     </div>
   </div>
-
-          <div className="flex-1" />
           
-          {/* Right Header Navigation & Panel Controls */}
-          <div className="flex items-center gap-2 h-full pb-1.5 pt-1.5 text-[#f4f4f5]">
-            {!isAssistantOpen && (
-              <button 
-                onClick={() => setIsAssistantOpen(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#222222] hover:border-[#3f3f46] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98] whitespace-nowrap"
-                title="Open Assistant Source"
-              >
-                <Icon icon="ph:sparkle" className="w-3.5 h-3.5" />
-                <span>Agent</span>
-              </button>
-            )}
-          </div>
-        </header>
+  {/* Right Header Navigation & Panel Controls */}
+  {!isAssistantOpen && (
+    <div className="absolute right-2 bottom-[3px] z-20 flex items-center">
+      <button 
+        onClick={() => setIsAssistantOpen(true)}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1a1a1a] border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#222222] hover:border-[#3f3f46] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98] whitespace-nowrap"
+        title="Open Assistant Source"
+      >
+        <img src="/cosmi.png" alt="Blob" className="w-3.5 h-3.5 object-contain" />
+        <span>Blob</span>
+      </button>
+    </div>
+  )}
+</header>
 
         {/* Main Editor Component Container */}
         <div className="relative flex-1 bg-[#121212] rounded-2xl flex flex-row overflow-hidden min-w-0 transition-all">
@@ -3913,10 +3917,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                   </button>
                                 </th>
                                 <th className="py-3 px-3 font-semibold text-[#8a8a93]">Title</th>
-                                <th className="py-3 px-3 font-semibold text-[#8a8a93]">Move Folder</th>
+                                <th className="py-3 px-3 font-semibold text-[#8a8a93]">Folder</th>
                                 <th className="py-3 px-3 font-semibold text-[#8a8a93]">Authors</th>
                                 <th className="py-3 px-3 font-semibold text-[#8a8a93]">Added</th>
-                                <th className="py-3 px-3 font-semibold text-[#8a8a93]">Full text</th>
                                 <th className="py-3 px-3 font-semibold text-[#8a8a93]">Viewed</th>
                                 <th className="py-3 px-3 font-semibold text-[#8a8a93]">Type</th>
                                 <th className="py-3 px-3 font-semibold text-[#8a8a93]">Summary</th>
@@ -4010,22 +4013,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     </td>
                                     <td className="px-3 text-zinc-400">{paper.author || '—'}</td>
                                     <td className="px-3 text-zinc-500">{paper.added || '—'}</td>
-                                    <td className="px-3">
-                                      <div className="flex items-center gap-1.5 flex-wrap">
-                                        {paper.fullTextStatus === 'Available' ? (
-                                          <span className="text-[#e4e4e7] bg-[#1a1a1a] px-2 py-0.5 rounded text-[10px] border border-[#27272a]">
-                                            Available
-                                          </span>
-                                        ) : (
-                                          <span className="text-zinc-650">Unavailable</span>
-                                        )}
-                                        {paper.extractedText && (
-                                          <span className="text-emerald-400 bg-emerald-950/20 px-1.5 py-0.5 rounded text-[10px] font-mono">
-                                            Mapped
-                                          </span>
-                                        )}
-                                      </div>
-                                    </td>
                                     <td className="px-3 text-zinc-500">{paper.viewed || '—'}</td>
                                     <td className="px-3 text-zinc-400 capitalize">{paper.fileType || '—'}</td>
                                     <td className="px-3 text-[#52525b]">
@@ -4569,7 +4556,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
               )}
             </div>
           ) : activeTab.type === 'tools' ? (
-            <div className="flex-1 overflow-hidden focus:outline-none bg-[#0c0c0d] flex flex-col pt-8 w-full h-full min-h-0">
+            <div className="flex-1 overflow-hidden focus:outline-none bg-[#121212] flex flex-col pt-8 w-full h-full min-h-0">
                <div className="w-full h-full flex flex-col min-h-0">
                   <h1 className="text-xl text-[#f4f4f5] font-semibold tracking-tight pb-4 border-b border-[#222225] px-8 shrink-0">
                     {activeToolsTab === 'slovin' ? "Slovin's Margin of Error & Sample Size" :
