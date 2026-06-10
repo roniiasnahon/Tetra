@@ -1603,7 +1603,7 @@ export default function App() {
 
   // Auto Scroll Chat
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages, isAiTyping]);
 
   // Sync workspace session to Firestore periodically when changes occur
