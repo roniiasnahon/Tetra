@@ -2048,24 +2048,30 @@ Once you have content, I can help you draft sections, summarize findings, or for
                            });
                            setResearchStatus(null);
 
-                           if (newPapers.some(p => p.fileId)) {
-                             // Auto-trigger summary without visible prompt
-                             newPapers.forEach(p => {
-                               if (p.fileId) {
-                                 // We'll call a special function or just add the abstract as a first pass
-                                 // For now, let's use the abstract as the "spit out summary"
-                                 setTimeout(() => {
-                                   const assistantMsg: ChatMessage = {
-                                     id: String(Date.now() + Math.random()),
-                                     role: 'assistant',
-                                     content: `### New Research Mapped: ${p.title}\n\n**Overview:**\n\n${formatAbstractText(p.summary || "I have successfully indexed this paper. You can now ask me questions about its methodology or findings.")}`,
-                                     timestamp: Date.now()
-                                   };
-                                   updateChatMessages(prev => [...prev, assistantMsg], false);
-                                 }, 1000);
-                               }
-                             });
-                           }
+                           // Auto-trigger messages for each found paper depending on if file downloaded successfully
+                           newPapers.forEach(p => {
+                             if (p.fileId) {
+                               setTimeout(() => {
+                                 const assistantMsg: ChatMessage = {
+                                   id: String(Date.now() + Math.random()),
+                                   role: 'assistant',
+                                   content: `### 📄 New Research Mapped: ${p.title}\n\n**Overview:**\n\n${formatAbstractText(p.summary || "I have successfully indexed this paper. You can now ask me questions about its methodology or findings.")}`,
+                                   timestamp: Date.now()
+                                 };
+                                 updateChatMessages(prev => [...prev, assistantMsg], false);
+                               }, 1000);
+                             } else {
+                               setTimeout(() => {
+                                 const assistantMsg: ChatMessage = {
+                                   id: String(Date.now() + Math.random()),
+                                   role: 'assistant',
+                                   content: `### ⚠️ Could not auto-download: ${p.title}\n\nThe full-text document is hosted behind a restricted publisher credential check or locked portal.\n\n* **Direct Link:** [Open original paper URL in browser](${p.url || '#'}) ↗\n* **Suggested Alternative:** Look for this title on open repositories like Google Scholar, ResearchGate, or arXiv.\n* **Manual Upload:** If you already have the PDF file downloaded locally on your device, simply drag and drop or click upload inside your folders sidebar to instantly parse, summarize, and cite the document here!`,
+                                   timestamp: Date.now()
+                                 };
+                                 updateChatMessages(prev => [...prev, assistantMsg], false);
+                               }, 1000);
+                             }
+                           });
 
                            const newTabs = newPapers.filter((p: any) => p.fileId).map((p: any) => {
                              let html = "";
@@ -2786,9 +2792,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 {folder.name}
                               </span>
                             </div>
-                            <span className="text-[9px] px-1.5 bg-[#18181b] border border-[#27272a]/40 rounded text-zinc-500 font-mono">
-                              {folderFiles.length}
-                            </span>
                           </button>
                         </div>
 
@@ -3293,7 +3296,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     }}
                     className="flex items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-colors rounded-3xl text-left cursor-pointer group"
                   >
-                    <div className="mr-5 group-hover:scale-110 transition-transform duration-300">
+                    <div className="mr-5">
                       <Icon icon="ph:pencil-line" className="w-7 h-7 text-[#f4f4f5]" />
                     </div>
                     <div>
@@ -3310,7 +3313,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       }}
                       className={`flex w-full items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-all rounded-3xl text-left cursor-pointer group ${isHomeCreateDropdownOpen ? 'ring-1 ring-zinc-500 bg-[#222222]' : ''}`}
                     >
-                      <div className="mr-5 group-hover:scale-110 transition-transform duration-300">
+                      <div className="mr-5">
                         <Icon icon="ph:plus-circle" className={`w-7 h-7 text-[#e4e4e7] transition-transform ${isHomeCreateDropdownOpen ? 'rotate-45' : ''}`} />
                       </div>
                       <div className="flex-1">
@@ -3337,10 +3340,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             className="w-full flex items-center gap-3 px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                           >
                             <Icon icon="ph:file-text" className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
-                            <div className="text-left">
-                              <div className="font-medium text-xs">New Document</div>
-                              <div className="text-[10px] text-zinc-500">Start drafting with your research</div>
-                            </div>
+                            <span className="font-medium text-xs text-left">New Document</span>
                           </button>
 
                           <button 
@@ -3353,10 +3353,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             className="w-full flex items-center gap-3 px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                           >
                             <Icon icon="ph:chat-circle" className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
-                            <div className="text-left">
-                              <div className="font-medium text-xs">Assistant Chat</div>
-                              <div className="text-[10px] text-zinc-500">Ask your mentor anything</div>
-                            </div>
+                            <span className="font-medium text-xs text-left">Talk to Cosmi</span>
                           </button>
 
                           <div className="h-[1px] bg-[#27272a] mx-4 my-1" />
@@ -3370,10 +3367,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             className="w-full flex items-center gap-3 px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                           >
                             <Icon icon="ph:folder-simple-plus" className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
-                            <div className="text-left">
-                              <div className="font-medium text-xs">New Folder</div>
-                              <div className="text-[10px] text-zinc-500">Organize your workspace</div>
-                            </div>
+                            <span className="font-medium text-xs text-left">New Folder</span>
                           </button>
                         </motion.div>
                       )}
@@ -3406,7 +3400,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         }}
                         className="flex flex-col items-start p-6 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-all duration-300 rounded-[28px] text-left cursor-pointer group min-w-[240px] shrink-0"
                       >
-                        <div className="mb-4 group-hover:scale-105 transition-transform duration-300">
+                        <div className="mb-4">
                           <Icon icon="ph:folder-user" className="w-10 h-10 text-[#f4f4f5]" />
                         </div>
                         <div className="min-w-0">

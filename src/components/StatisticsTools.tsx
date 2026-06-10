@@ -1,8 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Icon } from '@iconify/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { pdfjs } from 'react-pdf';
+import { motion, AnimatePresence } from 'motion/react';
 
 export function StatisticsTools({
   onAddHistory,
@@ -111,6 +112,20 @@ export function StatisticsTools({
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [libraryFormatFilter, setLibraryFormatFilter] = useState<'apa' | 'mla' | 'chicago' | 'harvard' | 'ieee'>('apa');
   const [librarySearchType, setLibrarySearchType] = useState<'all' | 'book' | 'journal' | 'website'>('all');
+  const [isFormatDropdownOpen, setIsFormatDropdownOpen] = useState(false);
+  const formatDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (formatDropdownRef.current && !formatDropdownRef.current.contains(event.target as Node)) {
+        setIsFormatDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   const handleResolveDoi = async () => {
     if (!doiInput.trim()) {
@@ -1936,16 +1951,50 @@ export function StatisticsTools({
             
             {/* Download/Copy All */}
             {savedCitations.length > 0 && (
-              <div className="flex items-center gap-1.5">
-                <select
-                  value={libraryFormatFilter}
-                  onChange={e => setLibraryFormatFilter(e.target.value as any)}
-                  className="bg-[#161616] border border-[#27272a] rounded-lg text-[10px] text-zinc-300 px-2 py-1 outline-none"
+              <div className="flex items-center gap-1.5 relative animate-none" ref={formatDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsFormatDropdownOpen(!isFormatDropdownOpen)}
+                  className="bg-[#161616] hover:bg-[#1f1f22] border border-[#27272a] rounded-lg text-[10px] text-zinc-300 px-2.5 py-1.5 outline-none flex items-center gap-1 transition-colors select-none cursor-pointer"
                 >
-                  {styles.map(s => (
-                    <option key={s.id} value={s.id}>{s.label}</option>
-                  ))}
-                </select>
+                  <span>{styles.find(s => s.id === libraryFormatFilter)?.label || libraryFormatFilter.toUpperCase()}</span>
+                  <Icon icon="ph:caret-down" className={`w-3 h-3 text-zinc-400 transition-transform duration-200 ${isFormatDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                <AnimatePresence>
+                  {isFormatDropdownOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 4, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 4, scale: 0.98 }}
+                      transition={{ duration: 0.1, ease: 'easeOut' }}
+                      className="absolute right-0 top-full mt-1 bg-[#18181b] border border-[#27272a] rounded-xl py-1 z-[80] overflow-hidden shadow-xl min-w-[150px]"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {styles.map(s => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => {
+                            setLibraryFormatFilter(s.id);
+                            setIsFormatDropdownOpen(false);
+                          }}
+                          className={`w-full text-left px-3 py-1.5 text-[10px] flex items-center justify-between transition-colors cursor-pointer ${
+                            libraryFormatFilter === s.id
+                              ? 'bg-[#27272a] text-white font-medium'
+                              : 'text-zinc-400 hover:text-white hover:bg-[#1a1a1a]'
+                          }`}
+                        >
+                          <span>{s.label}</span>
+                          {libraryFormatFilter === s.id && (
+                            <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
+                          )}
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 <button
                   onClick={() => {
                     const text = getFullFormattedBibliography(libraryFormatFilter);
@@ -1953,7 +2002,7 @@ export function StatisticsTools({
                       triggerCopy(text, 'all-bibliography');
                     }
                   }}
-                  className="py-1 px-2.5 bg-[#27272a] hover:bg-[#3f3f46] border border-[#3f3f46] text-[10px] text-white rounded transition font-bold select-none cursor-pointer flex items-center gap-1 shadow-none outline-none border-none active:scale-95"
+                  className="py-1.5 px-2.5 bg-[#27272a] hover:bg-[#3f3f46] border border-[#3f3f46] text-[10px] text-white rounded-lg transition font-bold select-none cursor-pointer flex items-center gap-1 shadow-none outline-none border-none active:scale-[0.98]"
                 >
                   <Icon icon="ph:copy-bold" className="w-3.5 h-3.5" />
                   {copiedStyleId === 'all-bibliography' ? 'Bibliography Copied!' : 'Copy Bibliography Index'}

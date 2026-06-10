@@ -434,8 +434,7 @@ async function attemptBypassDownload(url: string): Promise<Buffer> {
     }
     throw new Error("Downloaded file is empty or not a valid format");
   } catch (firstErr: any) {
-    console.warn(`[BYPASS] Primary download of ${url} failed: ${firstErr.message}. Attempting OpenAlex alternative lookup...`);
-    
+    // Silently attempt OpenAlex lookup without noisy warnings
     try {
       // Look up URL in OpenAlex locations using both full URL and any extracted DOI
       const lookupsUrls = [
@@ -451,7 +450,6 @@ async function attemptBypassDownload(url: string): Promise<Buffer> {
       }
 
       for (const queryOaUrl of lookupsUrls) {
-        console.log(`[BYPASS] Querying OpenAlex fallback index: ${queryOaUrl}`);
         try {
           const oaRes = await axios.get(queryOaUrl, { timeout: 10000 });
           const workData = oaRes.data;
@@ -563,10 +561,8 @@ async function getMegaClient(): Promise<any> {
   if (!email || !password) throw new Error("MEGA_EMAIL and MEGA_PASSWORD required for Mega storage");
   
   megaClient = new Storage({ email, password });
-  return new Promise((resolve, reject) => {
-    megaClient.on('ready', () => resolve(megaClient));
-    megaClient.on('error', (e: any) => reject(e));
-  });
+  await megaClient.ready;
+  return megaClient;
 }
 
 
@@ -667,6 +663,7 @@ If the user asks to "find", "search", "lookup", "download", or "get sources/pape
 1. Briefly state in <chat> that you are searching for real academic papers.
 2. You MUST append a <searchRealPapers> XML element immediately after your </chat> element. This element MUST contain ONLY a single, short search query string centered specifically around the user's requested topic.
 3. NEVER keep "machine learning" as the default query if the user is asking about something else (like "jpeg"). Replace it with their actual topic!
+4. **NO HALLUCINATED ABSTRACTS ON DOWNLOAD FAILURE**: If a paper's automated PDF download fails (as indicated by the search state results), you MUST NOT synthesize an abstract or brief. Instead, provide the URL link directly to the user so they can browse it, suggest they manually upload the document if they have the file, and recommend alternative papers or search directions.
 Examples:
 - If user wants "jpeg":
 <searchRealPapers>jpeg</searchRealPapers>
@@ -797,14 +794,21 @@ async function saveFile(fileId: string, data: { buffer: Buffer, mimetype: string
     console.log(`[STORAGE] Uploading ${fileId} to Mega Storage...`);
     const uploadBuffer = Buffer.alloc(safeBuffer.length); // extra defensive deep copy for mega
     safeBuffer.copy(uploadBuffer);
-    const file = mega.root.upload(fileId, uploadBuffer);
+    
     await new Promise<void>((resolve, reject) => {
-      file.on('complete', resolve);
-      file.on('error', reject);
+      const stream = mega.root.upload({name: fileId, size: uploadBuffer.length}, uploadBuffer, (err: any) => {
+        if (err) return reject(err);
+        resolve();
+      });
+      // prevent unhandled stream errors in mega from crashing node
+      stream.on('error', (err: any) => {
+         console.warn(`[STORAGE] Stream error during mega upload for ${fileId}`, err.message);
+      });
     });
+    
     console.log(`[STORAGE] Successfully uploaded ${fileId} to Mega Storage`);
   } catch (storageErr: any) {
-    console.error(`[STORAGE] Mega Storage upload FAILED for ${fileId}:`, storageErr);
+    console.error(`[STORAGE] Mega Storage upload FAILED for ${fileId}:`, storageErr.message || storageErr);
   }
 }
 
@@ -1916,6 +1920,7 @@ CRITICAL RULES:
         if (papers.length > 0) {
           // Try to auto-download the top paper or generate a fallback PDF note
           let autoDownloadedInfo = "";
+          let downloadSuccess = false;
           const topPaper = papers[0];
           const pdfUrl = topPaper.openAccessPdf?.url || (topPaper.url && topPaper.url.includes('.pdf') ? topPaper.url : null);
           const authorStr = topPaper.authors?.map((a: any) => a.name).join(', ') || 'Unknown Author';
@@ -1969,6 +1974,7 @@ CRITICAL RULES:
                 });
                 autoDownloadedInfo = `\n\n[AUTO-SAVED PDF]: "${topPaper.title}" has been automatically downloaded and is available in your workspace (File ID: ${fileId}). You can now cite it.`;
                 console.log(`[AUTO-DOWNLOAD] File downloaded and stored successfully as ${fileId}`);
+                downloadSuccess = true;
               } else {
                  // Check if it's an error page
                  const startText = dataBuffer.toString('utf-8', 0, 1024).toLowerCase();
@@ -1982,7 +1988,8 @@ CRITICAL RULES:
             }
           }
 
-          researchContext = `
+          if (downloadSuccess) {
+            researchContext = `
 --- AUTOMATIC SCHOLAR SEARCH RESULTS ---
 The user requested papers. I found these academic papers:
 
@@ -1990,8 +1997,25 @@ ${papers.map((p: any, i: number) => `[${i+1}] ${p.title} (${p.year}). Authors: $
 
 ${autoDownloadedInfo}
 -----------------------------------------
-Please synthesize these results into your greeting, let the user know the top paper was successfully downloaded/briefed, and offer to cite them.
+The top paper was successfully downloaded and stored. Please let the user know, highlight elements of it, and offer to cite it or help them integrate it.
 `;
+          } else {
+            const paperUrl = topPaper.url || pdfUrl || "N/A";
+            researchContext = `
+--- AUTOMATIC SCHOLAR SEARCH RESULTS ---
+The user requested papers. I found these academic papers:
+
+${papers.map((p: any, i: number) => `[${i+1}] ${p.title} (${p.year}). Authors: ${p.authors?.map((a:any)=>a.name).join(', ')}. Link: ${p.url || p.openAccessPdf?.url || 'N/A'}. Abstract: ${p.abstract?.substring(0, 300)}...`).join('\n\n')}
+
+-----------------------------------------
+CRITICAL INSTRUCTION: The automated PDF download for "${topPaper.title}" failed.
+DO NOT summarize or produce/hallucinate an abstract or brief of this paper in your response.
+Instead, do the following:
+1. Provide the direct original link (${paperUrl}) clearly in your chat response so the user can easily find and browse/download the full-text paper themselves.
+2. Directly present alternative papers from the search results index above or suggest alternative keywords/search areas.
+3. Suggest that if they have the document's PDF stored locally, they can manually upload it to the workspace for robust analysis.
+`;
+          }
         } else {
           console.log("[AUTO-SEARCH] No papers found in both search pathways.");
         }
@@ -2220,79 +2244,12 @@ ${researchContext}
               return { data: buffer, headers: { 'content-type': 'application/pdf' } };
             };
 
-            const generateFallbackPdf = async (title: string, author: string, year: string, abstract: string, paperId: string, venue?: string) => {
-              try {
-                const doc = new PDFDocument({ margin: 50 });
-                const buffers: Buffer[] = [];
-                doc.on('data', buffers.push.bind(buffers));
-                
-                doc.fontSize(22).font('Helvetica-Bold').fillColor('#0f172a').text(title, { align: 'center' });
-                doc.moveDown(0.5);
-                doc.fontSize(12).font('Helvetica-Oblique').fillColor('#475569').text(`${author || 'Unknown Author'} (${year || '2026'}) ${venue ? `• ${venue}` : ''}`, { align: 'center' });
-                doc.moveDown(2);
-                
-                doc.fontSize(10).font('Helvetica-Bold').fillColor('#b45309').text('[ACCESS NOTE: The original full-text PDF for this paper is hosted behind a publisher portal. Direct automated scholar-sync returned a security token check. An interactive Scholar Note has been generated based on the metadata index.]', { align: 'center' });
-                doc.moveDown(1.5);
-
-                const sectionTitleColor = '#1e293b';
-                const bodyTextColor = '#334155';
-
-                if (abstract && abstract !== "No abstract available.") {
-                  doc.fontSize(14).font('Helvetica-Bold').fillColor(sectionTitleColor).text('Research Abstract');
-                  doc.moveDown(0.5);
-                  doc.fontSize(11).font('Helvetica').fillColor(bodyTextColor).text(abstract, { align: 'justify', lineGap: 3 });
-                  doc.moveDown(1.5);
-                }
-
-                doc.fontSize(14).font('Helvetica-Bold').fillColor(sectionTitleColor).text('Paper Metadata & Reference');
-                doc.moveDown(0.5);
-                doc.fontSize(10).font('Helvetica').fillColor(bodyTextColor).text(`Paper ID: ${paperId || 'N/A'}`);
-                doc.text(`Year: ${year || 'N/A'}`);
-                doc.text(`Venue/Journal: ${venue || 'Academic Index'}`);
-                doc.moveDown(1.5);
-
-                doc.fontSize(14).font('Helvetica-Bold').fillColor(sectionTitleColor).text('Scholarly Insight & Context');
-                doc.moveDown(0.5);
-                const synthesizedOverview = `This document represents a metadata-enriched Scholar Note. 
-
-How to proceed with this interactive workspace:
-1. Annotation: Use sidebar tools to mark sections of interest in this abstract.
-2. Citation Management: This paper is indexed in your workspace with its DOI/PaperID.
-3. Analysis: If you have access to the physical PDF, you can manually upload it to replace this placeholder.
-
-The synthesis engine has verified this reference as a valid citation for your current research draft.`;
-                doc.fontSize(11).font('Helvetica').fillColor(bodyTextColor).text(synthesizedOverview, { align: 'justify', lineGap: 3 });
-
-                const pdfDataPromise = new Promise<Buffer>((resolve) => {
-                  doc.on('end', () => {
-                    resolve(Buffer.concat(buffers));
-                  });
-                });
-
-                doc.end();
-
-                const pdfData = await pdfDataPromise;
-                console.log(`[PDF_GEN] Generated PDF buffer size 1: ${pdfData.length} bytes, starts with: ${pdfData.toString('utf-8', 0, 5)}`);
-
-                const fallbackId = `semantic-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-                await saveFile(fallbackId, {
-                  buffer: pdfData,
-                  mimetype: 'application/pdf',
-                  originalname: `${title.replace(/[^a-zA-Z0-9]/g, '_')}_Scholar_Note.pdf`
-                });
-                return fallbackId;
-              } catch (pdfGenErr) {
-                console.error("Failed to generate fallback PDF:", pdfGenErr);
-                return null;
-              }
-            };
-
             let pdfRes;
             try {
               pdfRes = await attemptDownload(pdfLink);
             } catch (pdfErr: any) {
               const statusStr = pdfErr.response ? ` [Status ${pdfErr.response.status}]` : '';
-              console.warn(`Primary download failed for ${title} from ${pdfLink}:${statusStr} ${pdfErr.message}. Trying fallbacks.`);
+              // Primary direct download failed, silently attempt fallbacks
               
               const locations = entry.locations || [];
               for (const loc of locations) {
@@ -2326,19 +2283,19 @@ The synthesis engine has verified this reference as a valid citation for your cu
                   });
                   mimetype = sniffed.mimetype;
                 } else {
-                  console.warn(`Downloaded content for ${title} has unsupported mime type: ${sniffed.mimetype} (starts with ${buffer.toString('utf-8', 0, 15)}). Falling back to summary PDF.`);
-                  fileId = await generateFallbackPdf(title, author, year, abstract, entry.paperId, entry.venue);
-                  mimetype = 'application/pdf';
+                  console.warn(`Downloaded content for ${title} has unsupported mime type: ${sniffed.mimetype}. No fallback generated.`);
+                  fileId = null;
+                  mimetype = null;
                 }
               } catch (saveErr) {
-                console.error(`Failed to save real file for ${title}, falling back to summary:`, saveErr);
-                fileId = await generateFallbackPdf(title, author, year, abstract, entry.paperId, entry.venue);
-                mimetype = 'application/pdf';
+                console.error(`Failed to save real file for ${title}, no fallback generated:`, saveErr);
+                fileId = null;
+                mimetype = null;
               }
             } else {
-              console.warn(`All download attempts failed for ${title}. Creating elegant summary PDF fallback...`);
-              fileId = await generateFallbackPdf(title, author, year, abstract, entry.paperId, entry.venue);
-              mimetype = 'application/pdf';
+              console.warn(`All download attempts failed for ${title}. No fallback generated.`);
+              fileId = null;
+              mimetype = null;
             }
           } catch (outerErr: any) {
              console.error(`Outer error for ${title}:`, outerErr.message);
