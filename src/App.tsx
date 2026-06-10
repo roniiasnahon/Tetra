@@ -971,6 +971,43 @@ export default function App() {
     }
   });
 
+  // Dynamic Tab Title Management
+  useEffect(() => {
+    if (!activeTab) {
+      document.title = "Cosmi";
+      return;
+    }
+
+    switch (activeTab.type) {
+      case 'home':
+        document.title = "Cosmi";
+        break;
+      case 'library':
+        if (selectedFolderId) {
+          const folderObj = folders.find(f => f.id === selectedFolderId);
+          document.title = `Cosmi - ${folderObj?.name || 'Library'}`;
+        } else {
+          document.title = "Cosmi - Library";
+        }
+        break;
+      case 'document': {
+        const titleStr = activeTab.title && activeTab.title.trim() !== '' ? activeTab.title : 'Untitled Document';
+        document.title = `Cosmi - ${titleStr}`;
+        break;
+      }
+      case 'chat': {
+        const titleStr = activeTab.title && activeTab.title.trim() !== '' ? activeTab.title : 'Chat';
+        document.title = `Cosmi - ${titleStr}`;
+        break;
+      }
+      default: {
+        const titleStr = activeTab.title && activeTab.title.trim() !== '' ? activeTab.title : 'Workspace';
+        document.title = `Cosmi - ${titleStr}`;
+      }
+    }
+  }, [activeTab, selectedFolderId, folders]);
+
+
   // Database helper wrappers to sync automatically to Firestore or guest local state
   const dbSetFolder = async (folder: FolderItem) => {
     if (currentUser) {
