@@ -19,8 +19,18 @@ import axios from "axios";
 import { parseStringPromise } from "xml2js";
 import { Storage } from 'megajs';
 import admin from "firebase-admin";
-import firebaseConfig from "./firebase-applet-config.json" assert { type: "json" };
 import zlib from "zlib";
+
+// Safe, dynamic loading of firebase-applet-config.json
+let firebaseConfig: any = {};
+try {
+  const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  }
+} catch (e) {
+  console.error("Failed to load firebase-applet-config.json dynamically:", e);
+}
 
 function decompressResponse(buffer: Buffer, contentEncoding?: string): Buffer {
   if (!buffer || buffer.length === 0) return buffer;
@@ -697,7 +707,9 @@ const geminiResponseSchema = {
   required: ["content", "thought"]
 };
 
-const UPLOADS_DIR = path.join(process.cwd(), "uploads");
+const UPLOADS_DIR = process.env.VERCEL 
+  ? path.join("/tmp", "uploads")
+  : path.join(process.cwd(), "uploads");
 
 // Helper to ensure uploads directory exists
 async function ensureUploadsDir() {
