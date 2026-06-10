@@ -10,7 +10,6 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { mkdir, writeFile, readFile, access } from "fs/promises";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import multer from "multer";
 import mammoth from "mammoth";
@@ -499,23 +498,60 @@ async function attemptBypassDownload(url: string): Promise<Buffer> {
   }
 }
 
-// Initialize Firebase Admin
+// Initialize Firebase Admin safely
 if (!admin.apps.length) {
-  const initConfig: any = {
-    projectId: firebaseConfig.projectId,
-  };
-  if (firebaseConfig.storageBucket) {
-    initConfig.storageBucket = firebaseConfig.storageBucket;
+  if (firebaseConfig && firebaseConfig.projectId) {
+    const initConfig: any = {
+      projectId: firebaseConfig.projectId,
+    };
+    if (firebaseConfig.storageBucket) {
+      initConfig.storageBucket = firebaseConfig.storageBucket;
+    }
+    try {
+      admin.initializeApp(initConfig);
+      console.log("[FIREBASE] Success initializing Admin SDK with project ID:", firebaseConfig.projectId);
+    } catch (err) {
+      console.error("[FIREBASE] Firebase Admin initialization failed:", err);
+    }
+  } else {
+    console.warn("[FIREBASE] No firebase-applet-config.json or projectId present. Skipped administrative SDK setup.");
   }
-  admin.initializeApp(initConfig);
 }
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+// Lazy/Safe proxy initializer for GoogleGenAI to prevent failure if API key is not present during build/evaluation time
+let aiInstance: GoogleGenAI | null = null;
+try {
+  if (process.env.GEMINI_API_KEY) {
+    aiInstance = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+  }
+} catch (e) {
+  console.error("Failed to eagerly initialize GoogleGenAI:", e);
+}
+
+const ai = new Proxy({} as GoogleGenAI, {
+  get(target, prop, receiver) {
+    if (!aiInstance) {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error("GEMINI_API_KEY is not defined. Please configure it in your environment/secrets in Vercel.");
+      }
+      aiInstance = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
     }
+    return Reflect.get(aiInstance, prop, receiver);
   }
 });
 
@@ -2545,6 +2581,7 @@ ${textToAnalyze}
 
   // Serve static UI assets and delegate routing
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
