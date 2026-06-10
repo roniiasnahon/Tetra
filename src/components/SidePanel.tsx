@@ -84,6 +84,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const [attachments, setAttachments] = useState<{ id: string; name: string; mimetype: string; timestamp: number }[]>([]);
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [attachmentError, setAttachmentError] = useState('');
+  const [activeLightboxImage, setActiveLightboxImage] = useState<{ src: string; name: string } | null>(null);
 
   // Quiz state
   const [quizData, setQuizData] = useState<QuizData | null>(null);
@@ -998,14 +999,18 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                       )}
 
                       {isImage && (
-                        <div className="mt-1 relative rounded-lg overflow-hidden max-h-36 border border-zinc-900 flex justify-center bg-zinc-950">
+                        <button 
+                          onClick={() => setActiveLightboxImage({ src: `/api/files/${att.id}`, name: att.name })}
+                          className="w-full mt-1 relative rounded-lg overflow-hidden max-h-36 border border-zinc-900 flex justify-center bg-zinc-950 cursor-pointer focus:outline-none focus:ring-1 focus:ring-zinc-700 hover:opacity-90 transition-opacity border-none focus:ring-offset-0"
+                          title="Click to view full image"
+                        >
                           <img 
                             src={`/api/files/${att.id}`} 
                             alt={att.name} 
-                            className="max-w-full max-h-32 object-contain rounded pointer-events-none" 
+                            className="max-w-full max-h-32 object-contain rounded" 
                             referrerPolicy="no-referrer"
                           />
-                        </div>
+                        </button>
                       )}
                     </div>
                   );
@@ -1090,6 +1095,47 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox Modal */}
+      {activeLightboxImage && (
+        <div 
+          className="fixed inset-0 bg-[#070708]/95 backdrop-blur-md z-[100] flex flex-col items-center justify-center p-4"
+          onClick={() => setActiveLightboxImage(null)}
+        >
+          {/* Close Header */}
+          <div className="absolute top-4 right-4 flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+            <a
+              href={activeLightboxImage.src}
+              download={activeLightboxImage.name}
+              className="p-2 bg-[#18181b] border border-[#27272a] rounded-lg text-zinc-300 hover:text-white hover:bg-[#27272a] transition-all cursor-pointer flex items-center justify-center"
+              title="Download image"
+            >
+              <Download className="w-4 h-4" />
+            </a>
+            <button 
+              onClick={() => setActiveLightboxImage(null)}
+              className="p-2 bg-[#18181b] border border-[#27272a] rounded-lg text-zinc-300 hover:text-white hover:bg-[#27272a] transition-all cursor-pointer flex items-center justify-center"
+              title="Close image"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="relative max-w-5xl max-h-[85vh] flex flex-col items-center gap-3.5" onClick={(e) => e.stopPropagation()}>
+            <img 
+              src={activeLightboxImage.src} 
+              alt={activeLightboxImage.name} 
+              className="max-w-full max-h-[75vh] object-contain rounded-lg border border-[#27272a]"
+              referrerPolicy="no-referrer"
+            />
+            <div className="text-center px-4">
+              <span className="text-xs text-zinc-400 font-medium tracking-wide">
+                {activeLightboxImage.name}
+              </span>
+            </div>
           </div>
         </div>
       )}

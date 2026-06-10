@@ -80,6 +80,28 @@ body {
   animation: shimmer 1.8s infinite linear;
 }
 
+@keyframes slideProgress {
+  0% {
+    left: -40%;
+    width: 40%;
+  }
+  50% {
+    left: 30%;
+    width: 60%;
+  }
+  100% {
+    left: 100%;
+    width: 40%;
+  }
+}
+
+.animate-slide-progress {
+  position: absolute;
+  height: 100%;
+  background-color: #71717a; /* Zinc-500 equivalent */
+  animation: slideProgress 1.4s infinite ease-in-out;
+}
+
 [contenteditable]:empty:before {
   content: attr(data-placeholder);
   color: #52525b;

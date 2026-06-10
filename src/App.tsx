@@ -46,6 +46,7 @@ interface Tab {
   id: string;
   type: 'home' | 'document' | 'library' | 'chat' | 'tools';
   title: string;
+  originalTitle?: string;
   content?: string;
   fileId?: string;
   mimetype?: string;
@@ -489,26 +490,77 @@ const extractTextFromPdf = async (url: string): Promise<string> => {
   }
 };
 
+const cleanJsonLeakFront = (text: string): string => {
+  if (!text) return "";
+  let clean = text.trim();
+
+  // If the text starts with markdown block
+  if (clean.startsWith("```")) {
+    clean = clean.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  }
+
+  // Check if it has hallmarks of raw json
+  if (clean.includes('":') || clean.includes('",') || clean.includes('{"') || clean.includes('"}') || clean.includes('"],') || clean.includes('"]}') || clean.includes('} }')) {
+    clean = clean.replace(/",\s*"[a-zA-Z0-9_]+"\s*:\s*\{/g, "\n\n");
+    clean = clean.replace(/",\s*"[a-zA-Z0-9_]+"\s*:\s*\[/g, "\n\n");
+    clean = clean.replace(/",\s*"[a-zA-Z0-9_]+"\s*:\s*"/g, "\n\n");
+    clean = clean.replace(/",\s*"[a-zA-Z0-9_]+"\s*:\s*/g, "\n\n");
+    
+    clean = clean.replace(/[\{\}\[\]]/g, " ");
+
+    clean = clean.replace(/"[a-zA-Z0-9_]+"\s*:\s*"/g, " ");
+    clean = clean.replace(/"[a-zA-Z0-9_]+"\s*:\s*/g, " ");
+    
+    clean = clean.replace(/"\s*,\s*"/g, "\n\n");
+    clean = clean.replace(/"\s*:\s*"/g, ": ");
+    
+    clean = clean.replace(/([^\w])"([^\w])/g, "$1$2");
+    
+    if (clean.startsWith('"') && clean.endsWith('"')) {
+      clean = clean.substring(1, clean.length - 1);
+    }
+
+    clean = clean.replace(/\r/g, "");
+    clean = clean.replace(/\n{3,}/g, "\n\n");
+    clean = clean.replace(/[ \t]+/g, " ");
+  }
+
+  return clean.trim();
+};
+
 const formatAbstractText = (text: string) => {
   if (!text) return "";
-  let cleanText = text.replace(/^Abstract\s*[:\-]*\s*/i, '').trim();
+  const cleanedText = cleanJsonLeakFront(text);
+  let cleanText = cleanedText.replace(/^Abstract\s*[:\-]*\s*/i, '').trim();
   if (cleanText.includes('\n\n')) return cleanText;
   
-  const sentences = cleanText.match(/[^.!?]+[.!?]+(?:\s|$)/g);
-  if (!sentences || sentences.length <= 4) return cleanText;
+  // Protect common abbreviations by temporarily replacing their periods
+  const protectedText = cleanText
+    .replace(/\b(Mr|Mrs|Ms|Dr|Prof|Rev|Hon|St|Assoc)\.(\s+)/g, "$1_PROTECTED_DOT_$2")
+    .replace(/\b(e\.g|i\.e|etc|vs|al)\.(\s+)/g, "$1_PROTECTED_DOT_$2")
+    .replace(/([A-Z])\.(\s+)([A-Z])/g, "$1_PROTECTED_DOT_$2$3"); // Protect initials like "Julius D. Selle"
+
+  // Split on punctuation followed by a space and a capital letter
+  const parts = protectedText.split(/([.!?]+)\s+(?=[A-Z])/);
+  if (!parts || parts.length <= 8) return cleanText;
   
   let formatted = "";
-  for (let i = 0; i < sentences.length; i++) {
-    formatted += sentences[i].trim() + " ";
-    if ((i + 1) % 4 === 0 && i !== sentences.length - 1) {
+  let sentenceCount = 0;
+  
+  for (let i = 0; i < parts.length; i += 2) {
+    const textPart = parts[i];
+    const punctuation = parts[i + 1] || "";
+    
+    formatted += textPart + punctuation + " ";
+    sentenceCount++;
+    
+    if (sentenceCount % 4 === 0 && i < parts.length - 2) {
       formatted += "\n\n";
     }
   }
   
-  const formattedLength = sentences.join('').length;
-  if (formattedLength < cleanText.length) {
-    formatted += cleanText.substring(formattedLength).trim();
-  }
+  // Restore the protected abbreviations
+  formatted = formatted.replace(/_PROTECTED_DOT_/g, ".");
   
   return formatted.trim();
 };
@@ -602,10 +654,26 @@ export default function App() {
   };
   
   // Tab Management
-  const [tabs, setTabs] = useState<Tab[]>([
-    { id: 'initial-home', type: 'home', title: 'Home' }
-  ]);
-  const [activeTabId, setActiveTabId] = useState('initial-home');
+  const [tabs, setTabs] = useState<Tab[]>(() => {
+    try {
+      const cachedRef = localStorage.getItem('cosmi_user_snapshot');
+      const uid = cachedRef ? JSON.parse(cachedRef).uid : 'guest';
+      const cached = localStorage.getItem(`cosmi_tabs_${uid}`);
+      return cached ? JSON.parse(cached) : [{ id: 'initial-home', type: 'home', title: 'Home' }];
+    } catch {
+      return [{ id: 'initial-home', type: 'home', title: 'Home' }];
+    }
+  });
+  const [activeTabId, setActiveTabId] = useState<string>(() => {
+    try {
+      const cachedRef = localStorage.getItem('cosmi_user_snapshot');
+      const uid = cachedRef ? JSON.parse(cachedRef).uid : 'guest';
+      const cached = localStorage.getItem(`cosmi_activeTabId_${uid}`);
+      return cached || 'initial-home';
+    } catch {
+      return 'initial-home';
+    }
+  });
   const [activeAssistantTabId, setActiveAssistantTabId] = useState<string | null>(null);
   const ignoreNextTabSyncRef = useRef(false);
   const loadedTabIdRef = useRef<string>('initial-home');
@@ -632,6 +700,7 @@ export default function App() {
   const [currentSelectionSize, setCurrentSelectionSize] = useState(18);
   const [editorAlign, setEditorAlign] = useState<'left' | 'center' | 'right' | 'justify'>('left');
   const [isFontDropdownOpen, setIsFontDropdownOpen] = useState(false);
+  const [isMoreToolsOpen, setIsMoreToolsOpen] = useState(false);
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
 
   // Link context menu and rename modal state
@@ -913,16 +982,38 @@ export default function App() {
   const [savedNoteName, setSavedNoteName] = useState('');
 
   // Firebase Authentication & Authorization State
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const currentUserIdRef = useRef<string | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any>(() => {
+    try {
+      const cached = localStorage.getItem('cosmi_user_snapshot');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
+  const currentUserIdRef = useRef<string | null>(currentUser ? currentUser.uid : null);
+  const [isAuthLoading, setIsAuthLoading] = useState(() => {
+    try {
+      return !localStorage.getItem('cosmi_user_snapshot');
+    } catch {
+      return true;
+    }
+  });
   const [isSessionLoaded, setIsSessionLoaded] = useState(false);
   const [isCloudMenuOpen, setIsCloudMenuOpen] = useState(false);
 
   // Folder Management State
-  const [folders, setFolders] = useState<FolderItem[]>([
-    { id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 },
-  ]);
+  const [folders, setFolders] = useState<FolderItem[]>(() => {
+    try {
+      const cachedRef = localStorage.getItem('cosmi_user_snapshot');
+      const uid = cachedRef ? JSON.parse(cachedRef).uid : 'guest';
+      const cached = localStorage.getItem(`cosmi_folders_${uid}`);
+      return cached ? JSON.parse(cached) : [
+        { id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 },
+      ];
+    } catch {
+      return [{ id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 }];
+    }
+  });
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renamingFolderTempName, setRenamingFolderTempName] = useState<string>('');
@@ -932,7 +1023,16 @@ export default function App() {
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({ 'f1': true, 'f2': true, 'f3': false });
   
   // Research Papers Data
-  const [papers, setPapers] = useState<PaperItem[]>([]);
+  const [papers, setPapers] = useState<PaperItem[]>(() => {
+    try {
+      const cachedRef = localStorage.getItem('cosmi_user_snapshot');
+      const uid = cachedRef ? JSON.parse(cachedRef).uid : 'guest';
+      const cached = localStorage.getItem(`cosmi_papers_${uid}`);
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Database helper wrappers to sync automatically to Firestore or guest local state
   const dbSetFolder = async (folder: FolderItem) => {
@@ -962,6 +1062,32 @@ export default function App() {
         await deleteDoc(doc(db, 'users', currentUser.uid, 'folders', folderId));
         // Also remove referencing papers
         const papersToDelete = papers.filter(p => p.folderId === folderId);
+        
+        // Close tabs associated with deleted papers
+        if (papersToDelete.length > 0) {
+          const titlesToDelete = papersToDelete.map(p => p.title);
+          setTabs(prev => {
+            const tabsToDelete = prev.filter(t => t.type === 'document' && titlesToDelete.includes(t.title));
+            if (tabsToDelete.length === 0) return prev;
+            
+            const updated = prev.filter(t => t.type !== 'document' || !titlesToDelete.includes(t.title));
+            
+            if (updated.length === 0) {
+              const newId = `chat-${Date.now()}`;
+              setActiveTabId(newId);
+              setActiveAssistantTabId(newId);
+              setMessages([]);
+              return [{ id: newId, type: 'chat', title: 'Untitled' }];
+            }
+            
+            if (tabsToDelete.some(t => t.id === activeTabId)) {
+              setActiveTabId(updated[0].id);
+            }
+            
+            return updated;
+          });
+        }
+
         for (const p of papersToDelete) {
           const paperId = encodeURIComponent(p.title).replace(/\./g, '%2E');
           await deleteDoc(doc(db, 'users', currentUser.uid, 'papers', paperId));
@@ -1007,8 +1133,50 @@ export default function App() {
     }
   };
 
+  const createNewDocument = (targetFolderId?: string) => {
+    const newId = `doc-${Date.now()}`;
+    const folder = targetFolderId || selectedFolderId || folders[0]?.id || 'f1';
+    const newDoc: Tab = {
+      id: newId,
+      type: 'document',
+      title: 'Untitled',
+      originalTitle: 'Untitled',
+      content: '',
+      folderId: folder
+    };
+    
+    setTabs(prev => [...prev, newDoc]);
+    setActiveTabId(newId);
+    setSidebarView('files');
+    saveDraftToLibrary(newDoc);
+    return newId;
+  };
+
   const dbDeletePaper = async (paperTitle: string) => {
     const paperId = encodeURIComponent(paperTitle).replace(/\./g, '%2E');
+    
+    // Close any open document tabs associated with this paper
+    setTabs(prev => {
+      const tabsToDelete = prev.filter(t => t.type === 'document' && t.title === paperTitle);
+      if (tabsToDelete.length === 0) return prev;
+      
+      const updated = prev.filter(t => t.type !== 'document' || t.title !== paperTitle);
+      
+      if (updated.length === 0) {
+        const newId = `chat-${Date.now()}`;
+        setActiveTabId(newId);
+        setActiveAssistantTabId(newId);
+        setMessages([]);
+        return [{ id: newId, type: 'chat', title: 'Untitled' }];
+      }
+      
+      if (tabsToDelete.some(t => t.id === activeTabId)) {
+        setActiveTabId(updated[0].id);
+      }
+      
+      return updated;
+    });
+
     if (currentUser) {
       try {
         await deleteDoc(doc(db, 'users', currentUser.uid, 'papers', paperId));
@@ -1030,6 +1198,26 @@ export default function App() {
       setIsAuthLoading(false);
       
       if (user) {
+        // Save user snapshot to localStorage
+        const userObj = { uid: user.uid, email: user.email, displayName: user.displayName };
+        localStorage.setItem('cosmi_user_snapshot', JSON.stringify(userObj));
+
+        // Immediately hydrate from local storage for this user to avoid loading lag
+        try {
+          const cachedFolders = localStorage.getItem(`cosmi_folders_${user.uid}`);
+          if (cachedFolders) setFolders(JSON.parse(cachedFolders));
+          const cachedPapers = localStorage.getItem(`cosmi_papers_${user.uid}`);
+          if (cachedPapers) setPapers(JSON.parse(cachedPapers));
+          const cachedTabs = localStorage.getItem(`cosmi_tabs_${user.uid}`);
+          if (cachedTabs) setTabs(JSON.parse(cachedTabs));
+          const cachedActiveTabId = localStorage.getItem(`cosmi_activeTabId_${user.uid}`);
+          if (cachedActiveTabId) setActiveTabId(cachedActiveTabId);
+          const cachedMessages = localStorage.getItem(`cosmi_messages_${user.uid}`);
+          if (cachedMessages) setMessages(JSON.parse(cachedMessages));
+        } catch (e) {
+          console.error("Failed loading cached user data on auth change:", e);
+        }
+
         // Save user profile state
         try {
           const userDocRef = doc(db, 'users', user.uid);
@@ -1104,9 +1292,9 @@ export default function App() {
           snapshot.forEach((doc) => {
             const data = doc.data();
             loadedPapers.push({
-              author: data.author || '',
-              title: data.title || '',
-              description: data.description || '',
+              author: typeof data.author === 'string' ? data.author : (typeof data.author === 'object' && data.author !== null ? JSON.stringify(data.author) : String(data.author || '')),
+              title: typeof data.title === 'string' ? data.title : String(data.title || ''),
+              description: typeof data.description === 'string' ? data.description : String(data.description || ''),
               url: data.url || '',
               added: data.added || '',
               fullTextStatus: data.fullTextStatus || '',
@@ -1153,13 +1341,32 @@ export default function App() {
         };
       } else {
         unsubscribeUser();
-        setFolders([
-          { id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 }
-        ]);
-        setPapers([]);
-        setTabs([{ id: 'initial-home', type: 'home', title: 'Home' }]);
-        setActiveTabId('initial-home');
-        setMessages([]);
+        localStorage.removeItem('cosmi_user_snapshot');
+
+        // Immediately load guest workspace cache so the workspace resets/retains guest identity
+        try {
+          const cachedFolders = localStorage.getItem(`cosmi_folders_guest`);
+          setFolders(cachedFolders ? JSON.parse(cachedFolders) : [
+            { id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 }
+          ]);
+          const cachedPapers = localStorage.getItem(`cosmi_papers_guest`);
+          setPapers(cachedPapers ? JSON.parse(cachedPapers) : []);
+          const cachedTabs = localStorage.getItem(`cosmi_tabs_guest`);
+          setTabs(cachedTabs ? JSON.parse(cachedTabs) : [{ id: 'initial-home', type: 'home', title: 'Home' }]);
+          const cachedActiveTabId = localStorage.getItem(`cosmi_activeTabId_guest`);
+          setActiveTabId(cachedActiveTabId || 'initial-home');
+          const cachedMessages = localStorage.getItem(`cosmi_messages_guest`);
+          setMessages(cachedMessages ? JSON.parse(cachedMessages) : []);
+        } catch {
+          setFolders([
+            { id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 }
+          ]);
+          setPapers([]);
+          setTabs([{ id: 'initial-home', type: 'home', title: 'Home' }]);
+          setActiveTabId('initial-home');
+          setMessages([]);
+        }
+
         setActiveViewingPaper(null);
         setDocumentContent('');
         setDocumentTitle('');
@@ -1290,13 +1497,71 @@ export default function App() {
 
   // AI Assistant Chat Messages
   const [allChats, setAllChats] = useState<Tab[]>([]);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    try {
+      const cachedRef = localStorage.getItem('cosmi_user_snapshot');
+      const uid = cachedRef ? JSON.parse(cachedRef).uid : 'guest';
+      const cached = localStorage.getItem(`cosmi_messages_${uid}`);
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
   const [chatInput, setChatInput] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [researchStatus, setResearchStatus] = useState<'fetching' | 'downloading' | 'polishing' | null>(null);
   const aiWritingTabIdRef = useRef<string | null>(null);
   const [isChatSuggestionsDismissed, setIsChatSuggestionsDismissed] = useState(false);
   const [selectedFileLabel, setSelectedFileLabel] = useState<string | null>(null);
+
+  const saveDraftToLibrary = async (tab: Tab) => {
+    if (!currentUser || tab.type !== 'document') return;
+    
+    // We do not auto-save PDF documents as drafts, they are managed via upload/import.
+    if (tab.fileId || tab.mimetype === 'application/pdf') return;
+
+    const paperTitle = tab.title && tab.title.trim() ? tab.title.trim() : 'Untitled';
+    const paperId = encodeURIComponent(paperTitle).replace(/\./g, '%2E');
+
+    // If the title changed, delete the old document
+    if (tab.originalTitle && tab.originalTitle !== paperTitle) {
+      const oldPaperId = encodeURIComponent(tab.originalTitle).replace(/\./g, '%2E');
+      try {
+        await deleteDoc(doc(db, 'users', currentUser.uid, 'papers', oldPaperId));
+      } catch (err) {
+        console.error("Failed to delete renamed draft", err);
+      }
+      
+      // Update tab's originalTitle so we don't try to delete it again
+      setTabs(prev => prev.map(t => t.id === tab.id ? { ...t, originalTitle: paperTitle } : t));
+    }
+
+    const draftPaper: PaperItem = {
+      author: "Workspace Draft",
+      title: paperTitle,
+      description: (tab.content || '').substring(0, 100).replace(/<[^>]*>/g, '') + "...",
+      added: "Just now",
+      fullTextStatus: "Draft",
+      viewed: "Active",
+      fileType: "Document",
+      summary: tab.content || '',
+      folderId: tab.folderId || folders[0]?.id || 'f1'
+    };
+
+    const path = `users/${currentUser.uid}/papers/${paperId}`;
+    try {
+      await setDoc(doc(db, 'users', currentUser.uid, 'papers', paperId), draftPaper);
+      
+      // Reflect the change locally in the papers array to prevent flashing
+      setPapers(prev => {
+        const filtered = prev.filter(p => encodeURIComponent(p.title).replace(/\./g, '%2E') !== paperId && p.title !== tab.originalTitle);
+        return [draftPaper, ...filtered];
+      });
+      
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  };
 
   const saveChatToLibrary = async (targetUserId: string, chatTab: Tab) => {
     if (!chatTab || chatTab.type !== 'chat') return;
@@ -1382,6 +1647,32 @@ export default function App() {
     }
   }, [tabs, activeTabId, messages, currentUser, isSessionLoaded]);
 
+  // Synchronize workspace changes to LocalStorage instantly
+  useEffect(() => {
+    const uid = currentUser ? currentUser.uid : 'guest';
+    localStorage.setItem(`cosmi_folders_${uid}`, JSON.stringify(folders));
+  }, [folders, currentUser]);
+
+  useEffect(() => {
+    const uid = currentUser ? currentUser.uid : 'guest';
+    localStorage.setItem(`cosmi_papers_${uid}`, JSON.stringify(papers));
+  }, [papers, currentUser]);
+
+  useEffect(() => {
+    const uid = currentUser ? currentUser.uid : 'guest';
+    localStorage.setItem(`cosmi_tabs_${uid}`, JSON.stringify(tabs));
+  }, [tabs, currentUser]);
+
+  useEffect(() => {
+    const uid = currentUser ? currentUser.uid : 'guest';
+    localStorage.setItem(`cosmi_activeTabId_${uid}`, activeTabId);
+  }, [activeTabId, currentUser]);
+
+  useEffect(() => {
+    const uid = currentUser ? currentUser.uid : 'guest';
+    localStorage.setItem(`cosmi_messages_${uid}`, JSON.stringify(messages));
+  }, [messages, currentUser]);
+
   // Word count helper
   const wordCount = (() => {
     const rawText = `${documentTitle} ${folderName} ${savedNoteName} ` + 
@@ -1432,8 +1723,9 @@ export default function App() {
   const markdownToHtml = (markdown: string) => {
     if (!markdown) return "";
     try {
-      // Replace literal escaped newlines with actual newline characters
-      let formattedMarkdown = markdown.replace(/\\n/g, '\n');
+      // Clean JSON leak and replace literal escaped newlines with actual newline characters
+      const cleaned = cleanJsonLeakFront(markdown);
+      let formattedMarkdown = cleaned.replace(/\\n/g, '\n');
       
       // Attempt to add spacing to massive walls of text
       if (formattedMarkdown.length > 500 && !formattedMarkdown.includes('\n\n')) {
@@ -1443,7 +1735,7 @@ export default function App() {
       // Trim outer whitespace so that heading tags (like ## Introduction) 
       // placed at the start/ends are parsed as actual headings, not inline text.
       const trimmedMarkdown = formattedMarkdown.trim();
-      const htmlText = marked.parse(trimmedMarkdown, { gfm: true, breaks: true }) as string;
+      const htmlText = marked.parse(trimmedMarkdown, { gfm: true, breaks: false }) as string;
       return linkifyHtml(htmlText);
     } catch (e) {
       console.error("Markdown conversion failed", e);
@@ -2013,24 +2305,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
   // Dynamic sort and filter logic
   const allLibraryItems = [...papers];
-  const existingTitles = new Set(papers.map(p => p.title));
-  
-  tabs.forEach(t => {
-    if (t.type === 'document' && !t.fileId && !existingTitles.has(t.title)) {
-      if ((t.content && t.content.length > 5) || (t.title && t.title !== 'Untitled')) {
-        allLibraryItems.push({
-          author: "You",
-          title: t.title || "Untitled Draft",
-          description: t.content && t.content.length > 5 ? "Workspace draft / essay" : "Empty document",
-          added: "Just now",
-          fileType: "Document",
-          fullTextStatus: "Available",
-          summary: t.content ? (t.content.substring(0, 80).replace(/<[^>]+>/g, '') + '...') : ''
-        });
-        existingTitles.add(t.title || "Untitled Draft");
-      }
-    }
-  });
 
   const filteredPapers = allLibraryItems.filter(p => {
     const matchesSearch = searchFilter ? (
@@ -2064,9 +2338,22 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
   if (isAuthLoading) {
     return (
-      <div className="h-screen bg-[#070707] flex flex-col items-center justify-center text-zinc-400 gap-4 font-jakarta animate-none">
-        <Icon icon="ph:spinner-gap" className="w-5 h-5 animate-spin text-emerald-400" />
-        <div className="text-xs font-medium tracking-wide">Connecting Workspace...</div>
+      <div className="h-screen bg-[#070707] flex flex-col items-center justify-center font-sans animate-none select-none">
+        {/* Brand Lockup: cosmi word in lowercase, Plus Jakarta font, then logo beside it */}
+        <div className="flex items-center gap-2.5 mb-6">
+          <span className="text-3xl font-semibold tracking-normal text-white font-jakarta lowercase">cosmi</span>
+          <img 
+            src="/cosmi.png" 
+            alt="Cosmi" 
+            className="w-8 h-8 select-none grayscale invert object-contain" 
+            referrerPolicy="no-referrer"
+          />
+        </div>
+
+        {/* LinkedIn-style loading below */}
+        <div className="w-36 h-[2px] bg-zinc-800/80 rounded-full overflow-hidden relative">
+          <div className="animate-slide-progress rounded-full"></div>
+        </div>
       </div>
     );
   }
@@ -2291,17 +2578,19 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   const homeTab = tabs.find(t => t.type === 'home');
                   if (homeTab) setActiveTabId(homeTab.id);
                   setSidebarView('files');
-                }, active: activeTab.type === 'home' && sidebarView === 'files' },
+                }, active: sidebarView === 'files' || sidebarView === 'chats' },
                 { icon: 'ph:books', label: 'Library', onClick: () => {
                   const libTab = tabs.find(t => t.type === 'library');
                   if (libTab) {
                     setActiveTabId(libTab.id);
+                    setSidebarView('library');
                   } else {
                     const newId = `lib-${Date.now()}`;
                     setTabs([...tabs, { id: newId, type: 'library', title: 'Library' }]);
                     setActiveTabId(newId);
+                    setSidebarView('library');
                   }
-                }, active: activeTab.type === 'library' },
+                }, active: sidebarView === 'library' },
                 { icon: 'ph:calculator', label: 'Tools', onClick: () => {
                   let toolsTab = tabs.find(t => t.type === 'tools');
                   if (!toolsTab) {
@@ -2312,7 +2601,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     setActiveTabId(toolsTab.id);
                   }
                   setSidebarView('tools');
-                }, active: sidebarView === 'tools' || activeTab.type === 'tools' }
+                }, active: sidebarView === 'tools' }
               ].map((item) => (
                 <button 
                   key={item.label} 
@@ -2340,11 +2629,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   >
                     <button 
                       onClick={() => {
-                        const newId = `doc-${Date.now()}`;
-                        const targetFolder = selectedFolderId || folders[0]?.id || 'f1';
-                        setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled', content: '', folderId: targetFolder }]);
-                        setActiveTabId(newId);
-                        setSidebarView('files');
+                        createNewDocument();
                         setIsCreateDropdownOpen(false);
                       }}
                       className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
@@ -2640,20 +2925,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       className="w-full flex items-center justify-between px-1.5 py-1 text-[10px] text-[#71717a] hover:text-zinc-200 font-bold uppercase tracking-wider transition-colors cursor-pointer"
                     >
                       <div className="flex items-center gap-1.5">
-                        <Icon icon="ph:folders-fill" className="w-3.5 h-3.5" />
-                        <span>Statistics</span>
+                        <Icon icon="ph:wrench-fill" className="w-3.5 h-3.5" />
+                        <span>Tools</span>
                       </div>
                       <Icon icon="ph:caret-down" className={`w-3 h-3 transition-transform duration-200 ${isStatsSectionOpen ? '' : '-rotate-90'}`} />
                     </button>
                     
                     {isStatsSectionOpen && (
-                      <div className="space-y-0.5 pl-1.5 border-l border-zinc-850 ml-2 mt-1">
+                      <div className="space-y-0.5 pl-1.5 ml-2 mt-1">
                         {[
                           { id: 'slovin', label: "Slovin's Formula", icon: "ph:calculator-fill", color: "text-[#38bdf8]" },
                           { id: 'percentage', label: "Percentage Calc", icon: "ph:percent-fill", color: "text-[#10b981]" },
                           { id: 'weighted', label: "Weighted Mean", icon: "ph:scales-fill", color: "text-[#60a5fa]" },
                           { id: 'likert', label: "Likert Scale", icon: "ph:check-square-fill", color: "text-[#f59e0b]" },
-                          { id: 'ai', label: "Cosmi AI Audit", icon: "ph:sparkles-fill", color: "text-[#c084fc]" },
+                          { id: 'ai', label: "Cosmi Audit", icon: "cosmi.png", color: "" },
                           { id: 'citation', label: "Citation Generator", icon: "ph:article-fill", color: "text-[#fb7185]" }
                         ].map(item => {
                           const isCurrentlySelected = activeToolsTab === item.id && activeTab.type === 'tools';
@@ -2667,7 +2952,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#161617]/50'
                               }`}
                             >
-                              <Icon icon={item.icon} className={`w-3.5 h-3.5 ${item.color}`} />
+                              {item.icon.endsWith('.png') ? (
+                                <img src={`/${item.icon}`} className="w-3.5 h-3.5 object-contain shrink-0" alt="" />
+                              ) : (
+                                <Icon icon={item.icon} className={`w-3.5 h-3.5 ${item.color}`} />
+                              )}
                               <span className="truncate">{item.label}</span>
                             </button>
                           );
@@ -2704,7 +2993,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </button>
 
                     {isHistorySectionOpen && (
-                      <div className="space-y-1 mt-1 pl-1.5 border-l border-zinc-850 ml-2">
+                      <div className="space-y-1 mt-1 pl-1.5 ml-2">
                         {toolsHistory.length === 0 ? (
                           <div className="px-2 py-4 border border-dashed border-[#27272a]/60 rounded-xl text-center bg-[#0c0c0d]/40 my-1">
                             <p className="text-[10px] text-[#52525b]">No computations saved</p>
@@ -2724,8 +3013,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 iconName = "ph:check-square-fill";
                                 colorClass = "text-[#f59e0b]";
                               } else if (item.type === 'ai') {
-                                iconName = "ph:sparkles-fill";
-                                colorClass = "text-[#c084fc]";
+                                iconName = "cosmi.png";
+                                colorClass = "";
                               } else if (item.type === 'citation') {
                                 iconName = "ph:article-fill";
                                 colorClass = "text-[#fb7185]";
@@ -2745,7 +3034,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     <Icon icon="ph:trash" className="w-2.5 h-2.5" />
                                   </button>
                                   <div className="flex items-start gap-1.5 text-left">
-                                    <Icon icon={iconName} className={`w-3 h-3 mt-0.5 shrink-0 ${colorClass}`} />
+                                    {iconName.endsWith('.png') ? (
+                                      <img src={`/${iconName}`} className="w-3 h-3 mt-0.5 object-contain shrink-0" alt="" />
+                                    ) : (
+                                      <Icon icon={iconName} className={`w-3 h-3 mt-0.5 shrink-0 ${colorClass}`} />
+                                    )}
                                     <div className="flex-1 min-w-0 pr-3 text-left">
                                       <div className="text-[10px] font-medium text-zinc-300 truncate leading-tight">
                                         {item.title}
@@ -2884,7 +3177,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
             {tabs.map((tab) => (
               <div 
                 key={tab.id}
-                onClick={() => setActiveTabId(tab.id)}
+                onClick={() => {
+                  setActiveTabId(tab.id);
+                  if (tab.type === 'tools') setSidebarView('tools');
+                  else if (tab.type === 'library') setSidebarView('library');
+                  else if (tab.type === 'chat') setSidebarView('chats');
+                  else setSidebarView('files');
+                }}
                 className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[8px] transition-colors cursor-pointer text-[13px] ${
                   activeTabId === tab.id 
                     ? 'bg-[#121212] text-[#e4e4e7] border-t border-x border-[#27272a]' 
@@ -2975,13 +3274,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
                   <button 
                     onClick={() => {
-                      const docTab = tabs.find(t => t.type === 'document');
+                      const docTab = tabs.find(t => t.type === 'document' && !t.fileId);
                       if (docTab) {
                         setActiveTabId(docTab.id);
                       } else {
-                        const newId = `doc-${Date.now()}`;
-                        setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled' }]);
-                        setActiveTabId(newId);
+                        createNewDocument();
                       }
                     }}
                     className="flex items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-colors rounded-3xl text-left cursor-pointer group"
@@ -3024,9 +3321,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         >
                           <button 
                             onClick={() => {
-                              const newId = `doc-${Date.now()}`;
-                              setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled', content: '' }]);
-                              setActiveTabId(newId);
+                              createNewDocument();
                               setIsHomeCreateDropdownOpen(false);
                             }}
                             className="w-full flex items-center gap-3 px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
@@ -3404,7 +3699,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </button>
                   </div>
 
-                  <div className="flex items-center gap-3 ml-auto text-xs">
+                  <div className="flex items-center gap-3 sm:ml-auto text-xs w-full sm:w-auto justify-between sm:justify-end">
                     <span className="text-[#71717a] text-[11px] font-medium mr-1 select-none">
                       {sortedPapers.length} files in library
                     </span>
@@ -3434,9 +3729,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           >
                             <button
                               onClick={() => {
-                                const newId = `doc-${Date.now()}`;
-                                setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled', content: '' }]);
-                                setActiveTabId(newId);
+                                createNewDocument();
                                 setIsAddDropdownOpen(false);
                               }}
                               className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
@@ -3681,11 +3974,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           <p className="text-[#52525b] text-xs max-w-sm mx-auto mb-4">No assets have been added here yet. Create some research notes or upload files to fill it!</p>
                           <div className="flex justify-center gap-2">
                             <button 
-                              onClick={() => {
-                                const newId = `doc-${Date.now()}`;
-                                setTabs([...tabs, { id: newId, type: 'document', title: 'Untitled', content: '', folderId: selectedFolderId }]);
-                                setActiveTabId(newId);
-                              }}
+                              onClick={() => createNewDocument(selectedFolderId || folders[0]?.id)}
                               className="px-3.5 py-1.5 bg-zinc-200 hover:bg-white text-zinc-900 rounded-lg text-xs font-semibold cursor-pointer"
                             >
                               New Document
@@ -3775,7 +4064,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                             e.stopPropagation();
                                             setActiveMoveFolderDropdown(activeMoveFolderDropdown === paper.title ? null : paper.title);
                                           }} 
-                                          className={`flex items-center gap-1.5 px-3 py-1.5 font-semibold rounded-lg transition-all cursor-pointer w-full min-w-[130px] max-w-[140px] justify-between ${activeMoveFolderDropdown === paper.title ? 'bg-white text-zinc-950' : 'bg-zinc-200 hover:bg-white text-zinc-950'}`}
+                                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer w-full min-w-[130px] max-w-[140px] justify-between ${activeMoveFolderDropdown === paper.title ? 'bg-[#27272a] text-white' : 'bg-transparent text-zinc-300 hover:bg-[#27272a] hover:text-white'}`}
                                         >
                                           <span className="text-[11px] truncate">
                                             {paper.folderId ? folders.find(f => f.id === paper.folderId)?.name || 'Library' : 'Library'}
@@ -3831,7 +4120,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                           <span className="text-zinc-650">Unavailable</span>
                                         )}
                                         {paper.extractedText && (
-                                          <span className="text-emerald-400 bg-emerald-950/45 px-1.5 py-0.5 rounded text-[10px] border border-emerald-900/60 font-mono">
+                                          <span className="text-emerald-400 bg-emerald-950/20 px-1.5 py-0.5 rounded text-[10px] font-mono">
                                             Mapped
                                           </span>
                                         )}
@@ -3845,7 +4134,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                           e.stopPropagation();
                                           setActiveViewingPaper(paper);
                                         }}
-                                        className="px-2.5 py-1 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-zinc-300 hover:text-white font-sans text-[11px] rounded-lg transition-all cursor-pointer flex items-center gap-1.5 font-medium select-none"
+                                        className="px-2.5 py-1 bg-transparent hover:bg-[#27272a] text-zinc-300 hover:text-white font-sans text-[11px] rounded-lg transition-all cursor-pointer flex items-center gap-1.5 font-medium select-none"
                                       >
                                         <Icon icon="ph:eye" className="w-3.5 h-3.5" />
                                         <span>View Summary</span>
@@ -4454,11 +4743,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     <PanelRight className="w-5 h-5" />
                   </button>
                 )}
-                {/* Floating Pill Formatting Bar */}
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616] border border-[#2d2d30] rounded-full px-4 h-[44px] flex items-center gap-3 text-[12px] text-[#a1a1aa] whitespace-nowrap select-none">
+                {/* Floating Pill Formatting Bar - Compact, clean, with a 3-dots overflow menu to prevent layout wrapping or overlapping */}
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-3.5 h-[44px] flex items-center justify-center gap-x-2 text-[12px] text-[#a1a1aa] select-none max-w-[calc(100%-1.5rem)] md:max-w-max shadow-xl transition-all duration-200">
                 
                 {/* Font Selector */}
-                <div className="flex items-center relative h-full">
+                <div className="flex items-center relative h-full shrink-0">
                   <button 
                     onClick={() => setIsFontDropdownOpen(!isFontDropdownOpen)}
                     className="flex items-center gap-1.5 px-2.5 h-8 hover:bg-[#2c2c2e] transition-colors rounded-lg text-[#e4e4e7] cursor-pointer"
@@ -4495,7 +4784,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             className={`w-full text-left px-3 py-2 text-[11px] transition-colors flex items-center justify-between group cursor-pointer ${
                               editorFont === font.value 
                                 ? 'bg-[#2c2c2e] text-[#f4f4f5]' 
-                                : 'text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7]'
+                               : 'text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7]'
                             }`}
                           >
                             <span className={font.value}>{font.label}</span>
@@ -4509,10 +4798,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   </AnimatePresence>
                 </div>
 
-                <div className="h-4 w-[1px] bg-[#2d2d30]" />
+                <div className="h-4 w-[1px] bg-[#2d2d30] shrink-0" />
 
                 {/* Font Size Adjusters */}
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => changeSelectedFontSize(false)}
@@ -4532,10 +4821,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   </button>
                 </div>
 
-                <div className="h-4 w-[1px] bg-[#2d2d30]" />
+                <div className="h-4 w-[1px] bg-[#2d2d30] shrink-0" />
 
                 {/* Formatting controls */}
-                <div className="flex items-center gap-0.5">
+                <div className="flex items-center gap-0.5 shrink-0">
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleFormat('undo')}
@@ -4554,9 +4843,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   </button>
                 </div>
 
-                <div className="h-4 w-[1px] bg-[#2d2d30]" />
+                <div className="h-4 w-[1px] bg-[#2d2d30] shrink-0" />
 
-                <div className="flex items-center gap-0.5">
+                {/* Core Styles Always Visible */}
+                <div className="flex items-center gap-0.5 shrink-0">
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleFormat('bold')}
@@ -4581,143 +4871,206 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   >
                     <Icon icon="ph:text-underline" className="w-4 h-4" />
                   </button>
-                  <button 
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleFormat('strikethrough')}
-                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
-                    title="Strikethrough Selection"
-                  >
-                    <Icon icon="ph:text-strikethrough" className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleFormat('subscript')}
-                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
-                    title="Subscript"
-                  >
-                    <Icon icon="ph:text-subscript" className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleFormat('superscript')}
-                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
-                    title="Superscript"
-                  >
-                    <Icon icon="ph:text-superscript" className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      const color = prompt('Enter color (e.g. yellow, #ff0000):', 'yellow');
-                      if (color) handleFormat('hiliteColor', color);
-                    }}
-                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
-                    title="Highlight Selection"
-                  >
-                    <Icon icon="ph:highlighter" className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      const color = prompt('Enter text color (e.g. blue, red):', '#ffffff');
-                      if (color) handleFormat('foreColor', color);
-                    }}
-                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
-                    title="Change Text Color"
-                  >
-                    <Icon icon="ph:palette" className="w-4 h-4" />
-                  </button>
                 </div>
 
-                <div className="h-4 w-[1px] bg-[#2d2d30]" />
+                <div className="h-4 w-[1px] bg-[#2d2d30] shrink-0" />
 
-                {/* Lists */}
-                <div className="flex items-center gap-0.5">
+                {/* Three Dots Overflow Dropdown Menu */}
+                <div className="relative flex items-center shrink-0">
                   <button 
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleFormat('insertUnorderedList')}
-                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
-                    title="Bullet List"
+                    onClick={() => setIsMoreToolsOpen(!isMoreToolsOpen)}
+                    className={`p-1.5 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022] ${isMoreToolsOpen ? 'bg-[#2c2c2e] text-white' : ''}`}
+                    title="More formatting"
                   >
-                    <Icon icon="ph:list-bullets" className="w-4 h-4" />
+                    <Icon icon="ph:dots-three-bold" className="w-5 h-5" />
                   </button>
-                  <button 
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleFormat('insertOrderedList')}
-                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
-                    title="Numbered List"
-                  >
-                    <Icon icon="ph:list-numbers" className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleFormat('insertHorizontalRule')}
-                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
-                    title="Horizontal Rule"
-                  >
-                    <Icon icon="ph:minus" className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleFormat('removeFormat')}
-                    className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
-                    title="Clear Formatting"
-                  >
-                    <Icon icon="ph:eraser" className="w-4 h-4" />
-                  </button>
+
+                  <AnimatePresence>
+                    {isMoreToolsOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: -8, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        transition={{ duration: 0.15, ease: "easeOut" }}
+                        className="absolute right-0 bottom-full mb-2 z-50 bg-[#161616] border border-[#2d2d30] rounded-xl p-3 shadow-2xl flex flex-col gap-3 min-w-[200px]"
+                      >
+                        {/* Alignment section */}
+                        <div>
+                          <div className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider mb-1 select-none text-left">Alignment</div>
+                          <div className="flex items-center gap-0.5 bg-[#1e1e20] p-1 rounded-lg border border-[#27272a]">
+                            {[
+                              { id: 'left', icon: 'ph:text-align-left', format: 'justifyLeft', label: 'Left' },
+                              { id: 'center', icon: 'ph:text-align-center', format: 'justifyCenter', label: 'Center' },
+                              { id: 'right', icon: 'ph:text-align-right', format: 'justifyRight', label: 'Right' },
+                              { id: 'justify', icon: 'ph:text-align-justify', format: 'justifyFull', label: 'Justify' }
+                            ].map((align) => (
+                              <button
+                                key={align.id}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => {
+                                  setEditorAlign(align.id as any);
+                                  handleFormat(align.format);
+                                }}
+                                className={`flex-1 p-1 rounded-md transition-colors flex items-center justify-center cursor-pointer ${
+                                  editorAlign === align.id 
+                                    ? 'text-[#f4f4f5] bg-[#2d2d30]' 
+                                    : 'text-[#a1a1aa] hover:text-white hover:bg-[#252527]'
+                                }`}
+                                title={`Align ${align.label}`}
+                              >
+                                <Icon icon={align.icon} className="w-4 h-4" />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="h-[1px] bg-[#2d2d30]" />
+
+                        {/* Styles section */}
+                        <div>
+                          <div className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider mb-1 select-none text-left">Styles</div>
+                          <div className="grid grid-cols-4 gap-1">
+                            <button 
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => handleFormat('strikethrough')}
+                              className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
+                              title="Strikethrough Selection"
+                            >
+                              <Icon icon="ph:text-strikethrough" className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => handleFormat('subscript')}
+                              className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
+                              title="Subscript"
+                            >
+                              <Icon icon="ph:text-subscript" className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => handleFormat('superscript')}
+                              className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
+                              title="Superscript"
+                            >
+                              <Icon icon="ph:text-superscript" className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => handleFormat('removeFormat')}
+                              className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#202022] flex items-center justify-center"
+                              title="Clear Formatting"
+                            >
+                              <Icon icon="ph:eraser" className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="h-[1px] bg-[#2d2d30]" />
+
+                        {/* Text Color Section */}
+                        <div>
+                          <div className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider mb-1.5 select-none text-left flex items-center gap-1">
+                            <Icon icon="ph:palette" className="w-3.5 h-3.5" />
+                            <span>Text Color</span>
+                          </div>
+                          <div className="grid grid-cols-8 gap-1.5 p-1 bg-[#1e1e20] rounded-lg border border-[#27272a]">
+                            {[
+                              { name: 'White', value: '#ffffff', class: 'bg-white border border-[#2d2d30]' },
+                              { name: 'Gray', value: '#a1a1aa', class: 'bg-zinc-400' },
+                              { name: 'Red', value: '#ef4444', class: 'bg-red-500' },
+                              { name: 'Orange', value: '#f97316', class: 'bg-orange-500' },
+                              { name: 'Yellow', value: '#eab308', class: 'bg-yellow-500' },
+                              { name: 'Green', value: '#22c55e', class: 'bg-green-500' },
+                              { name: 'Blue', value: '#3b82f6', class: 'bg-blue-500' },
+                              { name: 'Purple', value: '#a855f7', class: 'bg-purple-500' },
+                            ].map((color) => (
+                              <button
+                                key={color.value}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => handleFormat('foreColor', color.value)}
+                                className={`w-5 h-5 rounded-full cursor-pointer transition-transform hover:scale-110 active:scale-95 ${color.class}`}
+                                title={color.name}
+                              />
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Highlight Section */}
+                        <div>
+                          <div className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider mb-1.5 select-none text-left flex items-center gap-1">
+                            <Icon icon="ph:highlighter" className="w-3.5 h-3.5" />
+                            <span>Highlight</span>
+                          </div>
+                          <div className="grid grid-cols-8 gap-1.5 p-1 bg-[#1e1e20] rounded-lg border border-[#27272a]">
+                            {[
+                              { name: 'None', value: 'transparent', class: 'border border-dashed border-zinc-600 bg-transparent flex items-center justify-center' },
+                              { name: 'Yellow', value: '#fef08a', class: 'bg-yellow-200 text-black' },
+                              { name: 'Green', value: '#bbf7d0', class: 'bg-green-200' },
+                              { name: 'Blue', value: '#bfdbfe', class: 'bg-blue-200' },
+                              { name: 'Pink', value: '#fbcfe8', class: 'bg-pink-200' },
+                              { name: 'Purple', value: '#e9d5ff', class: 'bg-purple-200' },
+                              { name: 'Orange', value: '#fed7aa', class: 'bg-orange-200' },
+                              { name: 'Red', value: '#fca5a5', class: 'bg-red-200' },
+                            ].map((color) => (
+                              <button
+                                key={color.value}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => handleFormat('hiliteColor', color.value)}
+                                className={`w-5 h-5 rounded-full cursor-pointer transition-transform hover:scale-110 active:scale-95 ${color.class}`}
+                                title={color.name}
+                              >
+                                {color.value === 'transparent' && <span className="text-[9px] text-zinc-400 select-none">×</span>}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="h-[1px] bg-[#2d2d30]" />
+
+                        {/* List inserts */}
+                        <div>
+                          <div className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider mb-1 select-none text-left">Insert</div>
+                          <div className="grid grid-cols-3 gap-1">
+                            <button 
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                handleFormat('insertUnorderedList');
+                                setIsMoreToolsOpen(false);
+                              }}
+                              className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
+                              title="Bullet List"
+                            >
+                              <Icon icon="ph:list-bullets" className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                handleFormat('insertOrderedList');
+                                setIsMoreToolsOpen(false);
+                              }}
+                              className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
+                              title="Numbered List"
+                            >
+                              <Icon icon="ph:list-numbers" className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                handleFormat('insertHorizontalRule');
+                                setIsMoreToolsOpen(false);
+                              }}
+                              className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
+                              title="Horizontal Rule"
+                            >
+                              <Icon icon="ph:minus" className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
-
-                <div className="h-4 w-[1px] bg-[#2d2d30]" />
-
-                {/* Text Alignment Picker */}
-                <div className="flex items-center gap-0.5">
-                  <button 
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      setEditorAlign('left');
-                      handleFormat('justifyLeft');
-                    }}
-                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'left' ? 'text-[#f4f4f5] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
-                    title="Align Left"
-                  >
-                    <Icon icon="ph:text-align-left" className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      setEditorAlign('center');
-                      handleFormat('justifyCenter');
-                    }}
-                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'center' ? 'text-[#f4f4f5] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
-                    title="Align Center"
-                  >
-                    <Icon icon="ph:text-align-center" className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      setEditorAlign('right');
-                      handleFormat('justifyRight');
-                    }}
-                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'right' ? 'text-[#f4f4f5] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
-                    title="Align Right"
-                  >
-                    <Icon icon="ph:text-align-right" className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      setEditorAlign('justify');
-                      handleFormat('justifyFull');
-                    }}
-                    className={`p-1 rounded-md transition-colors cursor-pointer ${editorAlign === 'justify' ? 'text-[#f4f4f5] bg-[#2c2c2e]' : 'hover:text-white hover:bg-[#202022]'}`}
-                    title="Align Justify"
-                  >
-                    <Icon icon="ph:text-align-justify" className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="h-4 w-[1px] bg-[#2d2d30]" />
 
               </div>
 
@@ -4732,6 +5085,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       const newTitle = e.target.value;
                       setDocumentTitle(newTitle);
                       setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, title: newTitle } : t));
+                    }}
+                    onBlur={(e) => {
+                      const currentTab = tabs.find(t => t.id === activeTabId);
+                      if (currentTab) saveDraftToLibrary({ ...currentTab, title: e.target.value });
                     }}
                     placeholder="Untitled"
                     className="w-full bg-transparent text-[#f4f4f5] tracking-tight font-normal pb-2 resize-none outline-none leading-[1.25] text-[2.2rem] md:text-[2.6rem] placeholder:text-[#3f3f46] font-jakarta"
@@ -4761,6 +5118,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           lastContentRef.current = html;
                           setDocumentContent(html);
                           setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, content: html } : t));
+                          const currentTab = tabs.find(t => t.id === activeTabId);
+                          if (currentTab) saveDraftToLibrary({ ...currentTab, content: html });
                         }
                       }}
                       onPaste={(e) => {

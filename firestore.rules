@@ -33,7 +33,8 @@ service cloud.firestore {
         && data.keys().size() <= 6
         && data.uid == request.auth.uid
         && data.email is string
-        && data.createdAt is number;
+        && data.createdAt is number
+        && data.get('displayName', '') is string;
     }
 
     function isValidFolder(data) {
@@ -47,9 +48,18 @@ service cloud.firestore {
     function isValidPaper(data) {
       return data.keys().hasAll(['title'])
         && data.title is string
-        && (data.author == null || data.author is string)
-        && (data.url == null || data.url is string)
-        && (data.folderId == null || data.folderId is string);
+        && data.get('author', '') is string
+        && data.get('description', '') is string
+        && data.get('url', '') is string
+        && data.get('added', '') is string
+        && data.get('fullTextStatus', '') is string
+        && data.get('viewed', '') is string
+        && data.get('fileType', '') is string
+        && data.get('summary', '') is string
+        && data.get('fileId', '') is string
+        && data.get('mimetype', '') is string
+        && data.get('extractedText', '') is string
+        && data.get('folderId', '') is string;
     }
 
     function isValidChat(data) {
@@ -61,8 +71,9 @@ service cloud.firestore {
 
     function isValidSession(data) {
       return data.keys().hasAny(['tabs', 'activeTabId', 'messages'])
-        && (data.tabs == null || data.tabs is list)
-        && (data.messages == null || data.messages is list);
+        && data.get('tabs', []) is list
+        && data.get('activeTabId', '') is string
+        && data.get('messages', []) is list;
     }
 
     // 4. Collection Matches

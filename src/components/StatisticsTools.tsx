@@ -66,6 +66,305 @@ export function StatisticsTools({
     accessDate: '2026-06-08'
   });
 
+  // Expanded Citation Management States
+  const [citationInputMode, setCitationInputMode] = useState<'manual' | 'doi' | 'pdf'>('manual');
+  const [doiInput, setDoiInput] = useState('');
+  const [isResolvingDoi, setIsResolvingDoi] = useState(false);
+  const [isParsingPdf, setIsParsingPdf] = useState(false);
+  const [pdfFileName, setPdfFileName] = useState('');
+  const [pdfTasks, setPdfTasks] = useState<Array<{
+    id: string;
+    name: string;
+    status: 'pending' | 'extracting' | 'parsing' | 'success' | 'error';
+    errorMsg?: string;
+  }>>([]);
+  const [citationStatus, setCitationStatus] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
+  // Saved/Organized Citations State
+  const [savedCitations, setSavedCitations] = useState<Array<{
+    id: string;
+    sourceType: 'book' | 'journal' | 'website';
+    fields: typeof citationFields;
+    createdAt: number;
+  }>>(() => {
+    try {
+      const stored = localStorage.getItem('organizedCitations');
+      return stored ? JSON.parse(stored) : [];
+    } catch (_) {
+      return [];
+    }
+  });
+
+  // Save to localStorage when updated
+  const saveToCitationsLocalStorage = (list: any) => {
+    try {
+      localStorage.setItem('organizedCitations', JSON.stringify(list));
+    } catch (e) {
+      console.error('Failed to save citations list to localStorage:', e);
+    }
+  };
+
+  // Right Panel display switch between Active Formatter Preview and Organized Citation Library
+  const [citationRightTab, setCitationRightTab] = useState<'preview' | 'library'>('library');
+  
+  // Library search and filter
+  const [librarySearchQuery, setLibrarySearchQuery] = useState('');
+  const [libraryFormatFilter, setLibraryFormatFilter] = useState<'apa' | 'mla' | 'chicago' | 'harvard' | 'ieee'>('apa');
+  const [librarySearchType, setLibrarySearchType] = useState<'all' | 'book' | 'journal' | 'website'>('all');
+
+  const handleResolveDoi = async () => {
+    if (!doiInput.trim()) {
+      setCitationStatus({ type: 'error', message: 'Please enter a valid DOI.' });
+      return;
+    }
+    setIsResolvingDoi(true);
+    setCitationStatus({ type: 'info', message: 'Resolving DOI metadata from OpenAlex indexes...' });
+    try {
+      const rawRes = await fetch("/api/citation/resolve-doi", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ doi: doiInput })
+      });
+      const data = await rawRes.json();
+      if (data.success && data.metadata) {
+        const meta = data.metadata;
+        setCitationSourceType(meta.sourceType || 'journal');
+        setCitationFields({
+          authors: meta.authors || '',
+          title: meta.title || '',
+          publisher: meta.publisher || '',
+          year: meta.year || '',
+          edition: meta.edition || '',
+          journal: meta.journal || '',
+          volume: meta.volume || '',
+          issue: meta.issue || '',
+          pages: meta.pages || '',
+          doi: meta.doi || doiInput,
+          url: meta.url || '',
+          siteName: meta.siteName || '',
+          pubDate: meta.pubDate || '',
+          accessDate: meta.accessDate || new Date().toISOString().split('T')[0]
+        });
+        setCitationStatus({ type: 'success', message: 'DOI metadata successfully parsed! Review fields below.' });
+        setDoiInput('');
+        setCitationInputMode('manual');
+      } else {
+        throw new Error(data.error || 'Failed to resolve DOI');
+      }
+    } catch (err: any) {
+      console.error("DOI resolution error:", err);
+      setCitationStatus({ type: 'error', message: err.message || 'Unable to resolve DOI automatically. Please enter manually.' });
+    } finally {
+      setIsResolvingDoi(false);
+    }
+  };
+
+  const parsePdfCitation = async (file: File) => {
+    await parseMultiplePdfCitations([file]);
+  };
+
+  const parseMultiplePdfCitations = async (files: File[]) => {
+    setIsParsingPdf(true);
+    setCitationStatus({ type: 'info', message: `Initializing batch parsing of ${files.length} PDF(s)...` });
+
+    // Initialize tasks list
+    const batchId = Date.now();
+    const initialTasks = files.map((f, i) => ({
+      id: `${f.name}-${batchId}-${i}-${Math.random().toString(36).substr(2, 5)}`,
+      name: f.name,
+      status: 'pending' as const,
+    }));
+    
+    setPdfTasks(prev => [...initialTasks, ...prev]);
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let idx = 0; idx < files.length; idx++) {
+      const file = files[idx];
+      const taskId = initialTasks[idx].id;
+
+      const updateTaskStatus = (status: 'pending' | 'extracting' | 'parsing' | 'success' | 'error', errorMsg?: string) => {
+        setPdfTasks(prev => prev.map(t => t.id === taskId ? { ...t, status, errorMsg } : t));
+      };
+
+      try {
+        updateTaskStatus('extracting');
+        setPdfFileName(file.name);
+        
+        const arrayBuffer = await file.arrayBuffer();
+        const loadingTask = pdfjs.getDocument({
+          data: arrayBuffer,
+          cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
+          cMapPacked: true,
+        });
+        const pdfDoc = await loadingTask.promise;
+        let extractedText = "";
+        
+        const numPages = Math.min(pdfDoc.numPages, 2);
+        for (let i = 1; i <= numPages; i++) {
+          const page = await pdfDoc.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map((item: any) => item.str || "").join(" ");
+          extractedText += pageText + "\n";
+        }
+
+        if (!extractedText.trim()) {
+          throw new Error("Could not extract legible characters from this PDF.");
+        }
+
+        updateTaskStatus('parsing');
+        
+        const response = await fetch("/api/citation/parse-text", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: extractedText })
+        });
+
+        const data = await response.json();
+        if (data.success && data.metadata) {
+          const meta = data.metadata;
+          const extractedFields = {
+            authors: meta.authors || "",
+            title: meta.title || "",
+            publisher: meta.publisher || "",
+            year: meta.year || "",
+            edition: meta.edition || "",
+            journal: meta.journal || "",
+            volume: meta.volume || "",
+            issue: meta.issue || "",
+            pages: meta.pages || "",
+            doi: meta.doi || "",
+            url: meta.url || "",
+            siteName: meta.siteName || "",
+            pubDate: meta.pubDate || "",
+            accessDate: meta.accessDate || new Date().toISOString().split('T')[0]
+          };
+
+          // Populate the active editor with the last parsed file's contents
+          setCitationSourceType(meta.sourceType || "journal");
+          setCitationFields(extractedFields);
+
+          // Auto-save this citation directly into the Organized Citation Library
+          const newCitation = {
+            id: `citation-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            sourceType: (meta.sourceType || "journal") as 'book' | 'journal' | 'website',
+            fields: extractedFields,
+            createdAt: Date.now()
+          };
+          
+          setSavedCitations(prev => {
+            const updated = [newCitation, ...prev];
+            saveToCitationsLocalStorage(updated);
+            return updated;
+          });
+
+          updateTaskStatus('success');
+          successCount++;
+        } else {
+          throw new Error(data.error || "Failed parsing metadata from Mistral response.");
+        }
+      } catch (err: any) {
+        console.error("PDF Parsing error:", err);
+        updateTaskStatus('error', err.message || 'Verification token failed.');
+        failCount++;
+      }
+    }
+
+    setIsParsingPdf(false);
+    if (successCount > 0 && failCount === 0) {
+      setCitationStatus({ type: 'success', message: `All ${successCount} PDF(s) successfully analyzed and imported to library!` });
+    } else if (successCount > 0) {
+      setCitationStatus({ type: 'info', message: `Imported ${successCount} paper(s) to library. ${failCount} failed.` });
+    } else {
+      setCitationStatus({ type: 'error', message: `Could not parse the selected PDF file(s).` });
+    }
+  };
+
+  const handlePdfUploadForCitation = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    await parseMultiplePdfCitations(Array.from(files));
+  };
+
+  const handlePdfDropForCitation = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const files: File[] = [];
+    if (e.dataTransfer.items) {
+      for (let i = 0; i < e.dataTransfer.items.length; i++) {
+        if (e.dataTransfer.items[i].kind === 'file') {
+          const file = e.dataTransfer.items[i].getAsFile();
+          if (file && file.name.toLowerCase().endsWith('.pdf')) {
+            files.push(file);
+          }
+        }
+      }
+    } else {
+      for (let i = 0; i < e.dataTransfer.files.length; i++) {
+        const file = e.dataTransfer.files[i];
+        if (file && file.name.toLowerCase().endsWith('.pdf')) {
+          files.push(file);
+        }
+      }
+    }
+    if (files.length === 0) return;
+    await parseMultiplePdfCitations(files);
+  };
+
+  const addCitationToLibrary = () => {
+    const newCitation = {
+      id: `citation-${Date.now()}`,
+      sourceType: citationSourceType,
+      fields: { ...citationFields },
+      createdAt: Date.now()
+    };
+    
+    const updated = [newCitation, ...savedCitations];
+    setSavedCitations(updated);
+    saveToCitationsLocalStorage(updated);
+
+    setCitationStatus({ type: 'success', message: 'Citation added to your organized library!' });
+    setCitationRightTab('library');
+  };
+
+  const deleteCitationFromLibrary = (id: string) => {
+    const updated = savedCitations.filter(c => c.id !== id);
+    setSavedCitations(updated);
+    saveToCitationsLocalStorage(updated);
+    setCitationStatus({ type: 'info', message: 'Citation matching record removed.' });
+  };
+
+  const getFullFormattedBibliography = (style: 'apa' | 'mla' | 'chicago' | 'harvard' | 'ieee') => {
+    const list = savedCitations
+      .filter(c => {
+        if (librarySearchType === 'all') return true;
+        return c.sourceType === librarySearchType;
+      })
+      .filter(c => {
+        if (!librarySearchQuery.trim()) return true;
+        const q = librarySearchQuery.toLowerCase();
+        return (
+          c.fields.title.toLowerCase().includes(q) ||
+          c.fields.authors.toLowerCase().includes(q) ||
+          (c.fields.journal && c.fields.journal.toLowerCase().includes(q)) ||
+          (c.fields.publisher && c.fields.publisher.toLowerCase().includes(q))
+        );
+      });
+
+    if (list.length === 0) return '';
+
+    // Sort alphabetically by first author
+    const sortedList = [...list].sort((a, b) => {
+      const authA = a.fields.authors || 'zzzz';
+      const authB = b.fields.authors || 'zzzz';
+      return authA.localeCompare(authB);
+    });
+
+    return sortedList
+      .map(c => generateCitationText(c.sourceType, style, c.fields).reference.replace(/\*(.*?)\*/g, '$1'))
+      .join('\n\n');
+  };
+
   const triggerCopy = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
     setCopiedStyleId(label);
@@ -329,56 +628,69 @@ export function StatisticsTools({
     setAnalysisResult('');
 
     try {
-      // 1. Upload the file to memory/disk
-      const formData = new FormData();
-      formData.append("file", file);
-      
-      const uploadRes = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!uploadRes.ok) throw new Error("Upload failed.");
-      const uploadText = await uploadRes.text();
-      if (uploadText.trim().startsWith("<!doctype") || uploadText.trim().startsWith("<html")) {
-        throw new Error("File upload failed. The engine returned an HTML error page instead of JSON. Check the server configuration.");
-      }
-      const uploadData = JSON.parse(uploadText);
-      const fileId = uploadData.fileId;
-
-      // 2. Extract text from the uploaded file
       let textContent = "";
-      if (file.name.toLowerCase().endsWith(".pdf")) {
-        const pdfFileRes = await fetch(`/api/files/${fileId}`);
-        if (!pdfFileRes.ok) throw new Error("Failed to load PDF file from workspace.");
-        const arrayBuffer = await pdfFileRes.arrayBuffer();
-
-        const loadingTask = pdfjs.getDocument({
-          data: arrayBuffer,
-          cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
-          cMapPacked: true,
-        });
-        const pdfDoc = await loadingTask.promise;
-        let fullText = "";
-        const numPagesToParse = Math.min(pdfDoc.numPages, 15);
-        for (let pageNum = 1; pageNum <= numPagesToParse; pageNum++) {
-          const page = await pdfDoc.getPage(pageNum);
-          const tContent = await page.getTextContent();
-          const pageText = tContent.items
-            .map((item: any) => item.str)
-            .join(" ");
-          fullText += `--- Page ${pageNum} of ${pdfDoc.numPages} ---\n${pageText}\n\n`;
-        }
-        textContent = fullText;
+      
+      const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+      
+      if (['.csv', '.txt', '.json', '.md'].includes(fileExt)) {
+         textContent = await file.text();
+         // Basic truncation for huge datasets
+         if (textContent.length > 50000) {
+           textContent = textContent.substring(0, 50000) + "\n\n...[Data Truncated for AI Context Limits]";
+         }
+      } else if (fileExt === '.pdf') {
+         const arrayBuffer = await file.arrayBuffer();
+         const loadingTask = pdfjs.getDocument({
+           data: arrayBuffer,
+           cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
+           cMapPacked: true,
+         });
+         const pdfDoc = await loadingTask.promise;
+         let fullText = "";
+         const numPagesToParse = Math.min(pdfDoc.numPages, 15);
+         for (let pageNum = 1; pageNum <= numPagesToParse; pageNum++) {
+           const page = await pdfDoc.getPage(pageNum);
+           const tContent = await page.getTextContent();
+           const pageText = tContent.items
+             .map((item: any) => item.str)
+             .join(" ");
+           fullText += `--- Page ${pageNum} of ${pdfDoc.numPages} ---\n${pageText}\n\n`;
+         }
+         textContent = fullText;
       } else {
-        const textRes = await fetch(`/api/files/${fileId}/raw-text`);
-        if (textRes.ok) {
-           const textResText = await textRes.text();
-           if (!textResText.trim().startsWith("<!doctype") && !textResText.trim().startsWith("<html")) {
-             const textData = JSON.parse(textResText);
-             textContent = textData.success && textData.text ? textData.text : "";
-           }
-        }
+         // 1. Upload the file to memory/disk for .docx / specialized server parsing
+         const formData = new FormData();
+         formData.append("file", file);
+         
+         const uploadRes = await fetch("/api/upload", {
+           method: "POST",
+           body: formData,
+         });
+
+         const uploadText = await uploadRes.text();
+         if (!uploadRes.ok) {
+            if (uploadText.trim().startsWith("<!doctype") || uploadText.trim().startsWith("<html")) {
+               throw new Error(`Upload failed (Status ${uploadRes.status}): Server returned an HTML error page. (It might be 413 Payload Too Large from Nginx).`);
+            }
+            throw new Error(`Upload failed (Status ${uploadRes.status}): ${uploadText.substring(0, 50)}`);
+         }
+         
+         if (uploadText.trim().startsWith("<!doctype") || uploadText.trim().startsWith("<html")) {
+           throw new Error(`File upload failed. Express skipped the '/api/upload' POST route and Vite returned 200 OK index.html.`);
+         }
+         
+         const uploadData = JSON.parse(uploadText);
+         const fileId = uploadData.fileId;
+
+         // 2. Extract text from the uploaded file
+         const textRes = await fetch(`/api/files/${fileId}/raw-text`);
+         if (textRes.ok) {
+            const textResText = await textRes.text();
+            if (!textResText.trim().startsWith("<!doctype") && !textResText.trim().startsWith("<html")) {
+              const textData = JSON.parse(textResText);
+              textContent = textData.success && textData.text ? textData.text : "";
+            }
+         }
       }
 
       if (!textContent) throw new Error("Could not extract any content from the file.");
@@ -548,9 +860,27 @@ export function StatisticsTools({
 
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        <h3 className="text-xs font-semibold text-[#e4e4e7] pt-8 pb-3 border-b border-[#222225] uppercase tracking-wide px-8 shrink-0">
-          Calculation Breakdown
-        </h3>
+        <div className="flex items-center justify-between px-8 pt-8 pb-3 shrink-0">
+          <h3 className="text-xs font-semibold text-[#e4e4e7] uppercase tracking-wide">
+            Calculation Breakdown
+          </h3>
+          {valid && (
+            <button
+              onClick={() => {
+                onAddHistory?.({
+                  type: 'slovin',
+                  title: `Slovin Sample (N=${N}, e=${e})`,
+                  parameters: { population, marginOfError },
+                  result: `Required sample size: ${Math.ceil(n)}`
+                });
+              }}
+              className="py-1 px-2.5 hover:bg-zinc-800 border border-zinc-700/60 hover:text-white text-[10px] text-zinc-300 rounded-lg transition-colors font-bold select-none cursor-pointer flex items-center gap-1.5 bg-transparent shadow-none border-none outline-none active:scale-95"
+            >
+              <Icon icon="ph:bookmark-bold" className="w-3.5 h-3.5" />
+              Save to Tools History
+            </button>
+          )}
+        </div>
         <div className="px-8 pt-6 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
           {valid ? (
             <div className="space-y-4 font-mono text-[11.5px] text-[#a1a1aa]">
@@ -582,28 +912,14 @@ export function StatisticsTools({
         </div>
 
         {valid && (
-          <div className="space-y-3 mt-4">
-            <div className="p-4 bg-zinc-900/40 rounded-xl flex items-center justify-between">
+          <div className="px-8 py-5 border-t border-[#1e1e20] shrink-0">
+            <div className="flex items-center justify-between">
               <div>
                 <div className="text-[10px] text-[#71717a] uppercase font-bold tracking-wider">Required Sample Size</div>
                 <div className="text-[11px] text-[#52525b] italic">(Rounded up to next whole count)</div>
               </div>
               <div className="text-3xl font-bold font-mono text-[#f4f4f5]">{Math.ceil(n)}</div>
             </div>
-            
-            <button
-              onClick={() => {
-                onAddHistory?.({
-                  type: 'slovin',
-                  title: `Slovin Sample (N=${N}, e=${e})`,
-                  parameters: { population, marginOfError },
-                  result: `Required sample size: ${Math.ceil(n)}`
-                });
-              }}
-              className="w-full py-2 bg-[#161617] hover:bg-zinc-800 text-[11px] font-medium text-[#e4e4e7] rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer border border-[#222225] shadow-none select-none"
-            >
-              Save to Tools History
-            </button>
           </div>
         )}
       </div>
@@ -654,9 +970,27 @@ export function StatisticsTools({
 
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        <h3 className="text-xs font-semibold text-[#e4e4e7] pt-8 pb-3 border-b border-[#222225] uppercase tracking-wide px-8 shrink-0">
-          Proportional Breakdown
-        </h3>
+        <div className="flex items-center justify-between px-8 pt-8 pb-3 shrink-0">
+          <h3 className="text-xs font-semibold text-[#e4e4e7] uppercase tracking-wide">
+            Proportional Breakdown
+          </h3>
+          {isValid && (
+            <button
+              onClick={() => {
+                onAddHistory?.({
+                  type: 'percentage',
+                  title: `Portion (${p} of ${t})`,
+                  parameters: { part, total },
+                  result: `Proportion: ${pct.toFixed(2)}%`
+                });
+              }}
+              className="py-1 px-2.5 hover:bg-zinc-800 border border-zinc-700/60 hover:text-white text-[10px] text-zinc-300 rounded-lg transition-colors font-bold select-none cursor-pointer flex items-center gap-1.5 bg-transparent shadow-none border-none outline-none active:scale-95"
+            >
+              <Icon icon="ph:bookmark-bold" className="w-3.5 h-3.5" />
+              Save to Tools History
+            </button>
+          )}
+        </div>
         <div className="px-8 pt-6 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
           {isValid ? (
             <div className="space-y-4 text-xs">
@@ -689,28 +1023,14 @@ export function StatisticsTools({
         </div>
 
         {isValid && (
-          <div className="space-y-3 mt-4">
-            <div className="p-4 bg-zinc-900/40 rounded-xl flex items-center justify-between">
+          <div className="px-8 py-5 border-t border-[#1e1e20] shrink-0">
+            <div className="flex items-center justify-between">
               <div>
                 <div className="text-[10px] text-[#71717a] uppercase font-bold tracking-wider">Calculated Proportion</div>
                 <div className="text-[11px] text-[#52525b] italic">Ratio = {(p / t).toFixed(5)}</div>
               </div>
               <div className="text-3xl font-bold font-mono text-[#10b981]">{pct.toFixed(2)}%</div>
             </div>
-
-            <button
-              onClick={() => {
-                onAddHistory?.({
-                  type: 'percentage',
-                  title: `Portion (${p} of ${t})`,
-                  parameters: { part, total },
-                  result: `Proportion: ${pct.toFixed(2)}%`
-                });
-              }}
-              className="w-full py-2 bg-[#161617] hover:bg-zinc-800 text-[11px] font-medium text-[#e4e4e7] rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer border border-[#222225] shadow-none select-none"
-            >
-              Save to Tools History
-            </button>
           </div>
         )}
       </div>
@@ -792,9 +1112,27 @@ export function StatisticsTools({
 
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        <h3 className="text-xs font-semibold text-[#e4e4e7] pt-8 pb-3 border-b border-[#222225] uppercase tracking-wide px-8 shrink-0">
-          Weighted Valuation
-        </h3>
+        <div className="flex items-center justify-between px-8 pt-8 pb-3 shrink-0">
+          <h3 className="text-xs font-semibold text-[#e4e4e7] uppercase tracking-wide">
+            Weighted Valuation
+          </h3>
+          {isValid && (
+            <button
+              onClick={() => {
+                onAddHistory?.({
+                  type: 'weighted',
+                  title: `Weighted Mean (${validatedRows.length} items)`,
+                  parameters: { entries },
+                  result: `Weighted mean: ${mean.toFixed(4)}`
+                });
+              }}
+              className="py-1 px-2.5 hover:bg-zinc-800 border border-zinc-700/60 hover:text-white text-[10px] text-zinc-300 rounded-lg transition-colors font-bold select-none cursor-pointer flex items-center gap-1.5 bg-transparent shadow-none border-none outline-none active:scale-95"
+            >
+              <Icon icon="ph:bookmark-bold" className="w-3.5 h-3.5" />
+              Save to Tools History
+            </button>
+          )}
+        </div>
         <div className="px-8 pt-6 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
           {isValid && validatedRows.length > 0 ? (
             <div className="space-y-3.5">
@@ -834,28 +1172,14 @@ export function StatisticsTools({
         </div>
 
         {isValid && (
-          <div className="space-y-3 mt-4">
-            <div className="p-4 bg-zinc-900/40 rounded-xl flex items-center justify-between">
+          <div className="px-8 py-5 border-t border-[#1e1e20] shrink-0">
+            <div className="flex items-center justify-between">
               <div>
                 <div className="text-[10px] text-[#71717a] uppercase font-bold tracking-wider">Weighted Average</div>
                 <div className="text-[11px] text-[#52525b] italic">Elements evaluated = {validatedRows.length}</div>
               </div>
               <div className="text-3xl font-bold font-mono text-[#38bdf8]">{mean.toFixed(4)}</div>
             </div>
-
-            <button
-              onClick={() => {
-                onAddHistory?.({
-                  type: 'weighted',
-                  title: `Weighted Mean (${validatedRows.length} items)`,
-                  parameters: { entries },
-                  result: `Weighted mean: ${mean.toFixed(4)}`
-                });
-              }}
-              className="w-full py-2 bg-[#161617] hover:bg-zinc-800 text-[11px] font-medium text-[#e4e4e7] rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer border border-[#222225] shadow-none select-none"
-            >
-              Save to Tools History
-            </button>
           </div>
         )}
       </div>
@@ -1011,9 +1335,27 @@ export function StatisticsTools({
 
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        <h3 className="text-xs font-semibold text-[#e4e4e7] pt-8 pb-3 border-b border-[#222225] uppercase tracking-wide px-8 shrink-0">
-          Survey Allocation Chart
-        </h3>
+        <div className="flex items-center justify-between px-8 pt-8 pb-3 shrink-0">
+          <h3 className="text-xs font-semibold text-[#e4e4e7] uppercase tracking-wide">
+            Survey Allocation Chart
+          </h3>
+          {isValid && sumWeight > 0 && (
+            <button
+              onClick={() => {
+                onAddHistory?.({
+                  type: 'likert',
+                  title: `Likert Scale (${sumWeight} respondents)`,
+                  parameters: { likertChoices },
+                  result: `Index: ${mean.toFixed(3)}`
+                });
+              }}
+              className="py-1 px-2.5 hover:bg-zinc-800 border border-zinc-700/60 hover:text-white text-[10px] text-zinc-300 rounded-lg transition-colors font-bold select-none cursor-pointer flex items-center gap-1.5 bg-transparent shadow-none border-none outline-none active:scale-95"
+            >
+              <Icon icon="ph:bookmark-bold" className="w-3.5 h-3.5" />
+              Save to Tools History
+            </button>
+          )}
+        </div>
         <div className="px-8 pt-6 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
           {isValid && sumWeight > 0 ? (
             <div className="space-y-3">
@@ -1042,37 +1384,21 @@ export function StatisticsTools({
         </div>
 
         {isValid && sumWeight > 0 && (
-          <div className="space-y-3 mt-4">
-            <div className="space-y-3 pt-4">
-              <div className="p-2 bg-[#161618] rounded-xl flex items-center justify-between text-[11px] text-[#71717a]">
-                 <span>Weighted Summation</span>
-                 <span className="font-mono text-[#e4e4e7]">{sumValueWeight} / {sumWeight} respondents</span>
+          <div className="px-8 py-5 border-t border-[#1e1e20] shrink-0 space-y-3">
+            <div className="flex items-center justify-between text-[11px] text-[#71717a]">
+               <span>Weighted Summation</span>
+               <span className="font-mono text-[#e4e4e7]">{sumValueWeight} / {sumWeight} respondents</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-[#71717a] uppercase font-bold tracking-wider">Likert Grand Index</span>
+                <span className="text-2xl font-bold font-mono text-white">{mean.toFixed(3)}</span>
               </div>
-              <div className="p-4 bg-zinc-900/40 rounded-xl flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-[#71717a] uppercase font-bold tracking-wider">Likert Grand Index</span>
-                  <span className="text-2xl font-bold font-mono text-white">{mean.toFixed(3)}</span>
-                </div>
-                <div className="flex items-center justify-between pt-1 border-t border-[#1d1d20]">
-                  <span className="text-[10px] text-[#52525b] uppercase font-bold">Interpretation</span>
-                  <span className={`text-[11px] font-medium font-jakarta ${colorClass}`}>{interpretation}</span>
-                </div>
+              <div className="flex items-center justify-between pt-1 border-t border-[#1d1d20]">
+                <span className="text-[10px] text-[#52525b] uppercase font-bold">Interpretation</span>
+                <span className={`text-[11px] font-medium font-jakarta ${colorClass}`}>{interpretation}</span>
               </div>
             </div>
-
-            <button
-              onClick={() => {
-                onAddHistory?.({
-                  type: 'likert',
-                  title: `Likert Scale (${sumWeight} respondents)`,
-                  parameters: { likertChoices },
-                  result: `Index: ${mean.toFixed(3)}`
-                });
-              }}
-              className="w-full py-2 bg-[#161617] hover:bg-zinc-800 text-[11px] font-medium text-[#e4e4e7] rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer border border-[#222225] shadow-none select-none"
-            >
-              Save to Tools History
-            </button>
           </div>
         )}
       </div>
@@ -1132,7 +1458,7 @@ export function StatisticsTools({
   const renderAiRight = () => {
     return (
       <div className="flex flex-col h-full">
-        <h3 className="text-xs font-semibold text-[#e4e4e7] pt-8 pb-3 border-b border-[#222225] uppercase tracking-wide px-8 shrink-0">
+        <h3 className="text-xs font-semibold text-[#e4e4e7] pt-8 pb-3 uppercase tracking-wide px-8 shrink-0">
           Deep Analytical Insights
         </h3>
         <div className="flex-1 min-h-0 overflow-y-auto px-8 pt-6 pb-8 select-text scrollbar-thin scrollbar-thumb-zinc-850">
@@ -1164,212 +1490,397 @@ export function StatisticsTools({
 
     return (
       <div className="space-y-4">
-        {/* Source Type Toggle */}
-        <div>
-          <label className="text-[10px] text-[#71717a] font-bold uppercase mb-2 block tracking-wider">Source Type</label>
-          <div className="grid grid-cols-3 gap-1 bg-[#161616] p-0.5 rounded-xl">
-            {(['book', 'journal', 'website'] as const).map(type => (
-              <button
-                key={type}
-                onClick={() => setCitationSourceType(type)}
-                className={`py-1.5 text-[10px] font-bold capitalize rounded-lg transition-colors cursor-pointer select-none ${citationSourceType === type ? 'bg-[#27272a] text-white' : 'text-zinc-400 hover:text-white'}`}
-              >
-                {type}
-              </button>
-            ))}
-          </div>
+        {/* Input Mode Navigation */}
+        <div className="flex gap-1 bg-[#161616] p-1 rounded-xl mb-3">
+          {(['manual', 'doi', 'pdf'] as const).map(mode => (
+            <button
+              key={mode}
+              onClick={() => {
+                setCitationInputMode(mode);
+                setCitationStatus(null);
+              }}
+              className={`flex-1 py-1.5 text-[10px] font-bold capitalize rounded-lg transition-colors cursor-pointer select-none text-center ${
+                citationInputMode === mode 
+                  ? 'bg-[#27272a] text-white' 
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              {mode === 'manual' ? 'Manual Input' : mode === 'doi' ? 'DOI Resolving' : 'PDF Scan'}
+            </button>
+          ))}
         </div>
 
-        {/* Input fields based on select type */}
-        <div className="space-y-3.5">
-          <div>
-            <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Authors (Semicolon separated)</label>
-            <input 
-              type="text"
-              value={citationFields.authors}
-              onChange={e => setField('authors', e.target.value)}
-              className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
-              placeholder="e.g. Smith, John; Doe, Jane"
+        {/* Status notification area within iframe bounds */}
+        {citationStatus && (
+          <div className={`p-2.5 rounded-lg text-[11px] flex items-start gap-2 ${
+            citationStatus.type === 'success' 
+              ? 'bg-emerald-950/40 border border-emerald-900/50 text-emerald-300' 
+              : citationStatus.type === 'error' 
+                ? 'bg-rose-950/40 border border-rose-900/50 text-rose-300' 
+                : 'bg-blue-950/40 border border-blue-900/50 text-blue-300'
+          }`}>
+            <Icon 
+              icon={
+                citationStatus.type === 'success' 
+                  ? 'ph:check-circle-bold' 
+                  : citationStatus.type === 'error' 
+                    ? 'ph:warning-circle-bold' 
+                    : 'ph:info-bold'
+              } 
+              className="w-4 h-4 shrink-0 mt-0.5" 
             />
-            <p className="text-[9px] text-[#52525b] mt-1">Format: LastName, FirstName; LastName, FirstName</p>
+            <div className="flex-1">
+              {citationStatus.message}
+            </div>
+            <button 
+              onClick={() => setCitationStatus(null)} 
+              className="text-zinc-500 hover:text-zinc-200"
+            >
+              <Icon icon="ph:x-bold" className="w-3.5 h-3.5" />
+            </button>
           </div>
+        )}
 
-          <div>
-            <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">
-              {citationSourceType === 'book' ? 'Book Title' : citationSourceType === 'journal' ? 'Article Title' : 'Page / Article Title'}
-            </label>
-            <input 
-              type="text"
-              value={citationFields.title}
-              onChange={e => setField('title', e.target.value)}
-              className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
-              placeholder="e.g. Title of the work"
-            />
+        {/* Render different panels based on selected mode */}
+        {citationInputMode === 'doi' && (
+          <div className="space-y-4 bg-[#161616]/40 p-5 rounded-xl border border-[#222225]">
+            <div className="space-y-2">
+              <label className="text-[10px] text-[#71717a] font-bold uppercase block tracking-wider">Provide Work DOI</label>
+              <p className="text-[9px] text-[#52525b]">AI resolves DOI registry meta-values and syncs them automatically.</p>
+              <input 
+                type="text"
+                value={doiInput}
+                onChange={e => setDoiInput(e.target.value)}
+                placeholder="e.g., 10.1017/asi.2021.5"
+                className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono"
+              />
+            </div>
+            <button
+              onClick={handleResolveDoi}
+              disabled={isResolvingDoi}
+              className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-[10px] font-bold text-white rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none animate-none"
+            >
+              {isResolvingDoi ? (
+                <>
+                  <Icon icon="ph:spinner-gap" className="animate-spin w-3.5 h-3.5" />
+                  Resolving doi registry...
+                </>
+              ) : (
+                <>
+                  <Icon icon="ph:radar-bold" className="w-3.5 h-3.5" />
+                  Resolve DOI via AI
+                </>
+              )}
+            </button>
           </div>
+        )}
 
-          {citationSourceType === 'book' && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Publisher</label>
-                  <input 
-                    type="text"
-                    value={citationFields.publisher}
-                    onChange={e => setField('publisher', e.target.value)}
-                    className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
-                    placeholder="e.g. Oxford Press"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Pub Year</label>
-                  <input 
-                    type="text"
-                    value={citationFields.year}
-                    onChange={e => setField('year', e.target.value)}
-                    className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
-                    placeholder="e.g. 2021"
-                  />
-                </div>
+        {citationInputMode === 'pdf' && (
+          <div className="space-y-4 bg-[#161616]/40 p-5 rounded-xl border border-[#222225]">
+            <label className="text-[10px] text-[#71717a] font-bold uppercase block tracking-wider">Upload Research PDF(s)</label>
+            <p className="text-[9px] text-[#52525b]">Select one or multiple PDFs to extract metadata structures automatically using Mistral.</p>
+            
+            <div 
+              onClick={() => {
+                const input = document.getElementById('citation-pdf-uploader');
+                if (input) (input as HTMLInputElement).click();
+              }}
+              onDragOver={e => e.preventDefault()}
+              onDrop={handlePdfDropForCitation}
+              className="border border-dashed border-[#2d2d30] hover:border-zinc-600 rounded-xl p-6 text-center cursor-pointer transition-colors space-y-2 bg-[#121212]/40"
+            >
+              <input 
+                id="citation-pdf-uploader"
+                type="file"
+                accept=".pdf"
+                onChange={handlePdfUploadForCitation}
+                className="hidden"
+                multiple
+              />
+              <Icon icon="ph:cloud-arrow-up-fill" className={`mx-auto w-8 h-8 ${isParsingPdf ? 'animate-bounce text-[#fb7185]' : 'text-zinc-500'}`} />
+              <div className="text-[11px] text-zinc-300 font-medium">
+                {isParsingPdf ? 'Processing drag/upload index...' : 'Click to Browse or Drag PDFs here'}
               </div>
+              <p className="text-[9px] text-zinc-500 font-mono italic">Supports uploading multiple PDFs in parallel</p>
+            </div>
+
+            {pdfTasks.length > 0 && (
+              <div className="border-t border-[#222225] pt-3 mt-3 space-y-1.5 max-h-[180px] overflow-y-auto scrollbar-thin">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Upload Queue ({pdfTasks.length})</span>
+                  <button 
+                    onClick={() => setPdfTasks([])}
+                    className="text-[9px] text-[#fb7185] hover:underline font-bold bg-transparent border-none cursor-pointer select-none bg-none outline-none"
+                  >
+                    Clear All
+                  </button>
+                </div>
+                {pdfTasks.map(task => (
+                  <div key={task.id} className="bg-[#121212]/50 rounded-lg p-2 flex items-center justify-between text-xs border border-[#1b1b1e]">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <Icon 
+                        icon="ph:file-pdf-bold" 
+                        className={`w-4 h-4 shrink-0 ${
+                          task.status === 'success' ? 'text-emerald-500' :
+                          task.status === 'error' ? 'text-rose-500' :
+                          'text-zinc-400'
+                        }`} 
+                      />
+                      <span className="truncate text-zinc-300 font-mono text-[10px] pr-1 min-w-0" title={task.name}>
+                        {task.name}
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center gap-1 shrink-0">
+                      {task.status === 'pending' && (
+                        <span className="text-[9px] text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded font-mono">Pending</span>
+                      )}
+                      {task.status === 'extracting' && (
+                        <span className="text-[9px] text-amber-500 bg-amber-950/40 px-1.5 py-0.5 rounded font-mono animate-pulse flex items-center gap-1">
+                          <Icon icon="ph:spinner" className="animate-spin w-2.5 h-2.5" /> Text
+                        </span>
+                      )}
+                      {task.status === 'parsing' && (
+                        <span className="text-[9px] text-sky-400 bg-[#0c4a6e]/40 px-1.5 py-0.5 rounded font-mono animate-pulse flex items-center gap-1">
+                          <Icon icon="ph:sparkle" className="animate-pulse w-2.5 h-2.5 text-sky-400" /> Mistral
+                        </span>
+                      )}
+                      {task.status === 'success' && (
+                        <span className="text-[9px] text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5">
+                          ✓ Saved
+                        </span>
+                      )}
+                      {task.status === 'error' && (
+                        <span className="text-[9px] text-rose-400 bg-rose-950/40 px-1.5 py-0.5 rounded font-mono" title={task.errorMsg || "Parse failed"}>
+                          ✕ Fail
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {citationInputMode === 'manual' && (
+          <div className="space-y-4">
+            {/* Source Type Toggle */}
+            <div>
+              <label className="text-[10px] text-[#71717a] font-bold uppercase mb-2 block tracking-wider">Source Type</label>
+              <div className="grid grid-cols-3 gap-1 bg-[#161616] p-0.5 rounded-xl">
+                {(['book', 'journal', 'website'] as const).map(type => (
+                  <button
+                    key={type}
+                    onClick={() => setCitationSourceType(type)}
+                    className={`py-1.5 text-[10px] font-bold capitalize rounded-lg transition-colors cursor-pointer select-none ${citationSourceType === type ? 'bg-[#27272a] text-white' : 'text-zinc-400 hover:text-white'}`}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Input fields based on select type */}
+            <div className="space-y-3.5">
               <div>
-                <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Edition (Optional)</label>
+                <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Authors (Semicolon separated)</label>
                 <input 
                   type="text"
-                  value={citationFields.edition}
-                  onChange={e => setField('edition', e.target.value)}
+                  value={citationFields.authors}
+                  onChange={e => setField('authors', e.target.value)}
                   className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
-                  placeholder="e.g. 3rd"
+                  placeholder="e.g. Smith, John; Doe, Jane"
                 />
+                <p className="text-[9px] text-[#52525b] mt-1">Format: LastName, FirstName; LastName, FirstName</p>
               </div>
-            </>
-          )}
 
-          {citationSourceType === 'journal' && (
-            <>
               <div>
-                <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Journal Name</label>
+                <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">
+                  {citationSourceType === 'book' ? 'Book Title' : citationSourceType === 'journal' ? 'Article Title' : 'Page / Article Title'}
+                </label>
                 <input 
                   type="text"
-                  value={citationFields.journal}
-                  onChange={e => setField('journal', e.target.value)}
+                  value={citationFields.title}
+                  onChange={e => setField('title', e.target.value)}
                   className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
-                  placeholder="e.g. Nature"
+                  placeholder="e.g. Title of the work"
                 />
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Vol</label>
-                  <input 
-                    type="text"
-                    value={citationFields.volume}
-                    onChange={e => setField('volume', e.target.value)}
-                    className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-2 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono"
-                    placeholder="24"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Issue</label>
-                  <input 
-                    type="text"
-                    value={citationFields.issue}
-                    onChange={e => setField('issue', e.target.value)}
-                    className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-2 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono"
-                    placeholder="2"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Pages</label>
-                  <input 
-                    type="text"
-                    value={citationFields.pages}
-                    onChange={e => setField('pages', e.target.value)}
-                    className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-2 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono"
-                    placeholder="115-130"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Pub Year</label>
-                  <input 
-                    type="text"
-                    value={citationFields.year}
-                    onChange={e => setField('year', e.target.value)}
-                    className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
-                    placeholder="2021"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">DOI (Optional)</label>
-                  <input 
-                    type="text"
-                    value={citationFields.doi}
-                    onChange={e => setField('doi', e.target.value)}
-                    className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono"
-                    placeholder="e.g. 10.1002/art.1"
-                  />
-                </div>
-              </div>
-            </>
-          )}
 
-          {citationSourceType === 'website' && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Site Name</label>
-                  <input 
-                    type="text"
-                    value={citationFields.siteName}
-                    onChange={e => setField('siteName', e.target.value)}
-                    className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
-                    placeholder="e.g. Wikipedia"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Publisher</label>
-                  <input 
-                    type="text"
-                    value={citationFields.publisher}
-                    onChange={e => setField('publisher', e.target.value)}
-                    className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
-                    placeholder="e.g. Wikimedia Foundation"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">URL</label>
-                <input 
-                  type="text"
-                  value={citationFields.url}
-                  onChange={e => setField('url', e.target.value)}
-                  className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono text-[11px]"
-                  placeholder="https://..."
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Pub Date</label>
-                  <input 
-                    type="date"
-                    value={citationFields.pubDate}
-                    onChange={e => setField('pubDate', e.target.value)}
-                    className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Access Date</label>
-                  <input 
-                    type="date"
-                    value={citationFields.accessDate}
-                    onChange={e => setField('accessDate', e.target.value)}
-                    className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono"
-                  />
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+              {citationSourceType === 'book' && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Publisher</label>
+                      <input 
+                        type="text"
+                        value={citationFields.publisher}
+                        onChange={e => setField('publisher', e.target.value)}
+                        className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
+                        placeholder="e.g. Oxford Press"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Pub Year</label>
+                      <input 
+                        type="text"
+                        value={citationFields.year}
+                        onChange={e => setField('year', e.target.value)}
+                        className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
+                        placeholder="e.g. 2021"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Edition (Optional)</label>
+                    <input 
+                      type="text"
+                      value={citationFields.edition}
+                      onChange={e => setField('edition', e.target.value)}
+                      className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
+                      placeholder="e.g. 3rd"
+                    />
+                  </div>
+                </>
+              )}
+
+              {citationSourceType === 'journal' && (
+                <>
+                  <div>
+                    <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Journal Name</label>
+                    <input 
+                      type="text"
+                      value={citationFields.journal}
+                      onChange={e => setField('journal', e.target.value)}
+                      className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
+                      placeholder="e.g. Nature"
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Vol</label>
+                      <input 
+                        type="text"
+                        value={citationFields.volume}
+                        onChange={e => setField('volume', e.target.value)}
+                        className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-2 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono"
+                        placeholder="24"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Issue</label>
+                      <input 
+                        type="text"
+                        value={citationFields.issue}
+                        onChange={e => setField('issue', e.target.value)}
+                        className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-2 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono"
+                        placeholder="2"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Pages</label>
+                      <input 
+                        type="text"
+                        value={citationFields.pages}
+                        onChange={e => setField('pages', e.target.value)}
+                        className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-2 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono"
+                        placeholder="115-130"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Pub Year</label>
+                      <input 
+                        type="text"
+                        value={citationFields.year}
+                        onChange={e => setField('year', e.target.value)}
+                        className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
+                        placeholder="2021"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">DOI (Optional)</label>
+                      <input 
+                        type="text"
+                        value={citationFields.doi}
+                        onChange={e => setField('doi', e.target.value)}
+                        className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono"
+                        placeholder="e.g. 10.1002/art.1"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {citationSourceType === 'website' && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Site Name</label>
+                      <input 
+                        type="text"
+                        value={citationFields.siteName}
+                        onChange={e => setField('siteName', e.target.value)}
+                        className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
+                        placeholder="e.g. Wikipedia"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Publisher</label>
+                      <input 
+                        type="text"
+                        value={citationFields.publisher}
+                        onChange={e => setField('publisher', e.target.value)}
+                        className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
+                        placeholder="e.g. Wikimedia Foundation"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">URL</label>
+                    <input 
+                      type="text"
+                      value={citationFields.url}
+                      onChange={e => setField('url', e.target.value)}
+                      className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono text-[11px]"
+                      placeholder="https://..."
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Pub Date</label>
+                      <input 
+                        type="date"
+                        value={citationFields.pubDate}
+                        onChange={e => setField('pubDate', e.target.value)}
+                        className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Access Date</label>
+                      <input 
+                        type="date"
+                        value={citationFields.accessDate}
+                        onChange={e => setField('accessDate', e.target.value)}
+                        className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            
+            <button
+              onClick={addCitationToLibrary}
+              className="w-full py-2.5 bg-[#fb7185] hover:bg-[#fda4af] text-[11px] font-bold text-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none border-none animate-none"
+            >
+              <Icon icon="ph:bookmark-simple-fill" className="w-4 h-4" />
+              Save to Citation Library
+            </button>
+          </div>
+        )}
       </div>
     );
   };
@@ -1389,15 +1900,243 @@ export function StatisticsTools({
 
     const sampleCiteAPA = generateFormattedMarkdown('apa');
 
+    if (citationRightTab === 'library') {
+      const filteredLibrary = savedCitations
+        .filter(c => {
+          if (librarySearchType === 'all') return true;
+          return c.sourceType === librarySearchType;
+        })
+        .filter(c => {
+          if (!librarySearchQuery.trim()) return true;
+          const q = librarySearchQuery.toLowerCase();
+          return (
+            c.fields.title.toLowerCase().includes(q) ||
+            c.fields.authors.toLowerCase().includes(q) ||
+            (c.fields.journal && c.fields.journal.toLowerCase().includes(q)) ||
+            (c.fields.publisher && c.fields.publisher.toLowerCase().includes(q))
+          );
+        });
+
+      return (
+        <div className="flex flex-col h-full overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between gap-3 px-8 pt-8 pb-3 shrink-0">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setCitationRightTab('preview')}
+                className="text-zinc-400 hover:text-white transition-colors cursor-pointer select-none py-1 text-xs flex items-center gap-1 border-none bg-transparent"
+              >
+                <Icon icon="ph:arrow-left-bold" className="w-3.5 h-3.5" />
+                Preview Mode
+              </button>
+              <h3 className="text-xs font-semibold text-[#e4e4e7] uppercase tracking-wide">
+                Organized Citations Library ({savedCitations.length})
+              </h3>
+            </div>
+            
+            {/* Download/Copy All */}
+            {savedCitations.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={libraryFormatFilter}
+                  onChange={e => setLibraryFormatFilter(e.target.value as any)}
+                  className="bg-[#161616] border border-[#27272a] rounded-lg text-[10px] text-zinc-300 px-2 py-1 outline-none"
+                >
+                  {styles.map(s => (
+                    <option key={s.id} value={s.id}>{s.label}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => {
+                    const text = getFullFormattedBibliography(libraryFormatFilter);
+                    if (text) {
+                      triggerCopy(text, 'all-bibliography');
+                    }
+                  }}
+                  className="py-1 px-2.5 bg-[#27272a] hover:bg-[#3f3f46] border border-[#3f3f46] text-[10px] text-white rounded transition font-bold select-none cursor-pointer flex items-center gap-1 shadow-none outline-none border-none active:scale-95"
+                >
+                  <Icon icon="ph:copy-bold" className="w-3.5 h-3.5" />
+                  {copiedStyleId === 'all-bibliography' ? 'Bibliography Copied!' : 'Copy Bibliography Index'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Search bar & Type Filters */}
+          <div className="px-8 pt-3 pb-3 border-b border-[#1e1e20] bg-[#121212]/30 flex flex-col sm:flex-row gap-2 shrink-0">
+            <div className="flex-1 relative">
+              <Icon icon="ph:magnifying-glass-bold" className="absolute left-3 top-2.5 text-zinc-500 w-3.5 h-3.5" />
+              <input
+                type="text"
+                placeholder="Search library title, author, journal..."
+                value={librarySearchQuery}
+                onChange={e => setLibrarySearchQuery(e.target.value)}
+                className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl pl-9 pr-3 py-1.5 text-[11px] text-zinc-200 outline-none transition-colors"
+              />
+              {librarySearchQuery && (
+                <button
+                  onClick={() => setLibrarySearchQuery('')}
+                  className="absolute right-3 top-2.5 text-zinc-500 hover:text-zinc-200 bg-transparent border-none"
+                >
+                  <Icon icon="ph:x-bold" className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            
+            <div className="flex gap-1">
+              {(['all', 'book', 'journal', 'website'] as const).map(type => (
+                <button
+                  key={type}
+                  onClick={() => setLibrarySearchType(type)}
+                  className={`px-2 py-1.5 text-[9px] font-bold rounded-lg transition-colors capitalize select-none cursor-pointer border-none bg-transparent ${
+                    librarySearchType === type
+                      ? 'bg-zinc-800 text-white border border-[#3f3f46]'
+                      : 'text-zinc-400 hover:text-white border border-transparent'
+                  }`}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Library Cards list */}
+          <div className="px-8 pt-4 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
+            {filteredLibrary.length === 0 ? (
+              <div className="h-full py-16 flex flex-col items-center justify-center text-center text-zinc-500 space-y-2">
+                <Icon icon="ph:notebook-bold" className="w-10 h-10 mb-1 text-zinc-600 opacity-40" />
+                <p className="text-xs font-semibold text-zinc-400">
+                  {savedCitations.length === 0 ? 'No citations in your library yet.' : 'No matching citations found.'}
+                </p>
+                <p className="text-[10px] text-zinc-600 max-w-xs">
+                  {savedCitations.length === 0 
+                    ? 'Populate metadata manually, resolve via DOIs, or scan PDFs on the left, then click "Save to Citation Library" to build your reference index.'
+                    : 'Clear your search query or change headers filters to view your entire collection.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {filteredLibrary.map(citation => {
+                  const itemStyles = styles.map(st => ({
+                    id: st.id,
+                    label: st.label,
+                    cite: generateCitationText(citation.sourceType, st.id, citation.fields)
+                  }));
+                  
+                  const activeCite = itemStyles.find(st => st.id === libraryFormatFilter)?.cite || itemStyles[0].cite;
+
+                  return (
+                    <div key={citation.id} className="p-4 bg-[#161616]/60 hover:bg-[#1c1c1e]/60 border border-[#222225] rounded-xl transition-all space-y-3 relative group">
+                      <button
+                        onClick={() => deleteCitationFromLibrary(citation.id)}
+                        className="absolute top-4 right-4 text-zinc-500 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 cursor-pointer bg-transparent border-none outline-none"
+                        title="Delete Citation"
+                      >
+                        <Icon icon="ph:trash-bold" className="w-3.5 h-3.5" />
+                      </button>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] text-[#fb7185] bg-[#fb7185]/10 border border-[#fb7185]/20 font-bold px-1.5 py-0.5 rounded uppercase font-mono">
+                          {citation.sourceType}
+                        </span>
+                        {citation.fields.year && (
+                          <span className="text-[9px] text-zinc-500 font-bold font-mono">
+                            ({citation.fields.year})
+                          </span>
+                        )}
+                        {citation.fields.doi && (
+                          <span className="text-[9px] text-zinc-600 font-mono select-all truncate max-w-[150px]" title={`DOI: ${citation.fields.doi}`}>
+                            doi:{citation.fields.doi}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Display Bibliography representation depending on global toggle */}
+                      <div className="text-[11.5px] text-zinc-100 leading-relaxed font-sans pr-6 select-text">
+                        {activeCite.reference.replace(/\*(.*?)\*/g, '$1')}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 pt-1.5 border-t border-[#222225]/60">
+                        <span className="text-[9px] text-zinc-500 font-mono font-bold uppercase tracking-wider">In-Text:</span>
+                        <span className="text-[10px] text-zinc-300 font-mono bg-[#161616] px-1.5 py-0.5 border border-[#27272a] rounded select-all mb-1 sm:mb-0">
+                          {activeCite.inText}
+                        </span>
+                        
+                        <div className="flex items-center gap-1 ml-auto">
+                          <button
+                            onClick={() => triggerCopy(activeCite.reference.replace(/\*(.*?)\*/g, '$1'), `${citation.id}-ref`)}
+                            className="text-[9px] text-zinc-400 hover:text-white px-2 py-1 bg-zinc-800/40 hover:bg-zinc-800 border border-[#27272a] rounded cursor-pointer transition-colors border-none"
+                          >
+                            {copiedStyleId === `${citation.id}-ref` ? 'Copied Bibli!' : 'Copy Bibliography'}
+                          </button>
+                          <button
+                            onClick={() => triggerCopy(activeCite.inText, `${citation.id}-txt`)}
+                            className="text-[9px] text-zinc-400 hover:text-white px-2 py-1 bg-zinc-800/40 hover:bg-zinc-800 border border-[#27272a] rounded cursor-pointer transition-colors border-none"
+                          >
+                            {copiedStyleId === `${citation.id}-txt` ? 'Copied In-Text!' : 'Copy In-Text'}
+                          </button>
+                          {/* Populate in form */}
+                          <button
+                            onClick={() => {
+                              setCitationSourceType(citation.sourceType);
+                              setCitationFields({ ...citation.fields });
+                              setCitationInputMode('manual');
+                              setCitationRightTab('preview');
+                              setCitationStatus({ type: 'info', message: 'Populated details back to form editing panel.' });
+                            }}
+                            className="text-[9px] text-zinc-400 hover:text-white px-2 py-1 bg-zinc-800/40 hover:bg-zinc-800 border border-[#27272a] rounded cursor-pointer transition-colors border-none"
+                            title="Load back for manual edits/re-formatting"
+                          >
+                            Load to Edit
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[#222225] px-8 pt-8 pb-3 shrink-0">
+        {/* Toggle Library / Preview */}
+        <div className="flex items-center justify-between px-8 pt-8 pb-3 shrink-0">
           <h3 className="text-xs font-semibold text-[#e4e4e7] uppercase tracking-wide">
             Formatted References Stack
           </h3>
-          <span className="text-[10px] text-[#71717a] font-mono capitalize px-2 py-0.5 bg-[#161618] border border-[#222225] rounded-md font-bold">
-            {citationSourceType} Format
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                onAddHistory?.({
+                  type: 'citation',
+                  title: `Citation: ${citationFields.title || 'Untitled'}`,
+                  parameters: { sourceType: citationSourceType, fields: citationFields },
+                  result: sampleCiteAPA.reference
+                });
+                setCitationStatus({ type: 'success', message: 'Calculated outputs backed up inside history tabs!' });
+              }}
+              className="py-1 px-2.5 hover:bg-zinc-800 border border-zinc-700/60 hover:text-white text-[10px] text-zinc-300 rounded-lg transition-colors font-bold select-none cursor-pointer flex items-center gap-1.5 bg-transparent shadow-none border-none outline-none active:scale-95"
+            >
+              <Icon icon="ph:bookmark-bold" className="w-3.5 h-3.5" />
+              Save to Tools History
+            </button>
+            {savedCitations.length > 0 && (
+              <button
+                onClick={() => setCitationRightTab('library')}
+                className="py-1 px-2.5 hover:bg-zinc-800 border border-zinc-700/60 hover:text-white text-[10px] text-[#fb7185] rounded-lg transition-colors font-bold select-none cursor-pointer flex items-center gap-1.5 bg-transparent shadow-none border-none outline-none active:scale-95"
+              >
+                <Icon icon="ph:bookmark-bold" className="w-3.5 h-3.5" />
+                Open Library ({savedCitations.length})
+              </button>
+            )}
+            <span className="text-[10px] text-[#71717a] font-mono capitalize px-2 py-0.5 bg-[#161618] border border-[#222225] rounded-md font-bold">
+              {citationSourceType} Format
+            </span>
+          </div>
         </div>
 
         <div className="px-8 pt-6 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
@@ -1411,13 +2150,13 @@ export function StatisticsTools({
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => triggerCopy(res.reference.replace(/\*(.*?)\*/g, '$1'), `${style.id}-ref`)}
-                        className="py-1 px-2 hover:bg-[#27272a] border border-transparent hover:border-[#3f3f46] text-[10px] text-zinc-300 rounded transition font-medium select-none cursor-pointer"
+                        className="py-1 px-2 hover:bg-[#27272a] border border-transparent hover:border-[#3f3f46] text-[10px] text-zinc-300 rounded transition font-medium select-none cursor-pointer border-none bg-transparent shadow-none"
                       >
                         {copiedStyleId === `${style.id}-ref` ? 'Copied Reference!' : 'Copy Bibliography'}
                       </button>
                       <button
                         onClick={() => triggerCopy(res.inText, `${style.id}-text`)}
-                        className="py-1 px-2 hover:bg-[#27272a] border border-transparent hover:border-[#3f3f46] text-[10px] text-zinc-300 rounded transition font-medium select-none cursor-pointer"
+                        className="py-1 px-2 hover:bg-[#27272a] border border-transparent hover:border-[#3f3f46] text-[10px] text-zinc-300 rounded transition font-medium select-none cursor-pointer border-none bg-transparent shadow-none"
                       >
                         {copiedStyleId === `${style.id}-text` ? 'Copied In-Text!' : 'Copy In-Text'}
                       </button>
@@ -1439,20 +2178,6 @@ export function StatisticsTools({
             })}
           </div>
         </div>
-
-        <button
-          onClick={() => {
-            onAddHistory?.({
-              type: 'citation',
-              title: `Citation: ${citationFields.title || 'Untitled'}`,
-              parameters: { sourceType: citationSourceType, fields: citationFields },
-              result: sampleCiteAPA.reference
-            });
-          }}
-          className="w-full py-2.5 bg-[#161617] hover:bg-zinc-800 text-[11px] font-bold text-[#e4e4e7] rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer border border-[#222225] shadow-none select-none"
-        >
-          Save to Tools History
-        </button>
       </div>
     );
   };
@@ -1462,7 +2187,7 @@ export function StatisticsTools({
       <div className="flex flex-col md:flex-row overflow-hidden items-stretch h-full md:divide-x divide-[#222225] min-h-0">
          {/* Left Side: Parameters / Files */}
          <div className="w-full md:w-4/12 flex flex-col justify-start overflow-hidden mb-8 md:mb-0 border-b md:border-b-0 border-[#222225] h-full">
-            <h3 className="text-xs font-semibold text-[#e4e4e7] pt-8 pb-3 border-b border-[#222225] uppercase tracking-wide px-8 shrink-0">
+            <h3 className="text-xs font-semibold text-[#e4e4e7] pt-8 pb-3 uppercase tracking-wide px-8 shrink-0">
               Tool Parameters
             </h3>
             <div className="px-8 pt-6 pb-6 space-y-4 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">

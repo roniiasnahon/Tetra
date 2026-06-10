@@ -104,6 +104,149 @@ function tryDecompressFallback(buffer: Buffer): Buffer {
   return buffer;
 }
 
+function extractAllContentStrings(obj: any, excludedKeys: string[] = ["title", "author", "fileType", "added", "fullTextStatus", "id"]): string[] {
+  let results: string[] = [];
+  if (obj === null || obj === undefined) return results;
+
+  if (typeof obj === "string") {
+    const trimmed = obj.trim();
+    if (trimmed && trimmed !== "..." && !trimmed.toLowerCase().startsWith("note") && !trimmed.toLowerCase().startsWith("document")) {
+      results.push(trimmed);
+    }
+    return results;
+  }
+
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      results.push(...extractAllContentStrings(item, excludedKeys));
+    }
+    return results;
+  }
+
+  if (typeof obj === "object") {
+    for (const key of Object.keys(obj)) {
+      if (excludedKeys.includes(key)) continue;
+      results.push(...extractAllContentStrings(obj[key], excludedKeys));
+    }
+  }
+
+  return results;
+}
+
+function cleanJsonLeak(text: string): string {
+  if (!text) return "";
+  let clean = text.trim();
+
+  // If the text literally begins with markdown backticks
+  if (clean.startsWith("```")) {
+    clean = clean.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  }
+
+  // Remove structural keys, nested list wrappers and formatting residues
+  // e.g., '", "some_key":{' or '", "some_key":"' or '", "some_key":['
+  clean = clean.replace(/",\s*"[a-zA-Z0-9_]+"\s*:\s*\{/g, "\n\n");
+  clean = clean.replace(/",\s*"[a-zA-Z0-9_]+"\s*:\s*\[/g, "\n\n");
+  clean = clean.replace(/",\s*"[a-zA-Z0-9_]+"\s*:\s*"/g, "\n\n");
+  clean = clean.replace(/",\s*"[a-zA-Z0-9_]+"\s*:\s*/g, "\n\n");
+  
+  // Strip any remaining curly braces or square brackets
+  clean = clean.replace(/[\{\}\[\]]/g, " ");
+
+  // Remove direct inline structural objects that might have been stringified
+  clean = clean.replace(/"[a-zA-Z0-9_]+"\s*:\s*"/g, " ");
+  clean = clean.replace(/"[a-zA-Z0-9_]+"\s*:\s*/g, " ");
+  
+  // Clean empty array remnants inside strings
+  clean = clean.replace(/"\s*,\s*"/g, "\n\n");
+  clean = clean.replace(/"\s*:\s*"/g, ": ");
+  
+  // Remove trailing or leading quotes and structural dividers at word edges
+  clean = clean.replace(/([^\w])"([^\w])/g, "$1$2");
+  
+  // Clean double quotes at ends/starts
+  if (clean.startsWith('"') && clean.endsWith('"')) {
+    clean = clean.substring(1, clean.length - 1);
+  }
+
+  // Standardize spacing and normalize paragraphs
+  clean = clean.replace(/\r/g, "");
+  clean = clean.replace(/\n{3,}/g, "\n\n");
+  clean = clean.replace(/[ \t]+/g, " ");
+  
+  return clean.trim();
+}
+
+function cleanAndParseJSON(responseText: string): any {
+  let cleaned = (responseText || "").trim();
+  
+  if (!cleaned) {
+    return {};
+  }
+
+  // Remove markdown fencing if present
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "");
+    cleaned = cleaned.replace(/\s*```$/, "");
+  }
+  
+  cleaned = cleaned.trim();
+  
+  try {
+    return JSON.parse(cleaned);
+  } catch (err) {
+    // Attempt pattern-matching for a JSON block within the response
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const candidate = jsonMatch[0];
+      try {
+        return JSON.parse(candidate);
+      } catch (e) {
+        // Let's try to repair unclosed quotes or missing brackets if truncated
+        let repaired = candidate.trim();
+        if (!repaired.endsWith("}")) {
+          // If truncated inside a string value
+          if (repaired.includes('"') && (repaired.split('"').length % 2 === 0)) {
+            repaired += '"';
+          }
+          repaired += "}";
+          try {
+            return JSON.parse(repaired);
+          } catch (e2) {}
+        }
+      }
+    }
+
+    try {
+      const sanitized = cleaned.replace(/[\u0000-\u0008\u000B-\u000C\u000E-\u001F\u007F-\u009F]/g, "");
+      return JSON.parse(sanitized);
+    } catch (err2) {
+      console.warn("[cleanAndParseJSON] Direct parsing failed, attempting fuzzy key-value extraction fallback.");
+      // Absolute fallback: build a simple plain object by parsing key-values using quick regexes
+      const obj: any = {};
+      const titleMatch = cleaned.match(/"title"\s*:\s*"([^"]+)"/i);
+      const authorMatch = cleaned.match(/"author"\s*:\s*"([^"]+)"/i);
+      const summaryMatch = cleaned.match(/"summary"\s*:\s*"([\s\S]+?)"\s*(?:,|\})/i);
+      const fileTypeMatch = cleaned.match(/"fileType"\s*:\s*"([^"]+)"/i);
+
+      if (titleMatch) obj.title = titleMatch[1];
+      if (authorMatch) obj.author = authorMatch[1];
+      if (summaryMatch) {
+        obj.summary = summaryMatch[1];
+      } else {
+        // Safe, clean JSON-leak stripped fallback summary
+        obj.summary = cleanJsonLeak(responseText);
+      }
+      if (fileTypeMatch) obj.fileType = fileTypeMatch[1];
+
+      if (obj.title || obj.summary) {
+        return obj;
+      }
+      
+      throw err;
+    }
+  }
+}
+
 function sniffMimeType(buffer: Buffer): { mimetype: string, extension: string } {
   if (buffer.length >= 4 && buffer.toString('utf-8', 0, 4) === '%PDF') {
     return { mimetype: 'application/pdf', extension: 'pdf' };
@@ -906,6 +1049,221 @@ async function startServer() {
     }
   });
 
+  // DOI Resolver Endpoint utilizing OpenAlex, CrossRef, and Gemini fallback
+  app.post("/api/citation/resolve-doi", async (req, res) => {
+    let { doi } = req.body;
+    if (!doi) {
+      return res.status(400).json({ error: "DOI is required" });
+    }
+
+    doi = doi.trim();
+    // Normalize DOI (remove dx.doi.org, doi.org prefixes)
+    const doiClean = doi.replace(/^(https?:\/\/)?(www\.)?(dx\.)?doi\.org\//i, "");
+
+    try {
+      console.log(`[DOI_RESOLVE] Fetching OpenAlex for DOI: ${doiClean}`);
+      const queryUrl = `https://api.openalex.org/works/https://doi.org/${encodeURIComponent(doiClean)}?mailto=asnahonron@gmail.com`;
+      const response = await axios.get(queryUrl, { timeout: 10000 });
+      const data = response.data;
+
+      if (data) {
+        // Map OpenAlex metadata to our format
+        const authorsList = (data.authorships || []).map((auth: any) => {
+          const name = auth.author?.display_name || "";
+          if (name && name.includes(" ")) {
+            const parts = name.trim().split(/\s+/);
+            const last = parts.pop();
+            const first = parts.join(" ");
+            return `${last}, ${first}`;
+          }
+          return name;
+        }).filter(Boolean);
+
+        const authors = authorsList.join("; ");
+        const title = data.title || "";
+        const year = data.publication_year ? String(data.publication_year) : "";
+        const url = data.doi || data.landing_page_url || `https://doi.org/${doiClean}`;
+        const journalName = data.primary_location?.source?.display_name || "";
+        const volume = data.biblio?.volume || "";
+        const issue = data.biblio?.issue || "";
+        const pages = (data.biblio?.first_page && data.biblio?.last_page) 
+          ? `${data.biblio.first_page}-${data.biblio.last_page}` 
+          : data.biblio?.first_page || "";
+
+        let sourceType: "book" | "journal" | "website" = "journal";
+        if (data.type === "book" || data.type === "book-chapter") {
+          sourceType = "book";
+        }
+
+        const metadata = {
+          sourceType,
+          authors,
+          title,
+          year,
+          doi: doiClean,
+          url,
+          journal: journalName,
+          publisher: data.primary_location?.source?.publisher || "",
+          volume,
+          issue,
+          pages,
+          siteName: journalName || "",
+          pubDate: data.publication_date || "",
+          accessDate: new Date().toISOString().split('T')[0]
+        };
+
+        return res.json({ success: true, metadata });
+      }
+
+      throw new Error("No data returned from OpenAlex");
+    } catch (error: any) {
+      console.warn(`[DOI_RESOLVE] OpenAlex failed: ${error.message}. Trying generic CrossRef lookup...`);
+      
+      try {
+        const crossrefUrl = `https://api.crossref.org/works/${encodeURIComponent(doiClean)}`;
+        const crRes = await axios.get(crossrefUrl, { timeout: 8000, headers: { 'User-Agent': 'mailto:asnahonron@gmail.com' } });
+        const item = crRes.data?.message;
+        if (item) {
+          const authorsList = (item.author || []).map((a: any) => {
+            if (a.family && a.given) return `${a.family}, ${a.given}`;
+            if (a.family) return a.family;
+            return a.name || "";
+          }).filter(Boolean);
+
+          const authors = authorsList.join("; ");
+          const title = (item.title || [])[0] || "";
+          const year = item.created?.["date-parts"]?.[0]?.[0] ? String(item.created["date-parts"][0][0]) : "";
+          const journal = (item["container-title"] || [])[0] || "";
+          const publisher = item.publisher || "";
+          const volume = item.volume || "";
+          const issue = item.issue || "";
+          const pages = item.page || "";
+
+          const metadata = {
+            sourceType: journal ? "journal" : "book",
+            authors,
+            title,
+            year,
+            doi: doiClean,
+            url: item.URL || `https://doi.org/${doiClean}`,
+            journal,
+            publisher,
+            volume,
+            issue,
+            pages,
+            siteName: journal || "",
+            pubDate: item.created?.["date-parts"]?.[0]?.join("-") || "",
+            accessDate: new Date().toISOString().split('T')[0]
+          };
+          return res.json({ success: true, metadata });
+        }
+      } catch (crErr: any) {
+        console.warn(`[DOI_RESOLVE] CrossRef fallback failed: ${crErr.message}`);
+      }
+
+      try {
+        const systemPrompt = `You are an academic lookup search assistant. Given a DOI string, if possible, identify representing article detail concepts. Return a JSON structure. If you are entirely unsure, return as much fields as you can deduce or predict based on the structure of the DOI, keeping successful retrieval format. JSON shape:
+{
+  "sourceType": "journal" | "book" | "website",
+  "title": "A predicted title or placeholder representing DOI",
+  "authors": "LastName, FirstName",
+  "year": "2026",
+  "journal": "Academic Journal"
+}`;
+        const aiResponse = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: `DOI: ${doiClean}`,
+          config: {
+            systemInstruction: systemPrompt,
+            temperature: 0.1,
+            responseMimeType: "application/json"
+          }
+        });
+        const content = aiResponse.text || "{}";
+        const parsed = cleanAndParseJSON(content);
+        return res.json({ success: true, metadata: { sourceType: "journal", doi: doiClean, url: `https://doi.org/${doiClean}`, ...parsed } });
+      } catch (aiErr) {
+        res.status(500).json({ success: false, error: "Unable to resolve DOI automatically. Please key in details manually." });
+      }
+    }
+  });
+
+  // AI-powered text & paper metadata extraction
+  app.post("/api/citation/parse-text", async (req, res) => {
+    const { text } = req.body;
+    if (!text) {
+      return res.status(400).json({ error: "Text is required for parsing" });
+    }
+
+    try {
+      const systemPrompt = `You are an expert academic citation extraction system.
+Analyze the provided text from the first few pages of a research paper or book chapter. 
+Extract the primary reference/citation metadata.
+
+You MUST respond strictly in JSON format matching this schema:
+{
+  "sourceType": "book" | "journal" | "website",
+  "authors": "LastName, FirstName; LastName, FirstName",
+  "title": "Title of the work",
+  "publisher": "Publisher Name",
+  "year": "YYYY",
+  "edition": "Edition, e.g., 3rd",
+  "journal": "Journal Name",
+  "volume": "Vol Number",
+  "issue": "Issue Number",
+  "pages": "StartPage-EndPage",
+  "doi": "DOI, e.g. 10.1002/art.1",
+  "url": "URL if web resource",
+  "siteName": "Web site name",
+  "pubDate": "YYYY-MM-DD",
+  "accessDate": "YYYY-MM-DD"
+}
+
+Ensure fields are filled accurately based on the text. If certain fields are missing or not applicable, omit them or supply empty strings. Keep "authors" formatted as semicolon-separated "LastName, FirstName" or similar academic format. No markdown wrap, no explanation, just raw JSON.`;
+
+      let parsed: any = null;
+      try {
+        console.log("[LLM] Attempting citation parse with Mistral...");
+        const client = getMistralClient();
+        const completion = await client.chat.completions.create({
+          model: "ministral-8b-latest",
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt
+            },
+            {
+              role: "user",
+              content: `Text snippet: ${text.substring(0, 12000)}`
+            }
+          ],
+          temperature: 0.1,
+          response_format: { type: "json_object" }
+        });
+        const content = completion.choices[0]?.message?.content || "{}";
+        parsed = cleanAndParseJSON(content);
+      } catch (err: any) {
+        console.warn("[LLM] Mistral parse or JSON parse failed, falling back to Gemini:", err.message || err);
+        const response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: `Text snippet: ${text.substring(0, 12000)}`,
+          config: {
+            systemInstruction: systemPrompt,
+            temperature: 0.1,
+            responseMimeType: "application/json"
+          }
+        });
+        const content = response.text || "{}";
+        parsed = cleanAndParseJSON(content);
+      }
+
+      res.json({ success: true, metadata: parsed });
+    } catch (error: any) {
+      console.error("AI Citation Parse Error:", error);
+      res.status(500).json({ success: false, error: error.message || "Failed parsing the text." });
+    }
+  });
+
   // API Check Enpoint
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", time: new Date().toISOString() });
@@ -1125,10 +1483,8 @@ Use a professional, encouraging tone. Do not use markdown headers; use bolding f
           console.error("Public URL Fetch Direct Error:", webErr);
           throw new Error(`Failed to access the public link: ${webErr.message || webErr}. Please double check that the URL is public and online.`);
         }
-      }
-
-      // Now we have docText and meta content, feed to Mistral for structured summarization
-      const mistralPrompt = `You are a world-class academic research bot. Please read and analyze the following extracted text snippet from a research source/URL (${url}). 
+      }      // Now we have docText and meta content, feed to Mistral for structured summarization
+      const mistralPrompt = `You are a highly capable reading assistant. Please read and analyze the following extracted text snippet from a source/URL (${url}). 
 Generated from source named: "${sourceMetaData.title || 'Unknown Source'}" by author/publisher: "${sourceMetaData.author || 'Unknown'}".
 
 CONTENT STREAM:
@@ -1136,18 +1492,23 @@ CONTENT STREAM:
 ${docText}
 """
 
-Please synthesize this content and create a highly detailed academic research summary.
-Deliver your synthesis exactly according to the strict JSON format provided.
+Please synthesize this content and create a highly detailed, comprehensive summary of the document.
+Deliver your synthesis strictly inside the following flat, 4-key JSON schema. Do NOT nesting any lists or secondary objects.
 
-The generated "summary" field should contain a complete, beautifully structured 3-Paragraph academic literature summary detailing:
-Paragraph 1: Core Summary description and overall context of the website reference or document/theme.
-Paragraph 2: Academic relevance & synthesis (empirical findings, methodology discussed, or theoretical arguments).
-Paragraph 3: Practical incorporation value (how the researcher can use this resource to augment drafting on student-success/neuroplasticity/literature review topics).
+EXPECTED JSON SCHEMA:
+{
+  "title": "A concise, accurate title matching or describing the article or website resource",
+  "author": "The publisher, author name, or domain of the source",
+  "summary": "A comprehensive, long, detailed, and beautifully formatted summary of the main points, arguments, or information presented in the document itself. Do NOT frame this as an academic review or literature synthesis; simply summarize the actual content directly and extensively. Format with multiple paragraphs and MUST use double-newlines (\\n\\n) to separate every paragraph.",
+  "fileType": "Must be either 'Note' or 'Document'"
+}
 
-Return EXACTLY a JSON output containing the structural properties: 'title', 'author', 'summary', and 'fileType'.
-Keep the 'fileType' as either 'Note' or 'Document'.`;
+CRITICAL RULES:
+1. Do NOT nest any elements, objects, or arrays in your response.
+2. Do NOT invent new JSON properties or structural objects (such as 'overall_theme', 'ethical_considerations', 'potential_applications', etc.). Place all of your analytical descriptions, theme maps, ethical views, research applications, and synthesis text directly inside the 'summary' string as clean text paragraphs.
+3. Output ONLY valid, parsable JSON matching this schema exactly.`;
 
-      let responseText = "";
+      let parsedJSON: any = null;
       try {
         console.log("[LLM] Attempting url summary with Mistral...");
         const client = getMistralClient();
@@ -1156,7 +1517,7 @@ Keep the 'fileType' as either 'Note' or 'Document'.`;
           messages: [
             {
               role: "system",
-              content: "You are a professional academic research assistant. Output ONLY valid JSON."
+              content: "You are a professional reading assistant. Output ONLY valid JSON."
             },
             {
               role: "user",
@@ -1165,10 +1526,12 @@ Keep the 'fileType' as either 'Note' or 'Document'.`;
           ],
           response_format: { type: "json_object" },
           temperature: 0.3,
+          max_tokens: 2500
         });
-        responseText = completion.choices[0].message.content || "";
+        const rText = completion.choices[0].message.content || "";
+        parsedJSON = cleanAndParseJSON(rText);
       } catch (err: any) {
-        console.warn("[LLM] Mistral url summary failed, falling back to Baseten:", err.message || err);
+        console.warn("[LLM] Mistral url summary or JSON parse failed, falling back to Baseten:", err.message || err);
         try {
           const client = getBasetenClient();
           const completion = await client.chat.completions.create({
@@ -1176,7 +1539,7 @@ Keep the 'fileType' as either 'Note' or 'Document'.`;
             messages: [
               {
                 role: "system",
-                content: "You are a professional academic research assistant. Output ONLY valid JSON."
+                content: "You are a professional reading assistant. Output ONLY valid JSON."
               },
               {
                 role: "user",
@@ -1185,15 +1548,17 @@ Keep the 'fileType' as either 'Note' or 'Document'.`;
             ],
             response_format: { type: "json_object" },
             temperature: 0.3,
+            max_tokens: 2500
           });
-          responseText = completion.choices[0].message.content || "";
+          const rText = completion.choices[0].message.content || "";
+          parsedJSON = cleanAndParseJSON(rText);
         } catch (err2: any) {
-          console.warn("[LLM] Baseten url summary failed, falling back to Gemini:", err2.message || err2);
+          console.warn("[LLM] Baseten url summary or JSON parse failed, falling back to Gemini:", err2.message || err2);
           const response = await ai.models.generateContent({
             model: "gemini-3.5-flash",
             contents: mistralPrompt,
             config: {
-              systemInstruction: "You are a professional academic research assistant. Output ONLY valid JSON.",
+              systemInstruction: "You are a professional reading assistant. Output ONLY valid JSON.",
               temperature: 0.3,
               responseMimeType: "application/json",
               responseSchema: {
@@ -1208,25 +1573,72 @@ Keep the 'fileType' as either 'Note' or 'Document'.`;
               }
             }
           });
-          responseText = response.text || "";
+          const rText = response.text || "";
+          parsedJSON = cleanAndParseJSON(rText);
         }
       }
 
-      if (!responseText) {
-        throw new Error("Empty response from AI summarization engine.");
+      if (!parsedJSON) {
+        throw new Error("All AI models failed to summarize and parse the URL content.");
       }
 
-      const parsedJSON = JSON.parse(responseText.trim());
-      const rawSummary = parsedJSON.summary || parsedJSON.description || "";
-      const summaryCleaned = typeof rawSummary === 'string' ? rawSummary.replace(/\\n/g, '\n') : "";
+      // Robust multiple key discovery & recursive extraction
+      let rawSummary = "";
+      const summaryVal = parsedJSON.summary 
+        || parsedJSON.Summary 
+        || parsedJSON.description 
+        || parsedJSON.Description 
+        || parsedJSON.synthesis 
+        || parsedJSON.Synthesis 
+        || parsedJSON.abstract 
+        || parsedJSON.Abstract 
+        || parsedJSON.content 
+        || parsedJSON.Content 
+        || parsedJSON.text 
+        || parsedJSON.Text;
+
+      if (typeof summaryVal === 'string' && summaryVal.trim().length > 30) {
+        rawSummary = summaryVal.trim();
+      } else if (typeof summaryVal === 'object' && summaryVal !== null) {
+        rawSummary = extractAllContentStrings(summaryVal).join("\n\n");
+      }
+
+      // If summary is empty or minimal, recursively collect all non-metadata string fields inside the JSON
+      if (!rawSummary || rawSummary.length < 50) {
+        const collected = extractAllContentStrings(parsedJSON, ["title", "author", "fileType", "added", "fullTextStatus", "id"]);
+        rawSummary = collected.join("\n\n");
+      }
+
+      rawSummary = rawSummary.trim();
+
+      let finalTitle = parsedJSON.title || sourceMetaData.title;
+      if (typeof finalTitle === 'object' && finalTitle !== null) {
+        finalTitle = finalTitle.primary || finalTitle.title || finalTitle.name || "Unknown";
+      }
+      if (typeof finalTitle !== 'string') finalTitle = String(finalTitle);
+
+      // Final bulletproof fallback: if the summary is still empty, synthesize a solid starting content stream
+      if (!rawSummary || rawSummary === "...") {
+        rawSummary = `### Document Summary: ${finalTitle}\n\nThis document focuses on "${finalTitle}". It is recorded in your repository and ready for complete research annotation, drafting, and outline expansion.\n\nTo begin exploring this content, use the chat panels.`;
+      }
+
+      // Post-process to wash out any JSON nesting residue or leaked formatting characters
+      const summaryCleaned = cleanJsonLeak(rawSummary).replace(/\\n/g, '\n');
+      
+      let finalAuthor = parsedJSON.author || sourceMetaData.author;
+      if (typeof finalAuthor === 'object' && finalAuthor !== null) {
+        finalAuthor = finalAuthor.primary || finalAuthor.name || finalAuthor.author || Object.values(finalAuthor).join(", ") || "Unknown";
+      }
+      if (typeof finalAuthor !== 'string') finalAuthor = String(finalAuthor);
+
       res.json({
         success: true,
         data: {
-          title: parsedJSON.title || sourceMetaData.title,
-          author: parsedJSON.author || sourceMetaData.author,
-          description: summaryCleaned.substring(0, 100) + "...",
+          title: finalTitle,
+          author: finalAuthor,
+          description: summaryCleaned.length > 100 ? summaryCleaned.substring(0, 100) + "..." : summaryCleaned + "...",
           summary: summaryCleaned, // store full text in summary property
-          fileType: parsedJSON.fileType || "Note",
+          fileType: typeof parsedJSON.fileType === 'string' ? parsedJSON.fileType : "Note",
           added: "Today",
           fullTextStatus: "Available",
           viewed: "Just now",
@@ -1978,7 +2390,8 @@ The synthesis engine has verified this reference as a valid citation for your cu
           {
             role: "system",
             content: `You are an expert data scientist and statistician. The user has uploaded a file or dataset named "${filename || 'dataset'}".
-Analyze the text contents, identify what kind of data or problem it is, and provide a thorough statistical explanation.
+First, analyze if this document even needs statistical interpretation or if it is a research paper that contains analyzable data. If it is NOT a research paper or does not contain statistical data that requires interpretation, clarify what the document is and clearly state that it doesn't appear to need statistical analysis.
+If it DOES contain relevant statistical data or is a research paper, proceed to provide a thorough statistical explanation.
 Point out any patterns, possible statistical models (like Slovin, ANOVA, regressions, mean/median) that apply.
 Output in clear Markdown formatting.`
           },
@@ -2058,7 +2471,7 @@ ${textToAnalyze}
           throw new Error("Received empty content output from Groq Qwen.");
         }
 
-        const result = JSON.parse(text.trim());
+        const result = cleanAndParseJSON(text);
         return res.json(result);
       } catch (groqError: any) {
         console.error("[QUIZ_GEN_API] Groq error, falling back to Gemini:", groqError.message || groqError);
@@ -2107,7 +2520,7 @@ ${textToAnalyze}
           throw new Error("Received empty content output from Gemini.");
         }
 
-        const result = JSON.parse(text.trim());
+        const result = cleanAndParseJSON(text);
         return res.json(result);
       }
     } catch (e: any) {
