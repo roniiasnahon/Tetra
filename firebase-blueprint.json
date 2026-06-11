@@ -73,12 +73,32 @@
           "items": { "type": "object" }
         }
       }
+    },
+    "Annotation": {
+      "title": "Annotation",
+      "description": "User highlights and notes on a document.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fileId": { "type": "string" },
+        "text": { "type": "string" },
+        "comment": { "type": "string" },
+        "page": { "type": "number" },
+        "color": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "uid": { "type": "string" }
+      },
+      "required": ["id", "fileId", "text", "page", "timestamp", "uid"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
       "description": "User profile document."
+    },
+    "/users/{userId}/annotations/{annotationId}": {
+      "schema": "Annotation",
+      "description": "User document annotations."
     },
     "/users/{userId}/folders/{folderId}": {
       "schema": "Folder",

@@ -556,12 +556,65 @@ const ai = new Proxy({} as GoogleGenAI, {
 let megaClient: any = null;
 async function getMegaClient(): Promise<any> {
   if (megaClient) return megaClient;
+  const rawSession = process.env.MEGA_SESSION_STRING;
   const email = process.env.MEGA_EMAIL;
   const password = process.env.MEGA_PASSWORD;
-  if (!email || !password) throw new Error("MEGA_EMAIL and MEGA_PASSWORD required for Mega storage");
+  const masterKey = process.env.MEGA_MASTER_KEY;
   
-  megaClient = new Storage({ email, password });
-  await megaClient.ready;
+  const session = rawSession && rawSession !== 'undefined' && rawSession !== 'null' ? rawSession.trim() : null;
+  const hasEmail = email && email !== 'undefined' && email !== 'null' && email.trim() !== '';
+  const hasPassword = password && password !== 'undefined' && password !== 'null' && password.trim() !== '';
+
+  if (hasEmail && hasPassword && (!session || !session.startsWith('{'))) {
+    // ALWAYS prefer email & password (unless session is a JSON string with key), because it derives the REAL cryptographic master key!
+    console.log("[MEGA] Authenticating using email and password to derive correct cryptographic keys...");
+    megaClient = new Storage({ email: email!.trim(), password: password!.trim() });
+    await megaClient.ready;
+    console.log("[MEGA] Successfully authenticated with email/password.");
+  } else if (session) {
+    console.log("[MEGA] Authenticating using session key...");
+    let parsedSession: any = null;
+    try {
+      if (session.startsWith('{')) {
+        parsedSession = JSON.parse(session);
+      }
+    } catch (e: any) {
+      console.warn("[MEGA] Failed to parse MEGA_SESSION_STRING as JSON:", e.message);
+    }
+
+    if (parsedSession && parsedSession.key && parsedSession.sid) {
+      console.log("[MEGA] Successfully restored session with real cryptographic master key from JSON.");
+      megaClient = Storage.fromJSON(parsedSession);
+      await megaClient.ready;
+      megaClient.status = 'ready';
+      await megaClient.reload();
+    } else {
+      // It's a raw session ID string. Check if we have MASTER_KEY env var
+      const keyToUse = masterKey && masterKey !== 'undefined' && masterKey !== 'null' 
+        ? masterKey.trim() 
+        : Buffer.alloc(16).toString('base64');
+      
+      if (!masterKey) {
+        console.warn("[MEGA] WARNING: Using raw session ID with a blank dummy key. Files uploaded using this session will appear as 'undecrypted' on the MEGA web dashboard unless MEGA_MASTER_KEY or MEGA_EMAIL/MEGA_PASSWORD is set.");
+      } else {
+        console.log("[MEGA] Restoring session with raw session ID and retrieved MEGA_MASTER_KEY.");
+      }
+      
+      megaClient = Storage.fromJSON({
+        key: keyToUse,
+        sid: session,
+        name: 'User',
+        user: 'User',
+        options: {} as any
+      });
+      await megaClient.ready;
+      megaClient.status = 'ready';
+      await megaClient.reload();
+    }
+  } else {
+    throw new Error("Neither MEGA_SESSION_STRING nor MEGA_EMAIL and MEGA_PASSWORD is configured correctly.");
+  }
+  
   return megaClient;
 }
 
@@ -2533,6 +2586,91 @@ ${textToAnalyze}
     } catch (e: any) {
       console.error("[QUIZ_GEN_API] Error:", e);
       res.status(500).json({ error: e.message || "An exception occurred during quiz composition." });
+    }
+  });
+
+  // Generate structured study notes from document text
+  app.post("/api/research/generate-notes", async (req, res) => {
+    try {
+      const { content, title } = req.body;
+      if (!content) {
+        return res.status(400).json({ error: "Document content is required to generate study notes." });
+      }
+
+      // Sanitize is helpful for density and matching token limits safely
+      const textToAnalyze = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 18000);
+
+      const notesPrompt = `You are a world-class academic researcher and expert note-taker. 
+Your goal is to extract the most critical insights, facts, formulas, or structures from the source text and transform them into beautiful, comprehensive, highly-structured student/research study notes.
+
+Structure the notes neatly with bold main topics, numbered lists, and bullet points. Focus on:
+1. Executive Summary: A quick overview of the document's main focus.
+2. Core Findings & key concepts: Lucid explanations of claims, assertions, or data.
+3. Key Takeaways & Supporting Details: Bullet points.
+
+Make sure the response is in plain text Markdown and is dense with actual knowledge, highly readable, and professional.
+
+Document Title: "${title || "Untitled Document"}"
+Source Content Excerpt:
+"""
+${textToAnalyze}
+"""`;
+
+      console.log("[NOTES_API] Calling Mistral to generate study notes...");
+      let generatedNotes = "";
+      try {
+        const client = getMistralClient();
+        const completion = await client.chat.completions.create({
+          model: "ministral-8b-latest",
+          messages: [
+            {
+              role: "system",
+              content: "You are a world-class academic researcher and expert note-taker who formats beautiful study notes in clean plain-text markdown. Do NOT wrap your response in ```markdown block. Output the markdown naturally."
+            },
+            {
+              role: "user",
+              content: notesPrompt
+            }
+          ],
+          temperature: 0.3
+        });
+        generatedNotes = completion.choices[0]?.message?.content || "";
+        generatedNotes = generatedNotes.replace(/^```markdown\n?/gi, "").replace(/\n?```$/gi, "");
+      } catch (mistralErr: any) {
+        console.warn("[NOTES_API] Mistral failed, falling back to Gemini:", mistralErr.message || mistralErr);
+        try {
+          const aiResponse = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: notesPrompt,
+          });
+          generatedNotes = aiResponse.text || "";
+        } catch (gemIniErr: any) {
+          console.warn("[NOTES_API] gemini-3.5-flash failed, trying gemini-3.1-flash-lite:", gemIniErr.message || gemIniErr);
+          try {
+            const aiResponse2 = await ai.models.generateContent({
+              model: "gemini-3.1-flash-lite",
+              contents: notesPrompt,
+            });
+            generatedNotes = aiResponse2.text || "";
+          } catch (gemIniErr2: any) {
+            console.warn("[NOTES_API] gemini-3.1-flash-lite failed, trying gemini-flash-latest fallback:", gemIniErr2.message || gemIniErr2);
+            const aiResponse3 = await ai.models.generateContent({
+              model: "gemini-flash-latest",
+              contents: notesPrompt,
+            });
+            generatedNotes = aiResponse3.text || "";
+          }
+        }
+      }
+
+      if (!generatedNotes) {
+        throw new Error("Received empty notes output from Gemini.");
+      }
+
+      return res.json({ notes: generatedNotes });
+    } catch (e: any) {
+      console.error("[NOTES_API] Error:", e);
+      res.status(500).json({ error: e.message || "An exception occurred during notes composition." });
     }
   });
 

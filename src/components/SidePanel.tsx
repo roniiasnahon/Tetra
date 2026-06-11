@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { showToast } from './Toast';
 import { AudioVisualizerPlayer } from './AudioVisualizerPlayer';
+import { Icon } from '@iconify/react';
 import { 
   X, 
   FileText, 
@@ -25,7 +27,9 @@ import {
   Image as ImageIcon,
   Paperclip,
   File,
-  Download
+  Download,
+  Edit2,
+  Eye
 } from 'lucide-react';
 
 interface SidePanelProps {
@@ -34,6 +38,8 @@ interface SidePanelProps {
   tabId: string;
   activeTab: any;
   papers: any[];
+  onUpdatePaper?: (paper: any) => void;
+  extractTextFromPdf?: (url: string) => Promise<string>;
 }
 
 interface SourceItem {
@@ -59,14 +65,82 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   onClose, 
   tabId, 
   activeTab, 
-  papers 
+  papers,
+  onUpdatePaper,
+  extractTextFromPdf
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'notes' | 'details' | 'sources' | 'quizzes' | 'attachments'>('notes');
+  // Compute document key for storage based on title, fallback to tabId
+  const docStorageKey = useMemo(() => {
+    if (activeTab?.title) {
+      return encodeURIComponent(activeTab.title).replace(/\./g, '%2E');
+    }
+    return tabId || 'default-doc';
+  }, [activeTab?.title, tabId]);
+
+  const [activeSubTab, setActiveSubTab] = useState<'notes' | 'details' | 'sources' | 'quizzes' | 'attachments' | 'comments'>('notes');
+
+  // Annotations / Comments state
+  const [annotations, setAnnotations] = useState<any[]>([]);
+
+  const loadAnnotations = () => {
+    const saved = localStorage.getItem(`annotations_${docStorageKey}`);
+    if (saved) {
+      try {
+        setAnnotations(JSON.parse(saved));
+      } catch {
+        setAnnotations([]);
+      }
+    } else {
+      setAnnotations([]);
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    loadAnnotations();
+
+    const handleUpdate = () => {
+      loadAnnotations();
+    };
+    window.addEventListener('annotationsUpdated', handleUpdate);
+    return () => {
+      window.removeEventListener('annotationsUpdated', handleUpdate);
+    };
+  }, [docStorageKey, isOpen]);
+
+  // Default to comments for PDFs and notes for normal docs
+  useEffect(() => {
+    if (!isOpen) return;
+    if (activeTab?.mimetype === 'application/pdf' || activeTab?.fileId) {
+      setActiveSubTab('comments');
+    } else {
+      setActiveSubTab('notes');
+    }
+  }, [docStorageKey, isOpen, activeTab]);
 
   // Notes state
   const [notes, setNotes] = useState<string>('');
   const [isCopied, setIsCopied] = useState(false);
   const [notesSavedStatus, setNotesSavedStatus] = useState<boolean>(false);
+  const [isGeneratingNotes, setIsGeneratingNotes] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const lastLoadedDocRef = React.useRef<string | null>(null);
+  const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const typewriterIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
+  const papersRef = useRef(papers);
+
+  useEffect(() => {
+    papersRef.current = papers;
+  }, [papers]);
+
+  useEffect(() => {
+    return () => {
+      if (typewriterIntervalRef.current) {
+        clearInterval(typewriterIntervalRef.current);
+      }
+    };
+  }, []);
 
   // Author & url override state
   const [customAuthor, setCustomAuthor] = useState<string>('');
@@ -102,19 +176,25 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     return papers.find(p => p.fileId === activeTab.fileId || p.title === activeTab.title) || null;
   }, [papers, activeTab]);
 
-  // Compute document key for storage
-  const docStorageKey = useMemo(() => {
-    return tabId || 'default-doc';
-  }, [tabId]);
-
   // Effect to load stored data when tab changes
   useEffect(() => {
     if (!isOpen) return;
 
-    // 1. Load Notes
-    const savedNotes = localStorage.getItem(`notes_${docStorageKey}`);
-    setNotes(savedNotes || '');
-    setNotesSavedStatus(false);
+    // 1. Load Notes (Initialize notes on document switch, or when document first gets loaded from firestore)
+    const keyChanged = lastLoadedDocRef.current !== docStorageKey;
+    if (keyChanged) {
+      if (typewriterIntervalRef.current) {
+        clearInterval(typewriterIntervalRef.current);
+      }
+      setIsTyping(false);
+      lastLoadedDocRef.current = docStorageKey;
+      const savedNotes = matchingPaper?.notes || localStorage.getItem(`notes_${docStorageKey}`) || '';
+      setNotes(savedNotes);
+      setNotesSavedStatus(false);
+    } else if (matchingPaper && !notes && matchingPaper.notes) {
+      // Fallback if notes load asynchronously from database after initial load empty
+      setNotes(matchingPaper.notes);
+    }
 
     // 2. Load Details overrides
     const savedAuthor = localStorage.getItem(`author_${docStorageKey}`) || matchingPaper?.author || '';
@@ -185,14 +265,132 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   }, [docStorageKey, isOpen, matchingPaper, activeTab]);
 
   // Auto-save notes
+  const saveNotesToDB = (val: string) => {
+    const currentMatchingPaper = papersRef.current.find(p => p.title === activeTab?.title);
+    if (currentMatchingPaper && onUpdatePaper) {
+      onUpdatePaper({
+        ...currentMatchingPaper,
+        notes: val
+      });
+    }
+  };
+
   const handleNotesChange = (val: string) => {
     setNotes(val);
     localStorage.setItem(`notes_${docStorageKey}`, val);
     setNotesSavedStatus(true);
-    const timeoutId = setTimeout(() => {
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(() => {
+      saveNotesToDB(val);
       setNotesSavedStatus(false);
-    }, 1000);
-    return () => clearTimeout(timeoutId);
+    }, 1500);
+  };
+
+  const handleGenerateCosmiNotes = async () => {
+    let textToUse = matchingPaper?.extractedText || activeTab?.content || matchingPaper?.summary || matchingPaper?.description || "";
+    
+    // Check if it's a PDF and text is very short/empty
+    const isDocPdf = activeTab?.mimetype === 'application/pdf' || activeTab?.title?.toLowerCase()?.endsWith('.pdf') || matchingPaper?.mimetype === 'application/pdf';
+    
+    setIsGeneratingNotes(true);
+    setNotesSavedStatus(false);
+
+    try {
+      if (isDocPdf && (!textToUse || textToUse.trim().length < 200) && extractTextFromPdf && activeTab?.fileId) {
+        try {
+          showToast("Reading PDF document context...", "info", 3000);
+          const extracted = await extractTextFromPdf(`/api/files/${activeTab.fileId}`);
+          if (extracted && extracted.trim()) {
+            textToUse = extracted;
+            // Dynamically save extracted text to the matching paper so we don't have to re-extract next time
+            const currentMatchingPaper = papersRef.current.find(p => p.title === activeTab?.title);
+            if (currentMatchingPaper && onUpdatePaper) {
+              onUpdatePaper({
+                ...currentMatchingPaper,
+                extractedText: extracted
+              });
+            }
+          }
+        } catch (pdfErr) {
+          console.error("SidePanel background PDF extraction failed:", pdfErr);
+        }
+      }
+
+      if (!textToUse || !textToUse.trim() || textToUse.trim().length < 5) {
+        showToast("No raw document content found for Cosmi to analyze.", "error");
+        setIsGeneratingNotes(false);
+        return;
+      }
+
+      const response = await fetch("/api/research/generate-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: textToUse,
+          title: matchingPaper?.title || activeTab?.title || "Document"
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Unable to retrieve structured notes from the server.");
+      }
+
+      const data = await response.json();
+      if (data.notes) {
+        const fullGeneratedNotes = data.notes;
+        
+        // Clear any prior typewriter process
+        if (typewriterIntervalRef.current) {
+          clearInterval(typewriterIntervalRef.current);
+        }
+
+        setIsTyping(true);
+        setNotes(''); // start fresh empty notes on screen
+        
+        let currentIdx = 0;
+        // Dynamically compute the increment size so that typing takes ~2-3 seconds regardless of text density
+        const increment = Math.max(2, Math.ceil(fullGeneratedNotes.length / 150));
+        
+        typewriterIntervalRef.current = setInterval(() => {
+          currentIdx += increment;
+          if (currentIdx >= fullGeneratedNotes.length) {
+            setNotes(fullGeneratedNotes);
+            localStorage.setItem(`notes_${docStorageKey}`, fullGeneratedNotes);
+            
+            // Save permanently to database
+            const currentMatchingPaper = papersRef.current.find(p => p.title === activeTab?.title);
+            if (currentMatchingPaper && onUpdatePaper) {
+              onUpdatePaper({
+                ...currentMatchingPaper,
+                notes: fullGeneratedNotes
+              });
+            }
+            
+            setIsTyping(false);
+            if (typewriterIntervalRef.current) {
+              clearInterval(typewriterIntervalRef.current);
+            }
+            showToast("Cosmi composed structured notes successfully!", "success");
+          } else {
+            const nextPart = fullGeneratedNotes.slice(0, currentIdx);
+            setNotes(nextPart);
+            localStorage.setItem(`notes_${docStorageKey}`, nextPart);
+          }
+        }, 15);
+      } else {
+        throw new Error("Received empty notes draft from Cosmi.");
+      }
+    } catch (err: any) {
+      console.error("Notes generation error:", err);
+      showToast(err?.message || "Notes generation failed.", "error");
+    } finally {
+      setIsGeneratingNotes(false);
+    }
   };
 
   const handleCopyNotes = () => {
@@ -206,6 +404,17 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     localStorage.setItem(`author_${docStorageKey}`, customAuthor);
     localStorage.setItem(`url_${docStorageKey}`, customUrl);
     setIsEditingDetails(false);
+
+    if (matchingPaper && onUpdatePaper) {
+      onUpdatePaper({
+        ...matchingPaper,
+        author: customAuthor,
+        url: customUrl
+      });
+      showToast('Document details updated successfully', 'success');
+    } else {
+      showToast('Details updated in local storage', 'success');
+    }
   };
 
   // Calculate dynamic content metrics
@@ -245,6 +454,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       new URL(formattedUrl);
     } catch (_) {
       setSourceError('Invalid website URL address.');
+      showToast('Kindly enter a valid website URL address.', 'error');
       return;
     }
 
@@ -259,15 +469,20 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     setSources(updated);
     localStorage.setItem(`sources_${docStorageKey}`, JSON.stringify(updated));
 
+    showToast(`Source "${titleToUse}" added successfully`, 'success');
+
     setNewSourceName('');
     setNewSourceUrl('');
     setIsAddSourceModalOpen(false);
   };
 
   const handleDeleteSource = (idToDelete: string) => {
+    const targetSource = sources.find(s => s.id === idToDelete);
+    const sourceTitle = targetSource ? targetSource.title : 'Research source';
     const updated = sources.filter(s => s.id !== idToDelete);
     setSources(updated);
     localStorage.setItem(`sources_${docStorageKey}`, JSON.stringify(updated));
+    showToast(`Deleted source: "${sourceTitle}"`, 'info');
   };
 
   // Attachments management
@@ -277,21 +492,42 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
     setIsUploadingAttachment(true);
     setAttachmentError('');
-
-    const formData = new FormData();
-    formData.append("file", file);
+    
+    const toastId = 'upload-attach-' + Date.now();
+    showToast(`Uploading attachment "${file.name}" (0%)...`, 'loading', 60000, toastId);
 
     try {
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
+      const data = await new Promise<any>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const formData = new FormData();
+        formData.append("file", file);
+
+        xhr.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            showToast(`Uploading attachment "${file.name}" (${percent}%)...`, 'loading', 60000, toastId);
+          }
+        });
+
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch (err) {
+              reject(new Error("Invalid server response"));
+            }
+          } else {
+            reject(new Error(`Server returned status ${xhr.status}`));
+          }
+        });
+
+        xhr.addEventListener("error", () => reject(new Error("Network upload error")));
+        xhr.addEventListener("abort", () => reject(new Error("Upload aborted")));
+
+        xhr.open("POST", "/api/upload");
+        xhr.send(formData);
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to upload attachment");
-      }
-
-      const data = await response.json();
       if (data.success) {
         const newAttachment = {
           id: data.fileId,
@@ -303,11 +539,15 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         const updated = [newAttachment, ...attachments];
         setAttachments(updated);
         localStorage.setItem(`attachments_${docStorageKey}`, JSON.stringify(updated));
+        
+        showToast(`Attachment "${data.fileName}" uploaded successfully`, 'success', 3000, toastId);
       } else {
         throw new Error(data.error || "Upload response success false");
       }
     } catch (err: any) {
-      setAttachmentError(err.message || "Error uploading attachment");
+      const msg = err.message || "Error uploading attachment";
+      setAttachmentError(msg);
+      showToast(`Attachment upload failed: ${msg}`, 'error', 4000, toastId);
     } finally {
       setIsUploadingAttachment(false);
       // Reset input value
@@ -316,15 +556,19 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   };
 
   const handleDeleteAttachment = (idToDelete: string) => {
+    const targetAttachment = attachments.find(a => a.id === idToDelete);
+    const attachmentName = targetAttachment ? targetAttachment.name : 'Attachment';
     const updated = attachments.filter(a => a.id !== idToDelete);
     setAttachments(updated);
     localStorage.setItem(`attachments_${docStorageKey}`, JSON.stringify(updated));
+    showToast(`Deleted attachment: "${attachmentName}"`, 'info');
   };
 
   // Quizzes logic
   const handleGenerateQuiz = async () => {
     setIsGeneratingQuiz(true);
     setQuizError('');
+    showToast('Generating interactive AI assessment...', 'info', 4000);
     try {
       const draftContent = activeTab?.content || matchingPaper?.extractedText || matchingPaper?.description || 'No document content available.';
       
@@ -351,8 +595,11 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       setQuizScore(0);
       setQuizFinished(false);
       setQuizHistory({});
+      showToast('AI assessment ready! Test your understanding.', 'success');
     } catch (err: any) {
-      setQuizError(err.message || 'Error executing AI generation request.');
+      const errMsg = err.message || 'Error executing AI generation request.';
+      setQuizError(errMsg);
+      showToast(`Failed to generate assessment: ${errMsg}`, 'error');
     } finally {
       setIsGeneratingQuiz(false);
     }
@@ -438,18 +685,62 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     setQuizHistory({});
   };
 
+  const [panelWidth, setPanelWidth] = useState(() => {
+    return parseInt(localStorage.getItem('sidePanelWidth') || '340', 10);
+  });
+
+  // Drag handle logic
+  const handleMouseDown = React.useCallback((mouseDownEvent: React.MouseEvent) => {
+    mouseDownEvent.preventDefault();
+    const startWidth = panelWidth;
+    const startX = mouseDownEvent.clientX;
+
+    const doDrag = (mouseMoveEvent: MouseEvent) => {
+      // Left side drag handle: moving left increases width, moving right decreases width
+      const newWidth = startWidth + (startX - mouseMoveEvent.clientX);
+      const clampedWidth = Math.max(250, Math.min(newWidth, 800));
+      setPanelWidth(clampedWidth);
+      localStorage.setItem('sidePanelWidth', clampedWidth.toString());
+    };
+
+    const stopDrag = () => {
+      document.removeEventListener('mousemove', doDrag);
+      document.removeEventListener('mouseup', stopDrag);
+      document.body.style.cursor = 'auto'; // Reset cursor
+    };
+
+    document.addEventListener('mousemove', doDrag);
+    document.addEventListener('mouseup', stopDrag);
+    document.body.style.cursor = 'col-resize';
+  }, [panelWidth]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="w-[340px] bg-[#121212] border-l border-[#1c1c1f] h-full flex flex-col shrink-0 overflow-hidden select-none animate-slide-in">
+    <div 
+      className="bg-[#121212] border-l border-[#1c1c1f] h-full flex flex-col shrink-0 overflow-hidden select-none animate-slide-in relative"
+      style={{ width: `${panelWidth}px` }}
+    >
+      {/* Drag Handle */}
+      <div 
+        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-[#3f3f46]/50 active:bg-[#60a5fa]/50 transition-colors z-50 flex items-center justify-center group"
+        onMouseDown={handleMouseDown}
+      >
+        <div className="w-[2px] h-6 bg-[#3f3f46] group-hover:bg-[#a1a1aa] rounded-full transition-colors opacity-0 group-hover:opacity-100" />
+      </div>
+
       {/* Tab Navigation Menu */}
-      <div className="flex items-center gap-1.5 px-4 h-[56px] bg-[#121212] shrink-0">
+      <div className="flex items-center gap-1.5 px-4 h-[56px] pl-3 bg-[#121212] shrink-0">
         <div className="flex-1 flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden py-1">
-          {(['quizzes', 'notes', 'details', 'sources', 'attachments'] as const).map(tab => {
+          {(([
+            activeTab?.mimetype === 'application/pdf' || activeTab?.fileId ? 'comments' : null,
+            'quizzes', 'notes', 'details', 'sources', 'attachments'
+          ].filter(Boolean)) as any[]).map(tab => {
             let label = tab as string;
             if (tab === 'quizzes') label = 'Test';
             if (tab === 'sources') label = 'Sources';
             if (tab === 'attachments') label = 'Files';
+            if (tab === 'comments') label = 'Comments';
 
             return (
               <button 
@@ -479,11 +770,122 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       {/* Main Tab Scrolling Viewer container */}
       <div className="flex-1 overflow-y-auto flex flex-col min-h-0 bg-[#121212]">
         
+        {/* TAB COMMENTS: Annotations */}
+        {activeSubTab === 'comments' && (
+          <div className="flex flex-col flex-1 min-h-0 p-4 space-y-3 bg-transparent text-[13px]">
+            <div className="flex items-center justify-between pb-2 border-b border-[#222225]">
+              <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">PDF Annotations & Comments</span>
+              <span className="text-[10px] text-zinc-500 font-mono">{annotations.length} items</span>
+            </div>
+            
+            {annotations.length === 0 ? (
+              <div className="flex-1 py-12 flex flex-col items-center justify-center text-center px-4 space-y-2">
+                <Icon icon="ph:highlighter" className="w-8 h-8 text-zinc-600" />
+                <p className="text-[12px] text-zinc-400 font-medium font-sans">No annotations yet</p>
+                <p className="text-[10.5px] text-zinc-500 leading-relaxed font-sans">
+                  Select text inside the PDF document viewer, then click "Save Annotation" to highlight sections and add persistent comments.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3 overflow-y-auto pr-1">
+                {annotations.map((anno) => (
+                  <div 
+                    key={anno.id} 
+                    className="p-3 bg-[#18181b] border border-[#27272a] rounded-xl flex flex-col gap-2 relative group hover:border-[#38383f] transition-colors"
+                  >
+                    {/* Top bar */}
+                    <div className="flex items-center justify-between text-[10px] text-zinc-500 font-mono">
+                      <button 
+                        onClick={() => {
+                          const pageEl = document.getElementById(`pdf-page-${anno.page}`);
+                          if (pageEl) {
+                            pageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          }
+                        }}
+                        className="flex items-center gap-1 text-[#fb7185] hover:underline cursor-pointer bg-transparent border-none p-0 select-none font-semibold text-[10.5px]"
+                      >
+                        <Icon icon="ph:bookmark-simple" className="w-3.5 h-3.5" />
+                        <span>Page {anno.page}</span>
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const updated = annotations.filter(a => a.id !== anno.id);
+                          localStorage.setItem(`annotations_${docStorageKey}`, JSON.stringify(updated));
+                          window.dispatchEvent(new Event('annotationsUpdated'));
+                          
+                          // Delete from firestore if possible
+                          try {
+                            const { auth: firebaseAuth, db: firestoreDb } = await import('../firebase');
+                            const user = firebaseAuth.currentUser;
+                            if (user) {
+                              const { deleteDoc, doc: fDoc } = await import('firebase/firestore');
+                              await deleteDoc(fDoc(firestoreDb, 'users', user.uid, 'annotations', anno.id));
+                            }
+                          } catch (e) {
+                            console.error("Firestore annotation delete failed", e);
+                          }
+                        }}
+                        className="text-zinc-500 hover:text-red-400 cursor-pointer p-0.5"
+                        title="Delete Annotation"
+                      >
+                        <Icon icon="ph:trash" className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    
+                    {/* Highlight text block */}
+                    <div 
+                      className="border-l-2 p-2 text-[11px] italic text-zinc-300 select-text leading-relaxed bg-[#121212]/50 whitespace-pre-wrap break-words"
+                      style={{ borderLeftColor: anno.color }}
+                    >
+                      "{anno.text}"
+                    </div>
+                    
+                    {/* Comment text block */}
+                    {anno.comment ? (
+                      <div className="text-[12px] text-zinc-100 font-sans leading-normal pl-0.5 break-words select-text">
+                        {anno.comment}
+                      </div>
+                    ) : (
+                      <div className="text-[11.5px] text-zinc-500 pl-0.5 italic select-none">
+                        No comment left.
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        
         {/* TAB 1: NOTES */}
         {activeSubTab === 'notes' && (
           <div className="flex flex-col flex-1 min-h-0">
-            <div className="flex items-center justify-end px-4 pt-2">
+            <div className="flex items-center justify-between px-4 pt-2 pb-2 border-b border-[#27272a]/20">
+              <button
+                onClick={handleGenerateCosmiNotes}
+                disabled={isGeneratingNotes || isTyping}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium bg-[#27272a] hover:bg-[#323235] text-[#f4f4f5] disabled:opacity-50 transition-colors rounded cursor-pointer border-none"
+                title="Let Cosmi generate structured concept notes for this document"
+              >
+                {isGeneratingNotes ? (
+                  <span className="w-3 h-3 border border-[#f4f4f5] border-t-transparent rounded-full animate-spin shrink-0" />
+                ) : isTyping ? (
+                  <span className="flex h-2 w-2 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                  </span>
+                ) : (
+                  <img src="/cosmi.png" alt="Cosmi" className="w-3.5 h-3.5 object-contain shrink-0" referrerPolicy="no-referrer" />
+                )}
+                <span>{isGeneratingNotes ? "Cosmi thinking..." : isTyping ? "Writing..." : "Let Cosmi make your notes"}</span>
+              </button>
+
               <div className="flex items-center gap-1.5 text-[11px]">
+                {isTyping && (
+                  <span className="text-zinc-500 font-mono text-[10px] mr-1.5 animate-pulse">
+                    Streaming...
+                  </span>
+                )}
                 {notesSavedStatus && (
                   <span className="text-[#a1a1aa] flex items-center gap-1 animate-fade-in font-medium">
                     <Check className="w-3 h-3 text-emerald-500" />
@@ -492,7 +894,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 )}
                 <button 
                   onClick={handleCopyNotes}
-                  disabled={!notes.trim()}
+                  disabled={!notes.trim() || isTyping}
                   className="flex items-center gap-1 px-2 py-1 rounded bg-transparent text-[#a1a1aa] hover:text-[#f4f4f5] disabled:opacity-40 transition-all cursor-pointer border-none"
                   title="Copy notes to clipboard"
                 >
@@ -501,17 +903,79 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 </button>
               </div>
             </div>
+ 
+            {isGeneratingNotes ? (
+              <div className="flex-1 p-5 space-y-6 overflow-y-auto select-none">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3.5 h-3.5 bg-zinc-800 rounded-full flex items-center justify-center shrink-0">
+                      <span className="w-1.5 h-1.5 bg-zinc-600 rounded-full animate-ping" />
+                    </div>
+                    <span className="text-[10.5px] font-mono font-medium text-zinc-500 uppercase tracking-wider">Generating notes...</span>
+                  </div>
+                  <div className="h-5 bg-zinc-800 rounded w-11/12"></div>
+                </div>
 
-            <textarea
-              key={`notes-textarea-${tabId}`}
-              id={`notes-textarea-${tabId}`}
-              name={`notes-textarea-${tabId}`}
-              autoComplete="off"
-              className="flex-1 w-full min-h-[300px] bg-transparent text-[#cfcfd4] p-4 pt-1 focus:outline-none text-[13px] leading-relaxed resize-none font-sans placeholder-[#52525b] border-none outline-none focus:ring-0"
-              placeholder="Paste relevant excerpts, frame your primary thesis, outline sections, or capture spontaneous ideas about this document..."
-              value={notes}
-              onChange={(e) => handleNotesChange(e.target.value)}
-            />
+                {/* Section 1 skeleton: Executive summary */}
+                <div className="space-y-2.5">
+                  <div className="h-3.5 bg-zinc-800 rounded w-1/3"></div>
+                  <div className="space-y-1.5 pl-1">
+                    <div className="h-2.5 bg-zinc-800/60 rounded w-full"></div>
+                    <div className="h-2.5 bg-zinc-800/60 rounded w-11/12"></div>
+                    <div className="h-2.5 bg-zinc-800/60 rounded w-5/6"></div>
+                  </div>
+                </div>
+
+                {/* Section 2 skeleton: Core Concepts */}
+                <div className="space-y-3 pt-2">
+                  <div className="h-3.5 bg-zinc-800 rounded w-1/4"></div>
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2 pl-1">
+                      <div className="w-2 h-2 bg-zinc-800 rounded-full mt-1.5 shrink-0" />
+                      <div className="flex-1 space-y-1">
+                        <div className="h-2.5 bg-zinc-800/60 rounded w-11/12"></div>
+                        <div className="h-2 bg-zinc-800/40 rounded w-3/4"></div>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2 pl-1">
+                      <div className="w-2 h-2 bg-zinc-800 rounded-full mt-1.5 shrink-0" />
+                      <div className="flex-1 space-y-1">
+                        <div className="h-2.5 bg-zinc-800/60 rounded w-5/6"></div>
+                        <div className="h-2 bg-zinc-800/40 rounded w-2/3"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 3 skeleton: Key takeaways */}
+                <div className="space-y-2.5 pt-2">
+                  <div className="h-3.5 bg-zinc-800 rounded w-1/3"></div>
+                  <div className="space-y-1.5 pl-1">
+                    <div className="h-2 bg-zinc-800/40 rounded w-5/6"></div>
+                    <div className="h-2 bg-zinc-800/40 rounded w-11/12"></div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+                <textarea
+                  key={`notes-textarea-${tabId}`}
+                  id={`notes-textarea-${tabId}`}
+                  name={`notes-textarea-${tabId}`}
+                  autoComplete="off"
+                  disabled={isTyping}
+                  className="flex-1 w-full min-h-[300px] bg-transparent text-[#cfcfd4] p-4 pt-3 focus:outline-none text-[13px] leading-relaxed resize-none font-sans placeholder-[#52525b] border-none outline-none focus:ring-0 disabled:opacity-90 whitespace-pre-wrap break-words"
+                  placeholder={isTyping ? "Formatting study notes..." : "Paste relevant excerpts, frame your primary thesis, outline sections, or capture spontaneous ideas about this document..."}
+                  value={notes}
+                  onChange={(e) => handleNotesChange(e.target.value)}
+                  onBlur={() => {
+                    if (saveTimeoutRef.current) {
+                      clearTimeout(saveTimeoutRef.current);
+                    }
+                    saveNotesToDB(notes);
+                    setNotesSavedStatus(false);
+                  }}
+                />
+            )}
           </div>
         )}
 
@@ -694,8 +1158,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
                 {isGeneratingQuiz ? (
                   <div className="space-y-2 py-1">
-                    <div className="flex items-center justify-center gap-2 text-xs text-purple-400 font-semibold">
-                      <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                    <div className="flex items-center justify-center gap-2 text-xs text-zinc-400 font-semibold">
+                      <div className="w-4 h-4 border-2 border-zinc-400 border-t-transparent rounded-full animate-spin" />
                       Cosmi reading document...
                     </div>
                     <span className="text-[10px] text-zinc-600 block">Determining applicability and styling key insights...</span>
@@ -836,7 +1300,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     ) : (
                       // Quiz scoring card results screen
                       <div className="text-center py-8 p-4 space-y-5">
-                        <div className="w-14 h-14 bg-purple-950/20 border border-purple-800/20 rounded-full flex items-center justify-center mx-auto text-purple-400">
+                        <div className="w-14 h-14 bg-zinc-900 border border-zinc-800 rounded-full flex items-center justify-center mx-auto text-zinc-400">
                           <CheckCircle2 className="w-8 h-8" />
                         </div>
                         

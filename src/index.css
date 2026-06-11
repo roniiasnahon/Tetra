@@ -235,5 +235,52 @@ body {
   vertical-align: middle;
 }
 
+/* React-PDF text layer transparency & black block prevention fixes */
+.react-pdf__Page__textContent {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  overflow: hidden !important;
+  opacity: 1 !important;
+  line-height: 1.0 !important;
+  pointer-events: auto !important;
+}
+
+/* Force all selection/overlay text spans to be absolutely transparent.
+   This guarantees that the actual high-quality PDF page canvas remains fully visible,
+   while text selection and search matches continue to function natively. */
+.react-pdf__Page__textContent span,
+.react-pdf__Page__textContent .textLayer > span,
+.textLayer > span {
+  color: transparent !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  position: absolute !important;
+  white-space: pre !important;
+  cursor: text !important;
+  transform-origin: 0% 0% !important;
+  outline: none !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+/* High-quality standard browser select highlight overlay style */
+.react-pdf__Page__textContent span::selection {
+  background-color: rgba(59, 130, 246, 0.3) !important; /* transcluent slate-blue selection overlay */
+  color: transparent !important;
+}
+
+/* Custom PDF highlighting mark overlay styles */
+.react-pdf__Page__textContent mark {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  mix-blend-mode: multiply !important;
+  border-radius: 2px !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+
+
 
 

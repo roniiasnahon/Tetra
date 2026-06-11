@@ -76,6 +76,18 @@ service cloud.firestore {
         && data.get('messages', []) is list;
     }
 
+    function isValidAnnotation(data) {
+      return data.keys().hasAll(['id', 'fileId', 'text', 'page', 'timestamp', 'uid'])
+        && data.id is string
+        && data.fileId is string
+        && data.text is string
+        && data.get('comment', '') is string
+        && data.page is number
+        && data.get('color', '') is string
+        && data.timestamp is number
+        && data.uid == request.auth.uid;
+    }
+
     // 4. Collection Matches
     match /users/{userId} {
       allow get: if isOwner(userId);
@@ -112,6 +124,15 @@ service cloud.firestore {
         allow get: if isOwner(userId);
         allow create: if isOwner(userId) && isValidSession(incoming());
         allow update: if isOwner(userId) && isValidSession(incoming());
+      }
+      
+      match /annotations/{annotationId} {
+        allow list: if isOwner(userId);
+        allow get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(annotationId) && isValidAnnotation(incoming());
+        allow update: if isOwner(userId) && isValidId(annotationId) && isValidAnnotation(incoming())
+          && incoming().id == existing().id;
+        allow delete: if isOwner(userId) && isValidId(annotationId);
       }
     }
 

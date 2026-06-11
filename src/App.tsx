@@ -14,6 +14,7 @@ import { AuthenticationScreen } from './components/AuthenticationScreen';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
+import { ToastContainer, showToast } from './components/Toast';
 
 // Firebase imports
 import { auth, db, OperationType, handleFirestoreError, signInWithPopup, googleProvider, signOut } from './firebase';
@@ -42,6 +43,7 @@ interface PaperItem {
   mimetype?: string;
   extractedText?: string;
   folderId?: string;
+  notes?: string;
 }
 
 export interface Tab {
@@ -671,12 +673,16 @@ export default function App() {
       if (!('key' in e) || e.key === 'Enter') {
         const newTitle = renamingChatText.trim() || 'Untitled';
         setTabs(tabs.map(t => t.id === isRenamingChat ? { ...t, title: newTitle } : t));
+        showToast(`Chat renamed to "${newTitle}"`, "success");
       }
       setIsRenamingChat(null);
     }
   };
 
   const deleteTab = async (id: string) => {
+    const closedTab = tabs.find(t => t.id === id);
+    const closedTitle = closedTab ? closedTab.title : 'Tab';
+
     if (tabs.length <= 1 && tabs[0].id === id) {
       const newId = `chat-${Date.now()}`;
       setTabs([{ id: newId, type: 'chat', title: 'Untitled' }]);
@@ -705,6 +711,8 @@ export default function App() {
       }
     }
 
+    showToast(`Closed "${closedTitle}"`, "info");
+
     if (currentUser) {
       const path = `users/${currentUser.uid}/chats/${id}`;
       try {
@@ -720,6 +728,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [pdfNumPages, setPdfNumPages] = useState<number | null>(null);
+  const [currentPdfPage, setCurrentPdfPage] = useState<number>(1);
   const [inviteEmail, setInviteEmail] = useState('');
   const [isInviteSuccess, setIsInviteSuccess] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -915,6 +924,14 @@ export default function App() {
   
   // Document Metadata State
   const [documentTitle, setDocumentTitle] = useState('');
+  const [docSaveStatus, setDocSaveStatus] = useState<'saved' | 'saving' | null>('saved');
+  
+  // PDF Annotation States
+  const [selectionText, setSelectionText] = useState("");
+  const [selectionPos, setSelectionPos] = useState<{ x: number; y: number } | null>(null);
+  const [selectedPageNum, setSelectedPageNum] = useState<number | null>(null);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [activeHighlightColor, setActiveHighlightColor] = useState("#fef08a");
   const [folderName, setFolderName] = useState('');
   const [savedNoteName, setSavedNoteName] = useState('');
 
@@ -1010,6 +1027,7 @@ export default function App() {
 
   // Database helper wrappers to sync automatically to Firestore or guest local state
   const dbSetFolder = async (folder: FolderItem) => {
+    const isRename = folders.some(f => f.id === folder.id);
     if (currentUser) {
       try {
         await setDoc(doc(db, 'users', currentUser.uid, 'folders', folder.id), {
@@ -1017,8 +1035,10 @@ export default function App() {
           name: folder.name,
           createdAt: folder.createdAt
         });
+        showToast(isRename ? `Folder renamed to "${folder.name}"` : `Folder "${folder.name}" created successfully`, "success");
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/folders/${folder.id}`);
+        showToast(`Failed to save folder: ${error instanceof Error ? error.message : String(error)}`, "error");
       }
     } else {
       setFolders(prev => {
@@ -1027,10 +1047,12 @@ export default function App() {
         }
         return [...prev, folder];
       });
+      showToast(isRename ? `Folder renamed to "${folder.name}"` : `Folder "${folder.name}" created successfully`, "success");
     }
   };
 
   const dbDeleteFolder = async (folderId: string) => {
+    const folderName = folders.find(f => f.id === folderId)?.name || 'Folder';
     if (currentUser) {
       try {
         await deleteDoc(doc(db, 'users', currentUser.uid, 'folders', folderId));
@@ -1066,17 +1088,23 @@ export default function App() {
           const paperId = encodeURIComponent(p.title).replace(/\./g, '%2E');
           await deleteDoc(doc(db, 'users', currentUser.uid, 'papers', paperId));
         }
+        showToast(`Folder "${folderName}" and its documents deleted successfully`, "success");
       } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, `users/${currentUser.uid}/folders/${folderId}`);
+        showToast(`Failed to delete folder: ${error instanceof Error ? error.message : String(error)}`, "error");
       }
     } else {
       setFolders(prev => prev.filter(f => f.id !== folderId));
       setPapers(prev => prev.filter(p => p.folderId !== folderId));
+      showToast(`Folder "${folderName}" and its documents deleted successfully`, "success");
     }
   };
 
-  const dbSetPaper = async (paper: PaperItem) => {
+  const dbSetPaper = async (paper: PaperItem, silent = false) => {
     const paperId = encodeURIComponent(paper.title).replace(/\./g, '%2E');
+    const isNew = !papers.some(p => p.title === paper.title);
+    const hasFolderChanged = papers.some(p => p.title === paper.title && p.folderId !== paper.folderId);
+    
     if (currentUser) {
       try {
         await setDoc(doc(db, 'users', currentUser.uid, 'papers', paperId), {
@@ -1092,10 +1120,21 @@ export default function App() {
           fileId: paper.fileId || '',
           mimetype: paper.mimetype || '',
           extractedText: paper.extractedText || '',
-          folderId: paper.folderId || ''
+          folderId: paper.folderId || '',
+          notes: paper.notes || ''
         });
+        
+        if (!silent) {
+          if (hasFolderChanged) {
+            const destFolder = folders.find(f => f.id === paper.folderId)?.name || 'Default';
+            showToast(`Moved "${paper.title}" to ${destFolder}`, "success");
+          } else if (isNew) {
+            showToast(`Document "${paper.title}" added to workspace`, "success");
+          }
+        }
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/papers/${paperId}`);
+        showToast(`Failed to save document: ${error instanceof Error ? error.message : String(error)}`, "error");
       }
     } else {
       setPapers(prev => {
@@ -1104,6 +1143,15 @@ export default function App() {
         }
         return [paper, ...prev];
       });
+
+      if (!silent) {
+        if (hasFolderChanged) {
+          const destFolder = folders.find(f => f.id === paper.folderId)?.name || 'Default';
+          showToast(`Moved "${paper.title}" to ${destFolder}`, "success");
+        } else if (isNew) {
+          showToast(`Document "${paper.title}" added to workspace`, "success");
+        }
+      }
     }
   };
 
@@ -1123,6 +1171,7 @@ export default function App() {
     setActiveTabId(newId);
     setSidebarView('files');
     saveDraftToLibrary(newDoc);
+    showToast(`New draft document created`, "success");
     return newId;
   };
 
@@ -1154,11 +1203,14 @@ export default function App() {
     if (currentUser) {
       try {
         await deleteDoc(doc(db, 'users', currentUser.uid, 'papers', paperId));
+        showToast(`Document "${paperTitle}" deleted successfully`, "success");
       } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, `users/${currentUser.uid}/papers/${paperId}`);
+        showToast(`Failed to delete document: ${error instanceof Error ? error.message : String(error)}`, "error");
       }
     } else {
       setPapers(prev => prev.filter(p => p.title !== paperTitle));
+      showToast(`Document "${paperTitle}" deleted successfully`, "success");
     }
   };
 
@@ -1278,7 +1330,8 @@ export default function App() {
               fileId: data.fileId || '',
               mimetype: data.mimetype || '',
               extractedText: data.extractedText || '',
-              folderId: data.folderId || ''
+              folderId: data.folderId || '',
+              notes: data.notes || ''
             });
           });
           setPapers(loadedPapers);
@@ -1308,10 +1361,41 @@ export default function App() {
           handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/chats`);
         });
 
+        // Subscribe to all annotations
+        const annosColRef = collection(db, 'users', user.uid, 'annotations');
+        const unsubAnnos = onSnapshot(annosColRef, (snapshot) => {
+          const groupedAnnos: Record<string, any[]> = {};
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            const fileId = data.fileId || 'default';
+            if (!groupedAnnos[fileId]) {
+              groupedAnnos[fileId] = [];
+            }
+            groupedAnnos[fileId].push({
+              id: doc.id,
+              fileId,
+              text: data.text || '',
+              comment: data.comment || '',
+              page: data.page || 1,
+              color: data.color || '#fef08a',
+              timestamp: data.timestamp || Date.now()
+            });
+          });
+          
+          Object.keys(groupedAnnos).forEach((fileId) => {
+            localStorage.setItem(`annotations_${fileId}`, JSON.stringify(groupedAnnos[fileId]));
+          });
+          
+          window.dispatchEvent(new Event('annotationsUpdated'));
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/annotations`);
+        });
+
         unsubscribeUser = () => {
           unsubFolders();
           unsubPapers();
           unsubChats();
+          unsubAnnos();
         };
       } else {
         unsubscribeUser();
@@ -1651,6 +1735,153 @@ export default function App() {
     localStorage.setItem(`cosmi_messages_${uid}`, JSON.stringify(messages));
   }, [messages, currentUser]);
 
+  // PDF Annotation Helpers & Highlight Engine
+  const highlightPDFSpans = () => {
+    const activeTab = tabs.find(t => t.id === activeTabId);
+    if (!activeTab || !activeTab.id) return;
+    const fileKey = activeTab.fileId || activeTab.id;
+    const saved = localStorage.getItem(`annotations_${fileKey}`);
+    if (!saved) return;
+    try {
+      const annos = JSON.parse(saved);
+      if (!annos || annos.length === 0) return;
+      
+      annos.forEach((anno: any) => {
+        const pageContainer = document.getElementById(`pdf-page-${anno.page}`);
+        if (!pageContainer) return;
+        
+        const textLayer = pageContainer.querySelector('.react-pdf__Page__textContent');
+        if (!textLayer) return;
+
+        const spans = textLayer.querySelectorAll('span');
+        spans.forEach((span: any) => {
+          if (span.textContent && span.textContent.includes(anno.text) && !span.dataset.annotated) {
+            span.dataset.annotated = "true";
+            const originalHTML = span.innerHTML;
+            const highlightColor = anno.color || "#fef08a";
+            span.innerHTML = originalHTML.split(anno.text).join(`<mark style="background-color: ${highlightColor} !important; color: transparent !important; -webkit-text-fill-color: transparent !important; opacity: 0.55 !important; mix-blend-mode: multiply !important; border-radius: 2px; padding: 1px 0px; box-shadow: none;">${anno.text}</mark>`);
+          }
+        });
+      });
+    } catch (e) {
+      console.warn("Error highlighting spans", e);
+    }
+  };
+
+  useEffect(() => {
+    const activeTab = tabs.find(t => t.id === activeTabId);
+    let intervalId: any;
+    if (activeTab && activeTab.mimetype === 'application/pdf') {
+      highlightPDFSpans();
+      intervalId = setInterval(highlightPDFSpans, 1500);
+    }
+    
+    const handleUpdate = () => {
+      highlightPDFSpans();
+    };
+    
+    window.addEventListener('annotationsUpdated', handleUpdate);
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+      window.removeEventListener('annotationsUpdated', handleUpdate);
+    };
+  }, [activeTabId, pdfNumPages]);
+
+  useEffect(() => {
+    if (!pdfNumPages) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      // Find the entry that is intersecting the most
+      let maxRatio = 0;
+      let mostVisibleId = null;
+      
+      entries.forEach(entry => {
+        if (entry.isIntersecting && entry.intersectionRatio > maxRatio) {
+          maxRatio = entry.intersectionRatio;
+          mostVisibleId = entry.target.id;
+        }
+      });
+
+      if (mostVisibleId) {
+        const pageNum = parseInt((mostVisibleId as string).replace("pdf-page-", ""));
+        if (!isNaN(pageNum)) {
+          setCurrentPdfPage(pageNum);
+        }
+      }
+    }, {
+      root: document.getElementById('pdf-scroll-container'),
+      rootMargin: '0px',
+      threshold: [0.1, 0.4, 0.6, 0.8]
+    });
+
+    // We delay the observation to let the DOM settle
+    const timeout = setTimeout(() => {
+      const pageContainers = document.querySelectorAll('.pdf-page-wrapper');
+      pageContainers.forEach(container => observer.observe(container));
+    }, 500);
+
+    return () => {
+      clearTimeout(timeout);
+      observer.disconnect();
+    };
+  }, [pdfNumPages, activeTabId]);
+
+  const findPageFromNode = (node: Node | null): number | null => {
+    let current: HTMLElement | null = node as HTMLElement;
+    while (current) {
+      if (current.id && current.id.startsWith("pdf-page-")) {
+        const num = parseInt(current.id.replace("pdf-page-", ""));
+        if (!isNaN(num)) return num;
+      }
+      current = current.parentElement;
+    }
+    return null;
+  };
+
+  const handlePdfMouseUp = (e: React.MouseEvent) => {
+    const selection = window.getSelection();
+    if (selection && selection.toString().trim().length > 0) {
+      const text = selection.toString().trim();
+      setSelectionText(text);
+      
+      const pageNum = findPageFromNode(selection.anchorNode) || findPageFromNode(selection.focusNode);
+      setSelectedPageNum(pageNum);
+      
+      // Get selection coordinates for popover positioning relative to pdf-viewer-workspace container
+      try {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        
+        // Find outer relative container
+        const outerWorkspace = document.getElementById("pdf-viewer-workspace");
+        if (outerWorkspace) {
+          const containerRect = outerWorkspace.getBoundingClientRect();
+          setSelectionPos({
+            x: rect.left - containerRect.left + (rect.width / 2),
+            y: rect.top - containerRect.top - 150 // Above selection
+          });
+        } else {
+          const containerRect = e.currentTarget.getBoundingClientRect();
+          setSelectionPos({
+            x: rect.left - containerRect.left + (rect.width / 2),
+            y: rect.top - containerRect.top - 150
+          });
+        }
+      } catch (err) {
+        console.warn("Could not determine selection rect", err);
+        setSelectionPos({ x: e.clientX, y: e.clientY - 120 });
+      }
+    } else {
+      const target = e.target as HTMLElement;
+      if (target && !target.closest('.pdf-annotation-popover')) {
+        setSelectionText("");
+        setSelectionPos(null);
+        setSelectedPageNum(null);
+        setCommentDraft("");
+      }
+    }
+  };
+
   // Word count helper
   const wordCount = (() => {
     const rawText = `${documentTitle} ${folderName} ${savedNoteName} ` + 
@@ -1677,6 +1908,7 @@ export default function App() {
     if (isDocNotPdf) {
       setDocumentTitle(targetTab.title || 'Untitled');
       setDocumentContent(targetTab.content || '');
+      setDocSaveStatus('saved');
       setChatInput('');
       if (editorRef.current) {
         editorRef.current.innerHTML = targetTab.content || '';
@@ -1699,6 +1931,25 @@ export default function App() {
     }
     loadedTabIdRef.current = activeTabId;
   }, [activeTabId]);
+
+  // Debounced auto-save of active document draft to Firestore/LocalStorage
+  useEffect(() => {
+    if (docSaveStatus !== 'saving') return;
+
+    const timer = setTimeout(async () => {
+      const currentTab = tabs.find(t => t.id === activeTabId);
+      if (currentTab && currentTab.type === 'document' && (!currentTab.fileId || !(currentTab.mimetype === 'application/pdf' || currentTab.title.toLowerCase().endsWith('.pdf')))) {
+        try {
+          await saveDraftToLibrary(currentTab);
+        } catch (err) {
+          console.error("Auto-save failed to update paper draft:", err);
+        }
+      }
+      setDocSaveStatus('saved');
+    }, 1200); // 1.2s debounce for fast and modern response
+
+    return () => clearTimeout(timer);
+  }, [docSaveStatus, documentTitle, documentContent, activeTabId, tabs]);
 
   // Helper to convert Markdown to HTML for the editor
   const markdownToHtml = (markdown: string) => {
@@ -2389,33 +2640,42 @@ Once you have content, I can help you draft sections, summarize findings, or for
           const uploaderId = currentUserIdRef.current;
           const file = e.target.files?.[0];
           if (file) {
-            const formData = new FormData();
-            formData.append("file", file);
+            const toastId = 'upload-main-' + Date.now();
+            showToast(`Uploading and mapping "${file.name}" (0%)...`, 'loading', 60000, toastId);
             try {
-              const response = await fetch("/api/upload", {
-                method: "POST",
-                body: formData,
+              const data = await new Promise<any>((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                const formData = new FormData();
+                formData.append("file", file);
+
+                xhr.upload.addEventListener("progress", (event) => {
+                  if (event.lengthComputable) {
+                    const percent = Math.round((event.loaded / event.total) * 100);
+                    showToast(`Uploading and mapping "${file.name}" (${percent}%)...`, 'loading', 60000, toastId);
+                  }
+                });
+
+                xhr.addEventListener("load", () => {
+                  if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                      resolve(JSON.parse(xhr.responseText));
+                    } catch (err) {
+                      reject(new Error("Invalid server response"));
+                    }
+                  } else {
+                    let errMsg = `Server responded with status ${xhr.status}`;
+                    reject(new Error(errMsg));
+                  }
+                });
+
+                xhr.addEventListener("error", () => reject(new Error("Network upload error")));
+                xhr.addEventListener("abort", () => reject(new Error("Upload aborted")));
+
+                xhr.open("POST", "/api/upload");
+                xhr.send(formData);
               });
 
               if (currentUserIdRef.current !== uploaderId) return;
-
-              if (!response.ok) {
-                const errorText = await response.text();
-                let errMsg = "Server responded with status " + response.status;
-                try {
-                  const errJson = JSON.parse(errorText);
-                  if (errJson && (errJson.error || errJson.message)) {
-                    errMsg = errJson.error || errJson.message;
-                  }
-                } catch {
-                  if (errorText && errorText.length < 200) {
-                    errMsg = errorText;
-                  }
-                }
-                throw new Error(errMsg);
-              }
-
-              const data = await response.json();
               if (data.success) {
                 const fileLabel = data.fileName;
                 const titlePlaceholder = fileLabel.replace(/\.[^/.]+$/, "");
@@ -2461,7 +2721,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             .trim();
                         }
                         extractedText = cleanText;
-                        summaryInfo = `This document is parsed and mapped successfully. You can start synthesizing your notes, analyzing findings, and asking the Assistant specifically about its claims.`;
+                        summaryInfo = `This document is parsed and mapped successfully. You can start synthesizing your notes, analyzing findings, and asking the Assistant specifically about its claims Simon.`;
                         const words = extractedText.trim().split(/\s+/).filter(Boolean).length;
                         pagesCountString = ` (${words} words mapped)`;
                       }
@@ -2488,7 +2748,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   extractedText: extractedText,
                   folderId: targetFolder
                 };
-                dbSetPaper(parsedPaper);
+                dbSetPaper(parsedPaper, true);
 
                 const newId = `doc-${Date.now()}`;
                 let initialContent = "";
@@ -2537,6 +2797,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 setSidebarView('files');
                 setIsCreateDropdownOpen(false);
                 setIsAssistantOpen(true);
+                showToast(`"${fileLabel}" uploaded and structured successfully!`, 'success', 3000, toastId);
 
                 if (extractedText) {
                   setTimeout(() => {
@@ -2556,13 +2817,15 @@ Once you have content, I can help you draft sections, summarize findings, or for
               }
             } catch (err: any) {
               console.error("Upload failed", err);
+              const errMsg = err?.message || 'The server returned an unexpected error format.';
+              showToast(`Upload failed: ${errMsg}`, 'error', 4000, toastId);
               // Inform the user via assistant message nicely
               setMessages(prev => [
                 ...prev,
                 {
                   id: String(Date.now()),
                   role: 'assistant',
-                  content: `⚠️ **Upload failed**: ${err?.message || 'The server returned an unexpected error format.'}\n\n*Make sure the file is a valid PDF, DOC, or DOCX, and is under 15MB.*`,
+                  content: `⚠️ **Upload failed**: ${errMsg}\n\n*Make sure the file is a valid PDF, DOC, or DOCX, and is under 15MB.*`,
                   timestamp: Date.now()
                 }
               ]);
@@ -4579,20 +4842,61 @@ Once you have content, I can help you draft sections, summarize findings, or for
             </div>
           ) : (
             (activeTab.fileId && activeTab.mimetype === 'application/pdf') ? (
-              <div className="flex-1 flex flex-col bg-[#0b0b0c] h-full overflow-hidden">
+              <div className="flex-1 flex flex-col bg-[#0b0b0c] h-full overflow-hidden" id="pdf-viewer-workspace">
                 {/* PDF Viewer Display Body */}
-                <div className="flex-1 w-full bg-[#1e1e1e] relative min-h-0 overflow-hidden">
-                    {!isSidePanelOpen && (
-                      <button
-                        onClick={() => setIsSidePanelOpen(true)}
-                        className="absolute top-4 right-4 z-10 p-2 text-[#a1a1aa] hover:text-[#f4f4f5] transition-all cursor-pointer"
-                        title="Toggle Side Panel"
-                      >
-                        <PanelRight className="w-5 h-5" />
-                      </button>
-                    )}
-                    <div className="w-full h-full overflow-y-auto bg-[#0f0f10]">
-                      <Document
+                <div className="h-[44px] flex items-center justify-between px-4 bg-[#1e1e1e] border-b border-[#27272a] shrink-0 z-10 relative">
+                     {/* Left Spacer for absolute centering balance */}
+                     <div className="w-8" />
+                     
+                     <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-4">
+                        <div className="flex items-center text-sm font-medium text-zinc-400 select-none">
+                           <span className="text-zinc-200 min-w-[20px] text-center">{currentPdfPage}</span>
+                           <span className="mx-1.5 text-zinc-600">/</span>
+                           <span>{pdfNumPages || '-'}</span>
+                        </div>
+                        <div className="flex items-center box-border border border-[#27272a] rounded overflow-hidden">
+                           <button 
+                             onClick={() => {
+                               const page = document.getElementById(`pdf-page-${Math.max(1, currentPdfPage - 1)}`);
+                               if (page) page.scrollIntoView({ behavior: 'smooth' });
+                             }}
+                             disabled={currentPdfPage <= 1}
+                             className="w-7 h-7 flex items-center justify-center bg-[#1e1e1e] hover:bg-[#27272a] hover:text-white text-zinc-400 disabled:opacity-30 disabled:hover:bg-[#1e1e1e] disabled:hover:text-zinc-400 transition-colors"
+                           >
+                             <Icon icon="ph:caret-up" className="w-4 h-4" />
+                           </button>
+                           <div className="w-[1px] h-4 bg-[#27272a]" />
+                           <button 
+                             onClick={() => {
+                               const page = document.getElementById(`pdf-page-${Math.min(pdfNumPages || 1, currentPdfPage + 1)}`);
+                               if (page) page.scrollIntoView({ behavior: 'smooth' });
+                             }}
+                             disabled={currentPdfPage >= (pdfNumPages || 1)}
+                             className="w-7 h-7 flex items-center justify-center bg-[#1e1e1e] hover:bg-[#27272a] hover:text-white text-zinc-400 disabled:opacity-30 disabled:hover:bg-[#1e1e1e] disabled:hover:text-zinc-400 transition-colors"
+                           >
+                             <Icon icon="ph:caret-down" className="w-4 h-4" />
+                           </button>
+                        </div>
+                     </div>
+                     <div className="flex items-center">
+                       {!isSidePanelOpen && (
+                         <button
+                           onClick={() => setIsSidePanelOpen(true)}
+                           className="p-1.5 text-[#a1a1aa] hover:text-[#f4f4f5] transition-all cursor-pointer rounded-md hover:bg-[#27272a]"
+                           title="Toggle Side Panel"
+                         >
+                           <PanelRight className="w-[18px] h-[18px]" />
+                         </button>
+                       )}
+                     </div>
+                 </div>
+                 <div className="flex-1 w-full bg-[#1e1e1e] relative min-h-0 overflow-hidden">
+                     <div 
+                       className="w-full h-full overflow-y-auto bg-[#0f0f10] custom-scrollbar-v"
+                       onMouseUp={handlePdfMouseUp}
+                       id="pdf-scroll-container"
+                     >
+                       <Document
                         file={`/api/files/${activeTab.fileId}`}
                         onLoadSuccess={({ numPages }) => setPdfNumPages(numPages)}
                         className="flex flex-col items-center py-8 gap-6"
@@ -4605,22 +4909,141 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         error={<div className="text-red-400 py-12">Failed to load PDF file.</div>}
                       >
                         {Array.from(new Array(pdfNumPages || 0), (el, index) => (
-                          <div key={`page_container_${index + 1}`} id={`pdf-page-${index + 1}`}>
+                          <div key={`page_container_${index + 1}`} id={`pdf-page-${index + 1}`} className="relative pdf-page-wrapper">
                             <Page
                               pageNumber={index + 1}
                               renderTextLayer={true}
                               renderAnnotationLayer={true}
-                              className="bg-[#18181b] border border-[#27272a] text-[#e4e4e7]"
+                              className="bg-[#18181b] border border-[#27272a] text-[#e4e4e7] relative"
                               width={800}
                             />
                           </div>
                         ))}
                       </Document>
                     </div>
+
+                    {/* Popover UI over PDF text selection */}
+                    {selectionText && selectionPos && (
+                      <div 
+                        className="absolute z-50 pdf-annotation-popover bg-[#161618] border border-[#2d2d30] rounded-xl p-3 shadow-2xl flex flex-col gap-2 min-w-[280px] max-w-sm"
+                        style={{
+                          left: `${selectionPos.x}px`,
+                          top: `${selectionPos.y}px`,
+                          transform: 'translateX(-50%)'
+                        }}
+                      >
+                        <div className="text-[11px] font-mono text-zinc-400 select-none pb-1.5 border-b border-[#2d2d30] flex items-center justify-between">
+                          <span>Page {selectedPageNum || 1} Annotation</span>
+                          <button 
+                            onClick={() => {
+                              setSelectionText("");
+                              setSelectionPos(null);
+                            }}
+                            className="text-zinc-500 hover:text-zinc-300 cursor-pointer p-0.5"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        
+                        <div className="bg-[#121212]/50 text-[11px] italic text-zinc-300 p-2 rounded border border-[#222224] max-h-24 overflow-y-auto select-none break-words whitespace-pre-wrap">
+                          "{selectionText}"
+                        </div>
+                        
+                        {/* Highlights selection color */}
+                        <div className="flex items-center gap-1.5 py-1">
+                          <span className="text-[10px] text-zinc-500 font-medium select-none">Color:</span>
+                          <div className="flex items-center gap-1">
+                            {[
+                              { name: 'Yellow', value: '#fef08a', class: 'bg-yellow-200' },
+                              { name: 'Green', value: '#bbf7d0', class: 'bg-green-200' },
+                              { name: 'Blue', value: '#bfdbfe', class: 'bg-blue-200' },
+                              { name: 'Pink', value: '#fbcfe8', class: 'bg-pink-200' },
+                            ].map((clr) => (
+                              <button
+                                key={clr.value}
+                                onClick={() => setActiveHighlightColor(clr.value)}
+                                className={`w-4 h-4 rounded-full transition-transform cursor-pointer border ${activeHighlightColor === clr.value ? 'ring-1 ring-zinc-400 border-white scale-110' : 'border-transparent hover:scale-105'} ${clr.class}`}
+                                title={clr.name}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        
+                        <textarea
+                          rows={2}
+                          value={commentDraft}
+                          onChange={(e) => setCommentDraft(e.target.value)}
+                          placeholder="Type your comment or thesis notes..."
+                          className="w-full bg-[#121212] border border-[#27272a] focus:border-zinc-700 rounded-lg p-2 text-[12px] text-[#f4f4f5] outline-none transition-colors resize-none placeholder:text-zinc-650"
+                        />
+                        
+                        <button
+                          onClick={async () => {
+                            if (!selectionText) return;
+                            
+                            const newAnno = {
+                              id: `anno-${Date.now()}`,
+                              fileId: activeTab.fileId || activeTab.id,
+                              text: selectionText,
+                              comment: commentDraft.trim(),
+                              page: selectedPageNum || 1,
+                              color: activeHighlightColor,
+                              timestamp: Date.now()
+                            };
+                            
+                            const storageKey = `annotations_${activeTab.id || activeTab.fileId}`;
+                            const currentAnnosStr = localStorage.getItem(storageKey) || '[]';
+                            let currentAnnos = [];
+                            try {
+                              currentAnnos = JSON.parse(currentAnnosStr);
+                            } catch (_) {}
+                            const updated = [...currentAnnos, newAnno];
+                            localStorage.setItem(storageKey, JSON.stringify(updated));
+                            
+                            window.dispatchEvent(new Event('annotationsUpdated'));
+                            
+                            if (currentUser) {
+                              try {
+                                await setDoc(doc(db, 'users', currentUser.uid, 'annotations', newAnno.id), {
+                                  ...newAnno,
+                                  uid: currentUser.uid
+                                });
+                              } catch (err) {
+                                handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid}/annotations/${newAnno.id}`);
+                              }
+                            }
+                            
+                            setSelectionText("");
+                            setSelectionPos(null);
+                            setSelectedPageNum(null);
+                            setCommentDraft("");
+                            
+                            setTimeout(highlightPDFSpans, 100);
+                          }}
+                          className="w-full py-1.5 bg-[#fb7185] hover:bg-[#fda4af] font-bold text-black text-[11px] rounded-lg transition-colors cursor-pointer text-center select-none"
+                        >
+                          Save Annotation
+                        </button>
+                      </div>
+                    )}
                 </div>
               </div>
             ) : (
               <div className="relative flex-1 flex flex-col h-full overflow-hidden">
+                {/* Repositioned Auto-Save Indicator next to SidePanel icon */}
+                <div className={`absolute top-3.5 z-30 transition-all duration-200 ${isSidePanelOpen ? 'right-4' : 'right-12'} flex items-center`}>
+                  {docSaveStatus === 'saving' ? (
+                    <span className="flex items-center gap-1.5 text-zinc-400 bg-[#121212]/80 px-2.5 py-1.5 rounded-lg border border-[#27272a] backdrop-blur-sm select-none text-[11px] font-mono h-8">
+                      <Icon icon="ph:spinner-gap" className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                      <span>Saving...</span>
+                    </span>
+                  ) : docSaveStatus === 'saved' ? (
+                    <span className="flex items-center gap-1.5 text-emerald-500 font-medium bg-[#121212]/80 px-2.5 py-1.5 rounded-lg border border-[#27272a] backdrop-blur-sm select-none text-[11px] font-mono h-8">
+                      <Icon icon="ph:cloud-check" className="w-4 h-4 text-emerald-500" />
+                      <span>Saved to Cloud Workers</span>
+                    </span>
+                  ) : null}
+                </div>
                 {!isSidePanelOpen && (
                   <button
                     onClick={() => setIsSidePanelOpen(true)}
@@ -4976,6 +5399,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       const newTitle = e.target.value;
                       setDocumentTitle(newTitle);
                       setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, title: newTitle } : t));
+                      setDocSaveStatus('saving');
                     }}
                     onBlur={(e) => {
                       const currentTab = tabs.find(t => t.id === activeTabId);
@@ -4998,6 +5422,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         lastContentRef.current = html;
                         setDocumentContent(html);
                         setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, content: html } : t));
+                        setDocSaveStatus('saving');
                       }}
                       onBlur={() => {
                         if (editorRef.current) {
@@ -5088,7 +5513,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
           )
         )}
           </div>
-          <SidePanel isOpen={isSidePanelOpen && activeTab.type === 'document'} onClose={() => setIsSidePanelOpen(false)} tabId={activeTabId} activeTab={activeTab} papers={papers} />
+          <SidePanel 
+            isOpen={isSidePanelOpen && activeTab.type === 'document'} 
+            onClose={() => setIsSidePanelOpen(false)} 
+            tabId={activeTabId} 
+            activeTab={activeTab} 
+            papers={papers} 
+            onUpdatePaper={(updatedPaper) => {
+              dbSetPaper(updatedPaper);
+              if (activeViewingPaper && activeViewingPaper.title === updatedPaper.title) {
+                setActiveViewingPaper(updatedPaper);
+              }
+            }}
+            extractTextFromPdf={extractTextFromPdf}
+          />
         </div>
       </div>
 
@@ -5515,6 +5953,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   }
                   setShowLinkRenameModal(false);
                   setLinkToRename(null);
+                  showToast("Hyperlink updated successfully", "success");
                 }}
                 className="px-3.5 py-2 rounded-lg text-xs bg-zinc-100 hover:bg-white text-black font-semibold transition-colors cursor-pointer"
               >
@@ -5564,6 +6003,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
         </div>
       )}
 
+      <ToastContainer />
     </div>
   );
 }
