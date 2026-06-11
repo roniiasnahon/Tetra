@@ -729,6 +729,7 @@ export default function App() {
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [pdfNumPages, setPdfNumPages] = useState<number | null>(null);
   const [currentPdfPage, setCurrentPdfPage] = useState<number>(1);
+  const [pdfScale, setPdfScale] = useState<number>(1);
   const [inviteEmail, setInviteEmail] = useState('');
   const [isInviteSuccess, setIsInviteSuccess] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -4856,6 +4857,29 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         </div>
                         <div className="flex items-center box-border border border-[#27272a] rounded overflow-hidden">
                            <button 
+                             onClick={() => setPdfScale(Math.max(0.25, pdfScale - 0.25))}
+                             disabled={pdfScale <= 0.25}
+                             className="w-7 h-7 flex items-center justify-center bg-[#1e1e1e] hover:bg-[#27272a] hover:text-white text-zinc-400 disabled:opacity-30 disabled:hover:bg-[#1e1e1e] disabled:hover:text-zinc-400 transition-colors"
+                             title="Zoom out"
+                           >
+                             <Icon icon="ph:minus" className="w-4 h-4" />
+                           </button>
+                           <div className="w-[1px] h-4 bg-[#27272a]" />
+                           <div className="w-[50px] text-center text-xs font-medium text-zinc-200">
+                             {Math.round(pdfScale * 100)}%
+                           </div>
+                           <div className="w-[1px] h-4 bg-[#27272a]" />
+                           <button 
+                             onClick={() => setPdfScale(Math.min(5, pdfScale + 0.25))}
+                             disabled={pdfScale >= 5}
+                             className="w-7 h-7 flex items-center justify-center bg-[#1e1e1e] hover:bg-[#27272a] hover:text-white text-zinc-400 disabled:opacity-30 disabled:hover:bg-[#1e1e1e] disabled:hover:text-zinc-400 transition-colors"
+                             title="Zoom in"
+                           >
+                             <Icon icon="ph:plus" className="w-4 h-4" />
+                           </button>
+                        </div>
+                        <div className="flex items-center box-border border border-[#27272a] rounded overflow-hidden">
+                           <button 
                              onClick={() => {
                                const page = document.getElementById(`pdf-page-${Math.max(1, currentPdfPage - 1)}`);
                                if (page) page.scrollIntoView({ behavior: 'smooth' });
@@ -4909,13 +4933,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         error={<div className="text-red-400 py-12">Failed to load PDF file.</div>}
                       >
                         {Array.from(new Array(pdfNumPages || 0), (el, index) => (
-                          <div key={`page_container_${index + 1}`} id={`pdf-page-${index + 1}`} className="relative pdf-page-wrapper">
+                          <div key={`page_container_${index + 1}`} id={`pdf-page-${index + 1}`} className="relative pdf-page-wrapper" style={{ transformOrigin: "top center" }}>
                             <Page
                               pageNumber={index + 1}
                               renderTextLayer={true}
                               renderAnnotationLayer={true}
                               className="bg-[#18181b] border border-[#27272a] text-[#e4e4e7] relative"
                               width={800}
+                              scale={pdfScale}
                             />
                           </div>
                         ))}
@@ -5033,12 +5058,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 {/* Repositioned Auto-Save Indicator next to SidePanel icon */}
                 <div className={`absolute top-3.5 z-30 transition-all duration-200 ${isSidePanelOpen ? 'right-4' : 'right-12'} flex items-center`}>
                   {docSaveStatus === 'saving' ? (
-                    <span className="flex items-center gap-1.5 text-zinc-400 bg-[#121212]/80 px-2.5 py-1.5 rounded-lg border border-[#27272a] backdrop-blur-sm select-none text-[11px] font-mono h-8">
+                    <span className="flex items-center gap-1.5 text-zinc-400 bg-[#121212]/80 px-2.5 py-1.5 rounded-lg backdrop-blur-sm select-none text-[11px] font-mono h-8">
                       <Icon icon="ph:spinner-gap" className="w-3.5 h-3.5 animate-spin text-zinc-400" />
                       <span>Saving...</span>
                     </span>
                   ) : docSaveStatus === 'saved' ? (
-                    <span className="flex items-center gap-1.5 text-emerald-500 font-medium bg-[#121212]/80 px-2.5 py-1.5 rounded-lg border border-[#27272a] backdrop-blur-sm select-none text-[11px] font-mono h-8">
+                    <span className="flex items-center gap-1.5 text-emerald-500 font-medium bg-[#121212]/80 px-2.5 py-1.5 rounded-lg backdrop-blur-sm select-none text-[11px] font-mono h-8">
                       <Icon icon="ph:cloud-check" className="w-4 h-4 text-emerald-500" />
                       <span>Saved to Cloud Workers</span>
                     </span>

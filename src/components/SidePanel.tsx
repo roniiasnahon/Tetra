@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { showToast } from './Toast';
 import { AudioVisualizerPlayer } from './AudioVisualizerPlayer';
 import { Icon } from '@iconify/react';
@@ -124,6 +126,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const [notesSavedStatus, setNotesSavedStatus] = useState<boolean>(false);
   const [isGeneratingNotes, setIsGeneratingNotes] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [isEditingNotes, setIsEditingNotes] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const lastLoadedDocRef = React.useRef<string | null>(null);
   const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -893,6 +896,15 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   </span>
                 )}
                 <button 
+                  onClick={() => setIsEditingNotes(!isEditingNotes)}
+                  disabled={!notes.trim() || isTyping}
+                  className="flex items-center gap-1 px-2 py-1 rounded bg-transparent text-[#a1a1aa] hover:text-[#f4f4f5] disabled:opacity-40 transition-all cursor-pointer border-none"
+                  title={isEditingNotes ? "View Formatted Notes" : "Edit Notes"}
+                >
+                  {isEditingNotes ? <Eye className="w-3 h-3" /> : <Edit2 className="w-3 h-3" />}
+                  <span>{isEditingNotes ? 'View' : 'Edit'}</span>
+                </button>
+                <button 
                   onClick={handleCopyNotes}
                   disabled={!notes.trim() || isTyping}
                   className="flex items-center gap-1 px-2 py-1 rounded bg-transparent text-[#a1a1aa] hover:text-[#f4f4f5] disabled:opacity-40 transition-all cursor-pointer border-none"
@@ -957,24 +969,38 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 </div>
               </div>
             ) : (
-                <textarea
-                  key={`notes-textarea-${tabId}`}
-                  id={`notes-textarea-${tabId}`}
-                  name={`notes-textarea-${tabId}`}
-                  autoComplete="off"
-                  disabled={isTyping}
-                  className="flex-1 w-full min-h-[300px] bg-transparent text-[#cfcfd4] p-4 pt-3 focus:outline-none text-[13px] leading-relaxed resize-none font-sans placeholder-[#52525b] border-none outline-none focus:ring-0 disabled:opacity-90 whitespace-pre-wrap break-words"
-                  placeholder={isTyping ? "Formatting study notes..." : "Paste relevant excerpts, frame your primary thesis, outline sections, or capture spontaneous ideas about this document..."}
-                  value={notes}
-                  onChange={(e) => handleNotesChange(e.target.value)}
-                  onBlur={() => {
-                    if (saveTimeoutRef.current) {
-                      clearTimeout(saveTimeoutRef.current);
-                    }
-                    saveNotesToDB(notes);
-                    setNotesSavedStatus(false);
-                  }}
-                />
+                <>
+                  {(!isEditingNotes || isTyping) && (notes.trim() || isTyping) ? (
+                    <div 
+                      className="flex-1 w-full min-h-[300px] text-[#cfcfd4] p-4 pt-3 text-[13px] leading-relaxed overflow-y-auto markdown-body
+                        [&>*:first-child]:mt-0"
+                      onDoubleClick={() => { if (!isTyping) setIsEditingNotes(true); }}
+                    >
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{notes}</ReactMarkdown>
+                      {isTyping && <span className="inline-block w-1.5 h-3 ml-1 bg-amber-400 animate-pulse" />}
+                    </div>
+                  ) : (
+                    <textarea
+                      key={`notes-textarea-${tabId}`}
+                      id={`notes-textarea-${tabId}`}
+                      name={`notes-textarea-${tabId}`}
+                      autoComplete="off"
+                      autoFocus={isEditingNotes}
+                      disabled={isTyping}
+                      className="flex-1 w-full min-h-[300px] bg-transparent text-[#cfcfd4] p-4 pt-3 focus:outline-none text-[13px] leading-relaxed resize-none font-sans placeholder-[#52525b] border-none outline-none focus:ring-0 disabled:opacity-90 whitespace-pre-wrap break-words"
+                      placeholder={isTyping ? "Formatting study notes..." : "Paste relevant excerpts, frame your primary thesis, outline sections, or capture spontaneous ideas about this document..."}
+                      value={notes}
+                      onChange={(e) => handleNotesChange(e.target.value)}
+                      onBlur={() => {
+                        if (saveTimeoutRef.current) {
+                          clearTimeout(saveTimeoutRef.current);
+                        }
+                        saveNotesToDB(notes);
+                        setNotesSavedStatus(false);
+                      }}
+                    />
+                  )}
+                </>
             )}
           </div>
         )}
