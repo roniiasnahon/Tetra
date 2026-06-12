@@ -89,6 +89,19 @@
         "uid": { "type": "string" }
       },
       "required": ["id", "fileId", "text", "page", "timestamp", "uid"]
+    },
+    "Visitor": {
+      "title": "Visitor",
+      "description": "Visitor who accessed a collaborative workspace.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "email": { "type": "string" },
+        "lastActive": { "type": "number" }
+      },
+      "required": ["id", "displayName", "lastActive"]
     }
   },
   "firestore": {
@@ -135,6 +148,10 @@
     "/shared_workspaces/{workspaceId}/annotations/{annotationId}": {
       "schema": "Annotation",
       "description": "Annotations belonging to a shared workspace."
+    },
+    "/shared_workspaces/{workspaceId}/visitors/{visitorId}": {
+      "schema": "Visitor",
+      "description": "Profile information of users who have accessed this collaborative workspace."
     },
     "/shared_libraries/{libraryId}/folders/{folderId}": {
       "schema": "Folder",

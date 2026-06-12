@@ -781,6 +781,80 @@ export default function App() {
     }
   };
 
+  const handlePrivacyChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newPrivacy = e.target.value as 'edit' | 'view';
+    setWorkspacePrivacy(newPrivacy);
+    if (sharedWorkspaceId) {
+      try {
+        await setDoc(doc(db, 'shared_workspaces', sharedWorkspaceId), {
+          privacy: newPrivacy
+        }, { merge: true });
+        showToast("Privacy updated successfully", "success");
+      } catch (err) {
+        console.error("Failed to update privacy:", err);
+        showToast("Failed to update privacy", "error");
+      }
+    }
+  };
+
+  const handleShareDocumentLink = async () => {
+    if (sharedWorkspaceId) {
+      const shareUrl = `${window.location.origin}${window.location.pathname}?workspace=${sharedWorkspaceId}`;
+      setGeneratedLink(shareUrl);
+      setGeneratedLinkType('workspace');
+      setIsShareModalOpen(true);
+    } else {
+      setIsShareModalOpen(true);
+      setIsSharingLoading(true);
+      setGeneratedLink('');
+      setGeneratedLinkType('workspace');
+      try {
+        const workspaceId = `w-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+        
+        const actualOwnerId = currentUser ? currentUser.uid : presenceIdRef.current;
+        await setDoc(doc(db, 'shared_workspaces', workspaceId), {
+          tabs: tabs || [],
+          activeTabId: activeTabId || 'initial-home',
+          messages: messages || [],
+          createdAt: Date.now(),
+          ownerId: actualOwnerId,
+          privacy: 'edit'
+        });
+
+        if (!currentUser) {
+          localStorage.setItem(`workspace_owner_${workspaceId}`, actualOwnerId);
+        }
+
+        for (const f of folders) {
+          await setDoc(doc(db, 'shared_workspaces', workspaceId, 'folders', f.id), {
+            id: f.id,
+            name: f.name,
+            createdAt: f.createdAt
+          });
+        }
+
+        for (const p of papers) {
+          const paperId = encodeURIComponent(p.title).replace(/\./g, '%2E');
+          await setDoc(doc(db, 'shared_workspaces', workspaceId, 'papers', paperId), {
+            ...p,
+            folderId: p.folderId || 'f1'
+          });
+        }
+
+        const shareUrl = `${window.location.origin}${window.location.pathname}?workspace=${workspaceId}`;
+        setGeneratedLink(shareUrl);
+        setSharedWorkspaceId(workspaceId);
+        window.history.replaceState(null, '', `?workspace=${workspaceId}`);
+      } catch (err) {
+        console.error("Failed to generate collaborative workspace:", err);
+        showToast("Could not generate workspace share link", "error");
+        setIsShareModalOpen(false);
+      } finally {
+        setIsSharingLoading(false);
+      }
+    }
+  };
+
   const handleGenerateLibraryShareLink = async () => {
     setIsSharingLoading(true);
     setGeneratedLink('');
@@ -831,6 +905,7 @@ export default function App() {
 
   // Link summarizer states
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [importType, setImportType] = useState<'url' | 'gdoc' | 'youtube' | null>(null);
   const [importUrl, setImportUrl] = useState('');
   const [isAnalyzingLink, setIsAnalyzingLink] = useState(false);
@@ -1063,6 +1138,10 @@ export default function App() {
   const [collaborators, setCollaborators] = useState<any[]>([]);
   const [presence, setPresence] = useState<Record<string, any>>({});
   const presenceIdRef = useRef(`guest-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`);
+  const lastLocalEditTimeRef = useRef<number>(0);
+  const [workspaceVisitors, setWorkspaceVisitors] = useState<any[]>([]);
+  const [workspacePrivacy, setWorkspacePrivacy] = useState<'edit' | 'view'>('edit');
+  const [workspaceOwnerId, setWorkspaceOwnerId] = useState<string | null>(null);
 
   const [isSessionLoaded, setIsSessionLoaded] = useState(false);
   const [isCloudMenuOpen, setIsCloudMenuOpen] = useState(false);
@@ -1393,6 +1472,8 @@ export default function App() {
     let unsubChats = () => {};
     let unsubAnnos = () => {};
     let unsubPresence = () => {};
+    let unsubWorkspaceDoc = () => {};
+    let unsubVisitors = () => {};
 
     const setupListeners = async (user: any) => {
       // Clean up previous listeners
@@ -1401,6 +1482,8 @@ export default function App() {
       unsubChats();
       unsubAnnos();
       unsubPresence();
+      unsubWorkspaceDoc();
+      unsubVisitors();
 
       if (sharedWorkspaceId) {
         // --- 1. COLLABORATIVE WORKSPACE MODE ---
@@ -1518,26 +1601,99 @@ export default function App() {
           console.error("Collaborative presence sync error:", error);
         });
 
-        // Load collaborative session document
-        try {
-          const sessionDoc = await getDocFromServer(doc(db, 'shared_workspaces', sharedWorkspaceId));
-          if (sessionDoc.exists()) {
-            const data = sessionDoc.data();
-            if (data.tabs && Array.isArray(data.tabs) && data.tabs.length > 0) {
-              setTabs(data.tabs);
+        // Load and sync collaborative session document in real time
+        unsubWorkspaceDoc = onSnapshot(doc(db, 'shared_workspaces', sharedWorkspaceId), (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            const now = Date.now();
+            const isTypingActiveTab = now - lastLocalEditTimeRef.current < 2000;
+            
+            if (data.tabs && Array.isArray(data.tabs)) {
+              setTabs(prev => {
+                if (!isSessionLoaded) return data.tabs;
+                return data.tabs.map((incomingTab: Tab) => {
+                  const localTab = prev.find(t => t.id === incomingTab.id);
+                  if (localTab) {
+                    if (incomingTab.id === activeTabId && isTypingActiveTab) {
+                      return localTab;
+                    }
+                  }
+                  return incomingTab;
+                });
+              });
+
+              if (!isTypingActiveTab) {
+                const incomingActiveTab = data.tabs.find((t: Tab) => t.id === activeTabId);
+                if (incomingActiveTab) {
+                  if (editorRef.current && incomingActiveTab.content !== editorRef.current.innerHTML) {
+                    editorRef.current.innerHTML = incomingActiveTab.content || '';
+                    lastContentRef.current = incomingActiveTab.content || '';
+                    setDocumentContent(incomingActiveTab.content || '');
+                  }
+                  if (incomingActiveTab.title !== documentTitle) {
+                    setDocumentTitle(incomingActiveTab.title || 'Untitled');
+                  }
+                }
+              }
             }
-            if (data.activeTabId) {
+
+            if (data.activeTabId && data.activeTabId !== activeTabId && !isTypingActiveTab) {
               setActiveTabId(data.activeTabId);
             }
+
             if (data.messages && Array.isArray(data.messages)) {
               setMessages(data.messages);
             }
+            
+            if (data.privacy) setWorkspacePrivacy(data.privacy);
+            if (data.ownerId) setWorkspaceOwnerId(data.ownerId);
           }
-        } catch (error) {
-          console.error("Failed loading collaborative workspace session state:", error);
-        } finally {
-          setIsSessionLoaded(true);
-        }
+          if (!isSessionLoaded) {
+            setIsSessionLoaded(true);
+          }
+        }, (error) => {
+          console.error("Collaborative session snapshot sync error:", error);
+          if (!isSessionLoaded) {
+            setIsSessionLoaded(true);
+          }
+        });
+
+        // Sync list of workspace visitors/contributors
+        const visitorsColRef = collection(db, 'shared_workspaces', sharedWorkspaceId, 'visitors');
+        unsubVisitors = onSnapshot(visitorsColRef, (snapshot) => {
+          const loadedVisitors: any[] = [];
+          snapshot.forEach((doc) => {
+            loadedVisitors.push({
+              id: doc.id,
+              ...doc.data()
+            });
+          });
+          setWorkspaceVisitors(loadedVisitors);
+        }, (error) => {
+          console.error("Collaborative visitors sync error:", error);
+        });
+
+        // Write this visitor's profile to visitors collection
+        const pid = presenceIdRef.current;
+        const visitorId = user ? user.uid : pid;
+        const visitorRef = doc(db, 'shared_workspaces', sharedWorkspaceId, 'visitors', visitorId);
+        
+        let pColor = 'bg-zinc-500';
+        try {
+          const colors = ['bg-red-500', 'bg-blue-500', 'bg-emerald-500', 'bg-purple-500', 'bg-pink-500', 'bg-amber-500'];
+          pColor = colors[parseInt(pid.replace(/\D/g, '') || '0') % colors.length] || 'bg-zinc-500';
+        } catch {}
+
+        let fallbackName = user ? (user.displayName || user.email?.split('@')[0]) : `Guest ${pid.substr(-4)}`;
+        fallbackName = fallbackName || 'Anonymous';
+
+        setDoc(visitorRef, {
+          displayName: fallbackName,
+          photoURL: user ? user.photoURL : null,
+          email: user ? user.email : null,
+          color: pColor,
+          lastActive: Date.now()
+        }, { merge: true }).catch(() => {});
 
       } else if (sharedLibraryId) {
         // --- 2. PUBLIC SHARED LIBRARY VIEW MODE ---
@@ -1853,6 +2009,9 @@ export default function App() {
       unsubPapers();
       unsubChats();
       unsubAnnos();
+      unsubPresence();
+      unsubWorkspaceDoc();
+      unsubVisitors();
     };
 
     return () => {
@@ -2170,7 +2329,7 @@ export default function App() {
           activeTabId,
           messages: cleanMessages
         }, { merge: true }).catch(err => console.error("Workspace collaborative sync failed:", err));
-      }, 3000);
+      }, 800);
       return () => clearTimeout(handler);
     } else if (currentUser) {
       const handler = setTimeout(() => {
@@ -3088,6 +3247,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
     const orderMultiplier = sortOrder === 'asc' ? 1 : -1;
     return valA.localeCompare(valB) * orderMultiplier;
   });
+
+  const isWorkspaceOwner = currentUser 
+    ? workspaceOwnerId === currentUser.uid 
+    : (workspaceOwnerId === presenceIdRef.current || (sharedWorkspaceId && workspaceOwnerId === localStorage.getItem(`workspace_owner_${sharedWorkspaceId}`)));
+
+  const isReadOnly = (sharedLibraryId !== null) || (sharedWorkspaceId !== null && workspacePrivacy === 'view' && !isWorkspaceOwner);
 
   if (isAuthLoading) {
     return (
@@ -5046,6 +5211,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 </div>
               )}
 
+
+
               {/* Zero-Glow Import Link Modal */}
               {importModalOpen && (
                 <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/75 z-40 flex items-center justify-center p-4">
@@ -5550,11 +5717,22 @@ Once you have content, I can help you draft sections, summarize findings, or for
                          </div>
                        )}
 
+                       <button
+                         disabled={isSharingLoading}
+                         onClick={handleShareDocumentLink}
+                         className="flex items-center gap-1.5 text-zinc-300 hover:text-white bg-[#1a1a1c] hover:bg-[#252528] border border-[#2d2d30] transition-colors px-3 py-1.5 rounded-lg select-none text-[11px] font-semibold h-8 cursor-pointer focus:outline-none disabled:opacity-40 select-none mr-1"
+                         title="Share Document / Collab Link"
+                       >
+                         <Icon icon="ph:share-network" className="w-[14px] h-[14px]" />
+                         <span>Share</span>
+                       </button>
+
                        {!isSidePanelOpen && (
                          <button
                            onClick={() => setIsSidePanelOpen(true)}
                            className="p-1.5 text-[#a1a1aa] hover:text-[#f4f4f5] transition-all cursor-pointer rounded-md hover:bg-[#27272a]"
                            title="Toggle Side Panel"
+                           id="pdf-panel-toggle"
                          >
                            <PanelRight className="w-[18px] h-[18px]" />
                          </button>
@@ -5944,9 +6122,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
             ) : (
               <div className="relative flex-1 flex flex-col h-full overflow-hidden">
                 {/* Repositioned Auto-Save Indicator next to SidePanel icon */}
-                <div className={`absolute top-3.5 z-30 transition-all duration-200 ${isSidePanelOpen ? 'right-4' : 'right-12'} flex items-center`}>
+                <div className={`absolute top-3.5 z-30 transition-all duration-200 ${isSidePanelOpen ? 'right-4' : 'right-12'} flex items-center gap-2.5`}>
                   {sharedWorkspaceId && (
-                    <div className="flex -space-x-1.5 mr-3 items-center">
+                    <div className="flex -space-x-1.5 mr-1 items-center">
                       {Object.entries(presence)
                          .filter(([k, p]) => k !== presenceIdRef.current && p.activeTabId === activeTabId)
                          .map(([k, p]) => (
@@ -5972,6 +6150,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       <span>Saved to Cloud Workers</span>
                     </span>
                   ) : null}
+
+                  <button
+                    disabled={isSharingLoading}
+                    onClick={handleShareDocumentLink}
+                    className="flex items-center gap-1.5 text-zinc-300 hover:text-white bg-[#1a1a1c] hover:bg-[#252528] border border-[#2d2d30] transition-colors px-3 py-1.5 rounded-lg select-none text-[11.5px] font-semibold h-8 cursor-pointer focus:outline-none disabled:opacity-40"
+                    title="Share Document / Collab Link"
+                  >
+                    <Icon icon="ph:share-network" className="w-3.5 h-3.5" />
+                    <span>Share</span>
+                  </button>
                 </div>
                 {!isSidePanelOpen && (
                   <button
@@ -6323,9 +6511,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     id={`doc-title-${activeTabId}`}
                     name={`doc-title-${activeTabId}`}
                     autoComplete="off"
+                    readOnly={isReadOnly}
                     value={documentTitle}
                     onChange={(e) => {
                       const newTitle = e.target.value;
+                      lastLocalEditTimeRef.current = Date.now();
                       setDocumentTitle(newTitle);
                       setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, title: newTitle } : t));
                       setDocSaveStatus('saving');
@@ -6342,13 +6532,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   <div className="min-h-[400px]">
                     <div
                       ref={editorRef}
-                      contentEditable
+                      contentEditable={!isReadOnly}
                       suppressContentEditableWarning
-                      data-placeholder="Start writing..."
+                      data-placeholder={isReadOnly ? "" : "Start writing..."}
                       className="w-full bg-transparent text-inherit outline-none min-h-[400px] leading-relaxed focus:outline-none markdown-body"
                       onInput={(e) => {
                         const html = e.currentTarget.innerHTML;
                         lastContentRef.current = html;
+                        lastLocalEditTimeRef.current = Date.now();
                         setDocumentContent(html);
                         setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, content: html } : t));
                         setDocSaveStatus('saving');
@@ -6943,6 +7134,173 @@ Once you have content, I can help you draft sections, summarize findings, or for
               Logging out...
             </h2>
           </motion.div>
+        </div>
+      )}
+
+      {/* Zero-Glow Multi-User Share Modal */}
+      {isShareModalOpen && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4">
+          <div className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-lg p-6 relative animate-scale-up text-zinc-300">
+            <button 
+              onClick={() => setIsShareModalOpen(false)}
+              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer focus:outline-none"
+            >
+              <Icon icon="ph:x" className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-2.5 mb-1.5 text-[#f4f4f5]">
+              <Icon icon="ph:share-network-fill" className="w-5 h-5 text-zinc-400" />
+              <h3 className="text-base font-semibold leading-normal truncate">
+                Share &ldquo;{documentTitle || 'Untitled Document'}&rdquo;
+              </h3>
+            </div>
+            <p className="text-zinc-400 text-xs mb-5">
+              Invite contributors to review and edit this document in real-time.
+            </p>
+
+            {/* General Access */}
+            {generatedLinkType === 'workspace' && (
+              <div className="space-y-3 mb-5 bg-[#18181b]/30 p-4 rounded-xl border border-[#27272a]/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-[#1c1c1e] flex items-center justify-center shrink-0 text-zinc-300 border border-[#27272a]">
+                    <Icon icon={workspacePrivacy === 'edit' ? "ph:globe-hemisphere-east" : "ph:lock"} className="w-5 h-5 text-zinc-400" />
+                  </div>
+                  <div>
+                    <h4 className="text-[13px] font-semibold text-[#f4f4f5] leading-none mb-1">General access</h4>
+                    <p className="text-[10.5px] text-zinc-500">
+                      {workspacePrivacy === 'edit' 
+                        ? 'Anyone with this link can co-edit' 
+                        : 'Anyone with this link can only view'}
+                    </p>
+                  </div>
+                </div>
+                <select 
+                  value={workspacePrivacy}
+                  onChange={handlePrivacyChange}
+                  disabled={workspaceOwnerId !== null && !isWorkspaceOwner}
+                  className="bg-[#1c1c1e] text-[11px] cursor-pointer text-zinc-200 border border-[#2d2d30] rounded-lg px-2.5 py-1.5 outline-none hover:bg-[#27272a] transition-all focus:outline-none w-full sm:w-auto min-w-[100px]"
+                >
+                  <option value="view">Viewer</option>
+                  <option value="edit">Editor</option>
+                </select>
+              </div>
+            )}
+
+            {/* Copier Input Bar */}
+            <div className="space-y-1.5 mb-5">
+              <label className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Shareable link</label>
+              <div className="bg-[#09090b] border border-[#27272a] rounded-xl p-2.5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-grow min-w-0">
+                  <Icon icon="ph:link" className="w-[15px] h-[15px] text-zinc-500 shrink-0" />
+                  {isSharingLoading ? (
+                    <div className="flex items-center gap-2 text-zinc-500 text-[11px] font-mono">
+                      <Icon icon="ph:spinner-gap" className="w-3.5 h-3.5 animate-spin text-zinc-500" />
+                      <span>Generating shareable path...</span>
+                    </div>
+                  ) : (
+                    <input
+                      type="text"
+                      readOnly
+                      value={generatedLink}
+                      onClick={(e) => (e.target as HTMLInputElement).select()}
+                      className="bg-transparent text-[#f4f4f5] font-mono text-[11px] outline-none border-none p-0 w-full select-all cursor-text focus:outline-none"
+                      placeholder="Link will be populated below"
+                    />
+                  )}
+                </div>
+                {!isSharingLoading && generatedLink && (
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(generatedLink);
+                      showToast("Copied link to clipboard!", "success");
+                    }}
+                    className="shrink-0 bg-zinc-200 hover:bg-white text-[#09090b] font-semibold text-[11px] px-3 py-1.5 rounded-lg cursor-pointer transition-colors focus:outline-none"
+                  >
+                    Copy Link
+                  </button>
+                )}
+              </div>
+              {workspaceOwnerId !== null && !isWorkspaceOwner && (
+                <p className="text-[9.5px] text-zinc-500 italic mt-1 leading-normal">
+                  Only the owner can modify privacy controls.
+                </p>
+              )}
+            </div>
+
+            {/* People with Access Display */}
+            <div className="border-t border-[#27272a] pt-4 mb-5">
+              <h4 className="text-[11.5px] font-semibold text-[#f4f4f5] mb-3">
+                People with access
+              </h4>
+
+              <div className="max-h-[140px] overflow-y-auto custom-scrollbar-v space-y-2.5 pr-1">
+                {/* Current User */}
+                <div className="flex items-center justify-between py-1 px-1 rounded-lg">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center shrink-0 border border-[#27272a] overflow-hidden text-[#e4e4e7]">
+                      {currentUser?.photoURL ? (
+                          <img src={currentUser.photoURL} alt="You" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                          <span className="text-xs font-bold uppercase">
+                            {(currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Y')[0]}
+                          </span>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold text-[#f4f4f5] leading-none mb-1">
+                        {currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Guest user'} (You)
+                      </p>
+                      <p className="text-[9.5px] text-zinc-500">{currentUser?.email || 'Guest Session'}</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-mono text-zinc-400 bg-zinc-800/40 px-2 py-0.5 rounded border border-[#27272a]">Owner</span>
+                </div>
+
+                {/* Other Collaborative Space Visitors */}
+                {workspaceVisitors
+                  .filter(visitor => {
+                    const visitorId = currentUser ? currentUser.uid : presenceIdRef.current;
+                    return visitor.id !== visitorId;
+                  })
+                  .map(visitor => (
+                    <div key={visitor.id} className="flex items-center justify-between py-1 px-1 rounded-lg">
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-8 h-8 rounded-full ${visitor.color || 'bg-zinc-800'} flex items-center justify-center shrink-0 border border-[#27272a] overflow-hidden text-[#e4e4e7]`}>
+                          {visitor.photoURL ? (
+                            <img src={visitor.photoURL} alt={visitor.displayName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <span className="text-xs font-bold uppercase">
+                              {visitor.displayName?.charAt(0)}
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-semibold text-[#f4f4f5] leading-none mb-1">{visitor.displayName}</p>
+                          <p className="text-[9.5px] text-zinc-500">{visitor.email || 'Guest co-author'}</p>
+                        </div>
+                      </div>
+                      <span className="text-[9.5px] font-medium text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/10">Joined</span>
+                    </div>
+                  ))}
+
+                {workspaceVisitors.filter(visitor => {
+                  const visitorId = currentUser ? currentUser.uid : presenceIdRef.current;
+                  return visitor.id !== visitorId;
+                }).length === 0 && (
+                  <p className="text-zinc-500 text-[10.5px] py-1 text-center italic">No co-authors in this session yet.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-3 border-t border-[#27272a]">
+              <button
+                onClick={() => setIsShareModalOpen(false)}
+                className="px-4 py-2 bg-[#27272a] hover:bg-[#323235] text-zinc-200 text-xs font-semibold rounded-lg cursor-pointer transition-colors focus:outline-none"
+              >
+                Done
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -166,8 +166,11 @@ service cloud.firestore {
         allow delete: if isValidId(workspaceId) && isValidId(annotationId);
       }
       match /presence/{memberId} {
-        allow list, get: if isValidId(workspaceId);
-        allow create, update, delete: if isValidId(workspaceId);
+        allow read, write: if true;
+      }
+
+      match /visitors/{visitorId} {
+        allow read, write: if true;
       }
     }
 
