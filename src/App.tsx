@@ -642,6 +642,7 @@ const formatAbstractText = (text: string) => {
 };
 
 export default function App() {
+  const isReadOnly = false;
   const cleanTitleStr = (t?: string) =>
     t ? t.replace(/[*#]/g, "").trim() : "";
 
@@ -929,187 +930,6 @@ export default function App() {
     "workspace" | "library" | null
   >(null);
 
-  const handleGenerateWorkspaceShareLink = async () => {
-    setIsSharingLoading(true);
-    setGeneratedLink("");
-    try {
-      const workspaceId = `w-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-
-      // Write current tabs, active tab, messages to `/shared_workspaces/{workspaceId}`
-      await setDoc(doc(db, "shared_workspaces", workspaceId), {
-        tabs: tabs || [],
-        activeTabId: activeTabId || "initial-home",
-        messages: messages || [],
-        createdAt: Date.now(),
-      });
-
-      // Clone folders
-      for (const f of folders) {
-        await setDoc(
-          doc(db, "shared_workspaces", workspaceId, "folders", f.id),
-          {
-            id: f.id,
-            name: f.name,
-            createdAt: f.createdAt,
-          },
-        );
-      }
-
-      // Clone papers
-      for (const p of papers) {
-        const paperId = encodeURIComponent(p.title).replace(/\./g, "%2E");
-        await setDoc(
-          doc(db, "shared_workspaces", workspaceId, "papers", paperId),
-          {
-            ...p,
-            folderId: p.folderId || "f1",
-          },
-        );
-      }
-
-      const shareUrl = `${window.location.origin}${window.location.pathname}?workspace=${workspaceId}`;
-      setGeneratedLink(shareUrl);
-      setGeneratedLinkType("workspace");
-      showToast("Workspace Share Link generated successfully!", "success");
-    } catch (err) {
-      console.error("Failed to generate collaborative workspace:", err);
-      showToast("Could not generate workspace share link", "error");
-    } finally {
-      setIsSharingLoading(false);
-    }
-  };
-
-  const handlePrivacyChange = async (
-    e: React.ChangeEvent<HTMLSelectElement>,
-  ) => {
-    const newPrivacy = e.target.value as "edit" | "view";
-    setWorkspacePrivacy(newPrivacy);
-    if (sharedWorkspaceId) {
-      try {
-        await setDoc(
-          doc(db, "shared_workspaces", sharedWorkspaceId),
-          {
-            privacy: newPrivacy,
-          },
-          { merge: true },
-        );
-        showToast("Privacy updated successfully", "success");
-      } catch (err) {
-        console.error("Failed to update privacy:", err);
-        showToast("Failed to update privacy", "error");
-      }
-    }
-  };
-
-  const handleShareDocumentLink = async () => {
-    if (sharedWorkspaceId) {
-      const shareUrl = `${window.location.origin}${window.location.pathname}?workspace=${sharedWorkspaceId}`;
-      setGeneratedLink(shareUrl);
-      setGeneratedLinkType("workspace");
-      setIsShareModalOpen(true);
-    } else {
-      setIsShareModalOpen(true);
-      setIsSharingLoading(true);
-      setGeneratedLink("");
-      setGeneratedLinkType("workspace");
-      try {
-        const workspaceId = `w-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-
-        const actualOwnerId = currentUser
-          ? currentUser.uid
-          : presenceIdRef.current;
-        await setDoc(doc(db, "shared_workspaces", workspaceId), {
-          tabs: tabs || [],
-          activeTabId: activeTabId || "initial-home",
-          messages: messages || [],
-          createdAt: Date.now(),
-          ownerId: actualOwnerId,
-          privacy: "edit",
-        });
-
-        if (!currentUser) {
-          localStorage.setItem(`workspace_owner_${workspaceId}`, actualOwnerId);
-        }
-
-        for (const f of folders) {
-          await setDoc(
-            doc(db, "shared_workspaces", workspaceId, "folders", f.id),
-            {
-              id: f.id,
-              name: f.name,
-              createdAt: f.createdAt,
-            },
-          );
-        }
-
-        for (const p of papers) {
-          const paperId = encodeURIComponent(p.title).replace(/\./g, "%2E");
-          await setDoc(
-            doc(db, "shared_workspaces", workspaceId, "papers", paperId),
-            {
-              ...p,
-              folderId: p.folderId || "f1",
-            },
-          );
-        }
-
-        const shareUrl = `${window.location.origin}${window.location.pathname}?workspace=${workspaceId}`;
-        setGeneratedLink(shareUrl);
-        setSharedWorkspaceId(workspaceId);
-        window.history.replaceState(null, "", `?workspace=${workspaceId}`);
-      } catch (err) {
-        console.error("Failed to generate collaborative workspace:", err);
-        showToast("Could not generate workspace share link", "error");
-        setIsShareModalOpen(false);
-      } finally {
-        setIsSharingLoading(false);
-      }
-    }
-  };
-
-  const handleGenerateLibraryShareLink = async () => {
-    setIsSharingLoading(true);
-    setGeneratedLink("");
-    try {
-      const libraryId = `lib-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-
-      // Create library doc to ensure existence
-      await setDoc(doc(db, "shared_libraries", libraryId), {
-        createdAt: Date.now(),
-      });
-
-      // Clone folders
-      for (const f of folders) {
-        await setDoc(doc(db, "shared_libraries", libraryId, "folders", f.id), {
-          id: f.id,
-          name: f.name,
-          createdAt: f.createdAt,
-        });
-      }
-
-      // Clone papers
-      for (const p of papers) {
-        const paperId = encodeURIComponent(p.title).replace(/\./g, "%2E");
-        await setDoc(
-          doc(db, "shared_libraries", libraryId, "papers", paperId),
-          {
-            ...p,
-            folderId: p.folderId || "f1",
-          },
-        );
-      }
-
-      const shareUrl = `${window.location.origin}${window.location.pathname}?library=${libraryId}`;
-      setGeneratedLink(shareUrl);
-      setGeneratedLinkType("library");
-      showToast("Public Library Share Link generated successfully!", "success");
-    } catch (err) {
-      console.error("Failed to share library:", err);
-      showToast("Could not generate library share link", "error");
-    } finally {
-      setIsSharingLoading(false);
-    }
-  };
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [isAddDropdownOpen, setIsAddDropdownOpen] = useState(false);
   const [addDropdownNested, setAddDropdownNested] = useState<string | null>(
@@ -1370,45 +1190,10 @@ export default function App() {
       return true;
     }
   });
-  const [sharedWorkspaceId, setSharedWorkspaceId] = useState<string | null>(
-    () => {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        return params.get("workspace");
-      } catch {
-        return null;
-      }
-    },
-  );
-  const [sharedLibraryId, setSharedLibraryId] = useState<string | null>(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      return params.get("library");
-    } catch {
-      return null;
-    }
-  });
-  const [collaborators, setCollaborators] = useState<any[]>([]);
-  const [presence, setPresence] = useState<Record<string, any>>({});
-  const presenceIdRef = useRef(
-    localStorage.getItem("cosmi_presence_id") ||
-      `guest-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-  );
 
-  // Initialize once
-  useEffect(() => {
-    if (!localStorage.getItem("cosmi_presence_id")) {
-      localStorage.setItem("cosmi_presence_id", presenceIdRef.current);
-    }
-  }, []);
   const lastLocalEditTimeRef = useRef<number>(0);
   const lastSyncTimeRef = useRef<number>(0);
   const lastReceivedSnapshotTabsStr = useRef<string>("");
-  const [workspaceVisitors, setWorkspaceVisitors] = useState<any[]>([]);
-  const [workspacePrivacy, setWorkspacePrivacy] = useState<"edit" | "view">(
-    "edit",
-  );
-  const [workspaceOwnerId, setWorkspaceOwnerId] = useState<string | null>(null);
 
   const [isSessionLoaded, setIsSessionLoaded] = useState(false);
   const [isCloudMenuOpen, setIsCloudMenuOpen] = useState(false);
@@ -1508,29 +1293,7 @@ export default function App() {
   // Database helper wrappers to sync automatically to Firestore or guest local state
   const dbSetFolder = async (folder: FolderItem) => {
     const isRename = folders.some((f) => f.id === folder.id);
-    if (sharedWorkspaceId) {
-      try {
-        await setDoc(
-          doc(db, "shared_workspaces", sharedWorkspaceId, "folders", folder.id),
-          {
-            id: folder.id,
-            name: folder.name,
-            createdAt: folder.createdAt,
-          },
-        );
-        showToast(
-          isRename
-            ? `Folder renamed to "${folder.name}"`
-            : `Folder "${folder.name}" created successfully`,
-          "success",
-        );
-      } catch (error) {
-        showToast(
-          `Failed to save folder: ${error instanceof Error ? error.message : String(error)}`,
-          "error",
-        );
-      }
-    } else if (currentUser) {
+    if (currentUser) {
       try {
         await setDoc(doc(db, "users", currentUser.uid, "folders", folder.id), {
           id: folder.id,
@@ -1603,28 +1366,7 @@ export default function App() {
       });
     }
 
-    if (sharedWorkspaceId) {
-      try {
-        await deleteDoc(
-          doc(db, "shared_workspaces", sharedWorkspaceId, "folders", folderId),
-        );
-        for (const p of papersToDelete) {
-          const paperId = encodeURIComponent(p.title).replace(/\./g, "%2E");
-          await deleteDoc(
-            doc(db, "shared_workspaces", sharedWorkspaceId, "papers", paperId),
-          );
-        }
-        showToast(
-          `Folder "${folderName}" and its documents deleted successfully`,
-          "success",
-        );
-      } catch (error) {
-        showToast(
-          `Failed to delete folder: ${error instanceof Error ? error.message : String(error)}`,
-          "error",
-        );
-      }
-    } else if (currentUser) {
+    if (currentUser) {
       try {
         await deleteDoc(doc(db, "users", currentUser.uid, "folders", folderId));
         for (const p of papersToDelete) {
@@ -1663,47 +1405,7 @@ export default function App() {
       (p) => p.title === paper.title && p.folderId !== paper.folderId,
     );
 
-    if (sharedWorkspaceId) {
-      try {
-        await setDoc(
-          doc(db, "shared_workspaces", sharedWorkspaceId, "papers", paperId),
-          {
-            author: paper.author || "",
-            title: paper.title || "",
-            description: paper.description || "",
-            url: paper.url || "",
-            added: paper.added || "",
-            fullTextStatus: paper.fullTextStatus || "",
-            viewed: paper.viewed || "",
-            fileType: paper.fileType || "",
-            summary: paper.summary || "",
-            fileId: paper.fileId || "",
-            mimetype: paper.mimetype || "",
-            extractedText: paper.extractedText || "",
-            folderId: paper.folderId || "",
-            notes: paper.notes || "",
-          },
-        );
-
-        if (!silent) {
-          if (hasFolderChanged) {
-            const destFolder =
-              folders.find((f) => f.id === paper.folderId)?.name || "Default";
-            showToast(`Moved "${paper.title}" to ${destFolder}`, "success");
-          } else if (isNew) {
-            showToast(
-              `Document "${paper.title}" added to workspace`,
-              "success",
-            );
-          }
-        }
-      } catch (error) {
-        showToast(
-          `Failed to save document: ${error instanceof Error ? error.message : String(error)}`,
-          "error",
-        );
-      }
-    } else if (currentUser) {
+    if (currentUser) {
       try {
         await setDoc(doc(db, "users", currentUser.uid, "papers", paperId), {
           author: paper.author || "",
@@ -1815,19 +1517,7 @@ export default function App() {
       return updated;
     });
 
-    if (sharedWorkspaceId) {
-      try {
-        await deleteDoc(
-          doc(db, "shared_workspaces", sharedWorkspaceId, "papers", paperId),
-        );
-        showToast(`Document "${paperTitle}" deleted successfully`, "success");
-      } catch (error) {
-        showToast(
-          `Failed to delete document: ${error instanceof Error ? error.message : String(error)}`,
-          "error",
-        );
-      }
-    } else if (currentUser) {
+    if (currentUser) {
       try {
         await deleteDoc(doc(db, "users", currentUser.uid, "papers", paperId));
         showToast(`Document "${paperTitle}" deleted successfully`, "success");
@@ -1846,18 +1536,13 @@ export default function App() {
       setPapers((prev) => prev.filter((p) => p.title !== paperTitle));
       showToast(`Document "${paperTitle}" deleted successfully`, "success");
     }
-  };
-
-  // Real-time Firestore synchronization effect
+  }  // Real-time Firestore synchronization effect
   useEffect(() => {
     let unsubscribeUser = () => {};
     let unsubFolders = () => {};
     let unsubPapers = () => {};
     let unsubChats = () => {};
     let unsubAnnos = () => {};
-    let unsubPresence = () => {};
-    let unsubWorkspaceDoc = () => {};
-    let unsubVisitors = () => {};
 
     const setupListeners = async (user: any) => {
       // Clean up previous listeners
@@ -1865,808 +1550,165 @@ export default function App() {
       unsubPapers();
       unsubChats();
       unsubAnnos();
-      unsubPresence();
-      unsubWorkspaceDoc();
-      unsubVisitors();
 
-      if (sharedWorkspaceId) {
-        // --- 1. COLLABORATIVE WORKSPACE MODE ---
-        // Subscribe to folders in shared workspace
-        const foldersColRef = collection(
-          db,
-          "shared_workspaces",
-          sharedWorkspaceId,
-          "folders",
-        );
-        unsubFolders = onSnapshot(
-          foldersColRef,
-          (snapshot) => {
-            const loadedFolders: FolderItem[] = [];
-            snapshot.forEach((doc) => {
-              const data = doc.data();
-              loadedFolders.push({
-                id: doc.id,
-                name: data.name || "Untitled Folder",
-                createdAt: data.createdAt || Date.now(),
-              });
-            });
-            if (loadedFolders.length > 0) {
-              setFolders(loadedFolders);
-            } else {
-              // Seed a default folder if empty
-              const defaultFolder: FolderItem = {
-                id: "f1",
-                name: "Shared Research",
-                createdAt: Date.now(),
-              };
-              setDoc(
-                doc(
-                  db,
-                  "shared_workspaces",
-                  sharedWorkspaceId,
-                  "folders",
-                  defaultFolder.id,
-                ),
-                defaultFolder,
-              );
-            }
-          },
-          (error) => {
-            console.error("Collaborative folders sync error:", error);
-          },
-        );
-
-        // Subscribe to papers in shared workspace
-        const papersColRef = collection(
-          db,
-          "shared_workspaces",
-          sharedWorkspaceId,
-          "papers",
-        );
-        unsubPapers = onSnapshot(
-          papersColRef,
-          (snapshot) => {
-            const loadedPapers: PaperItem[] = [];
-            snapshot.forEach((doc) => {
-              const data = doc.data();
-              loadedPapers.push({
-                author:
-                  typeof data.author === "string"
-                    ? data.author
-                    : String(data.author || ""),
-                title:
-                  typeof data.title === "string"
-                    ? data.title
-                    : String(data.title || ""),
-                description:
-                  typeof data.description === "string"
-                    ? data.description
-                    : String(data.description || ""),
-                url: data.url || "",
-                added: data.added || "",
-                fullTextStatus: data.fullTextStatus || "",
-                viewed: data.viewed || "",
-                fileType: data.fileType || "",
-                summary: data.summary || "",
-                fileId: data.fileId || "",
-                mimetype: data.mimetype || "",
-                extractedText: data.extractedText || "",
-                folderId: data.folderId || "",
-                notes: data.notes || "",
-              });
-            });
-            setPapers(loadedPapers);
-          },
-          (error) => {
-            console.error("Collaborative papers sync error:", error);
-          },
-        );
-
-        // Subscribe to chats in shared workspace
-        const chatsColRef = collection(
-          db,
-          "shared_workspaces",
-          sharedWorkspaceId,
-          "chats",
-        );
-        unsubChats = onSnapshot(
-          chatsColRef,
-          (snapshot) => {
-            const loadedChats: Tab[] = [];
-            snapshot.forEach((doc) => {
-              const data = doc.data();
-              loadedChats.push({
-                id: doc.id,
-                type: "chat",
-                title: data.title || "Untitled",
-                messages: data.messages || [],
-              });
-            });
-            setAllChats(loadedChats);
-          },
-          (error) => {
-            console.error("Collaborative chats sync error:", error);
-          },
-        );
-
-        // Subscribe to annotations in shared workspace
-        const annosColRef = collection(
-          db,
-          "shared_workspaces",
-          sharedWorkspaceId,
-          "annotations",
-        );
-        unsubAnnos = onSnapshot(
-          annosColRef,
-          (snapshot) => {
-            const groupedAnnos: Record<string, any[]> = {};
-            snapshot.forEach((doc) => {
-              const data = doc.data();
-              const fileId = data.fileId || "default";
-              if (!groupedAnnos[fileId]) {
-                groupedAnnos[fileId] = [];
-              }
-              groupedAnnos[fileId].push({
-                id: doc.id,
-                fileId,
-                text: data.text || "",
-                comment: data.comment || "",
-                page: data.page || 1,
-                color: data.color || "#fef08a",
-                timestamp: data.timestamp || Date.now(),
-              });
-            });
-
-            Object.keys(groupedAnnos).forEach((fileId) => {
-              localStorage.setItem(
-                `annotations_${fileId}`,
-                JSON.stringify(groupedAnnos[fileId]),
-              );
-            });
-
-            window.dispatchEvent(new Event("annotationsUpdated"));
-          },
-          (error) => {
-            console.error("Collaborative annotations sync error:", error);
-          },
-        );
-
-        const presenceColRef = collection(
-          db,
-          "shared_workspaces",
-          sharedWorkspaceId,
-          "presence",
-        );
-        unsubPresence = onSnapshot(
-          presenceColRef,
-          (snapshot) => {
-            const loadedPresence: Record<string, any> = {};
-            const now = Date.now();
-            snapshot.forEach((doc) => {
-              const data = doc.data();
-              if (now - (data.lastActive || 0) < 5 * 60 * 1000) {
-                loadedPresence[doc.id] = data;
-              }
-            });
-            setPresence(loadedPresence);
-          },
-          (error) => {
-            console.error("Collaborative presence sync error:", error);
-          },
-        );
-
-        // Load and sync collaborative session document in real time
-        unsubWorkspaceDoc = onSnapshot(
-          doc(db, "shared_workspaces", sharedWorkspaceId),
-          (snapshot) => {
-            if (snapshot.exists()) {
-              const data = snapshot.data();
-              const now = Date.now();
-              const isTypingActiveTab =
-                now - lastLocalEditTimeRef.current < 5000;
-
-              if (data.tabs && Array.isArray(data.tabs)) {
-                setTabs((prev) => {
-                  if (!isSessionLoaded) {
-                    lastReceivedSnapshotTabsStr.current = JSON.stringify(data.tabs);
-                    return data.tabs;
-                  }
-                  const merged = data.tabs.map((incomingTab: Tab) => {
-                    const localTab = prev.find((t) => t.id === incomingTab.id);
-                    if (
-                      localTab &&
-                      incomingTab.id === activeTabId &&
-                      isTypingActiveTab
-                    ) {
-                      return localTab;
-                    }
-                    return incomingTab;
-                  });
-
-                  // If the active tab is missing from incoming data but we are editing it, preserve it to prevent flashing
-                  const activeLocalTab = prev.find(
-                    (t: Tab) => t.id === activeTabId,
-                  );
-                  if (
-                    activeLocalTab &&
-                    !merged.some((t: Tab) => t.id === activeTabId) &&
-                    isTypingActiveTab
-                  ) {
-                    merged.push(activeLocalTab);
-                  }
-
-                  // Preserve any newly created tabs locally that haven't had time to sync yet (less than 5 seconds old)
-                  prev.forEach((localTab: Tab) => {
-                    if (localTab.id.startsWith("doc-")) {
-                      const timestampStr = localTab.id.replace("doc-", "");
-                      const timestamp = parseInt(timestampStr, 10);
-                      if (
-                        !isNaN(timestamp) &&
-                        now - timestamp < 5000 &&
-                        !merged.some((t: Tab) => t.id === localTab.id)
-                      ) {
-                        merged.push(localTab);
-                      }
-                    }
-                  });
-
-                  lastReceivedSnapshotTabsStr.current = JSON.stringify(merged);
-                  return merged;
-                });
-
-                if (!isTypingActiveTab) {
-                  const incomingActiveTab = data.tabs.find(
-                    (t: Tab) => t.id === activeTabId,
-                  );
-                  if (incomingActiveTab) {
-                    if (
-                      editorRef.current &&
-                      incomingActiveTab.content !== editorRef.current.innerHTML
-                    ) {
-                      editorRef.current.innerHTML =
-                        incomingActiveTab.content || "";
-                      lastContentRef.current = incomingActiveTab.content || "";
-                      setDocumentContent(incomingActiveTab.content || "");
-                    }
-                    if (incomingActiveTab.title !== documentTitle) {
-                      setDocumentTitle(incomingActiveTab.title || "Untitled");
-                    }
-                  }
-                }
-              }
-
-              if (
-                data.activeTabId &&
-                data.activeTabId !== activeTabId &&
-                !isTypingActiveTab
-              ) {
-                setActiveTabId(data.activeTabId);
-              }
-
-              if (data.messages && Array.isArray(data.messages)) {
-                setMessages(data.messages);
-              }
-
-              if (data.privacy) setWorkspacePrivacy(data.privacy);
-              if (data.ownerId) setWorkspaceOwnerId(data.ownerId);
-            }
-            if (!isSessionLoaded) {
-              setIsSessionLoaded(true);
-            }
-          },
-          (error) => {
-            console.error("Collaborative session snapshot sync error:", error);
-            if (!isSessionLoaded) {
-              setIsSessionLoaded(true);
-            }
-          },
-        );
-
-        // Sync list of workspace visitors/contributors
-        const visitorsColRef = collection(
-          db,
-          "shared_workspaces",
-          sharedWorkspaceId,
-          "visitors",
-        );
-        unsubVisitors = onSnapshot(
-          visitorsColRef,
-          (snapshot) => {
-            const loadedVisitors: any[] = [];
-            snapshot.forEach((doc) => {
-              loadedVisitors.push({
-                id: doc.id,
-                ...doc.data(),
-              });
-            });
-            setWorkspaceVisitors(loadedVisitors);
-          },
-          (error) => {
-            console.error("Collaborative visitors sync error:", error);
-          },
-        );
-
-        // Write this visitor's profile to visitors collection
-        const pid = presenceIdRef.current;
-        const visitorId = user ? user.uid : pid;
-        const visitorRef = doc(
-          db,
-          "shared_workspaces",
-          sharedWorkspaceId,
-          "visitors",
-          visitorId,
-        );
-
-        let pColor = "bg-zinc-500";
+      if (user) {
+        // --- PRIVATE PERSISTENT MODE ---
+        // Save/Sync profile
         try {
-          const colors = [
-            "bg-red-500",
-            "bg-blue-500",
-            "bg-emerald-500",
-            "bg-purple-500",
-            "bg-pink-500",
-            "bg-amber-500",
-          ];
-          pColor =
-            colors[parseInt(pid.replace(/\D/g, "") || "0") % colors.length] ||
-            "bg-zinc-500";
+          setDoc(
+            doc(db, "users", user.uid),
+            {
+              uid: user.uid,
+              email: user.email || "",
+              displayName: user.displayName || "Researcher",
+              lastActive: Date.now(),
+            },
+            { merge: true },
+          );
+        } catch (error) {
+          console.error("Failed saving user profile:", error);
+        }
+
+        // Hydrate from localStorage first for instant UI response
+        try {
+          const cachedFolders = localStorage.getItem(`cosmi_folders_${user.uid}`);
+          if (cachedFolders) setFolders(JSON.parse(cachedFolders));
+          const cachedPapers = localStorage.getItem(`cosmi_papers_${user.uid}`);
+          if (cachedPapers) setPapers(JSON.parse(cachedPapers));
+          const cachedTabs = localStorage.getItem(`cosmi_tabs_${user.uid}`);
+          if (cachedTabs) setTabs(JSON.parse(cachedTabs));
+          const cachedActiveTabId = localStorage.getItem(`cosmi_activeTabId_${user.uid}`);
+          if (cachedActiveTabId) setActiveTabId(cachedActiveTabId);
+          const cachedMessages = localStorage.getItem(`cosmi_messages_${user.uid}`);
+          if (cachedMessages) setMessages(JSON.parse(cachedMessages));
         } catch {}
 
-        let fallbackName = user
-          ? user.displayName || user.email?.split("@")[0]
-          : `Guest ${pid.substr(-4)}`;
-        fallbackName = fallbackName || "Anonymous";
-
-        setDoc(
-          visitorRef,
-          {
-            displayName: fallbackName,
-            photoURL: user ? user.photoURL : null,
-            email: user ? user.email : null,
-            color: pColor,
-            lastActive: Date.now(),
-          },
-          { merge: true },
-        ).catch(() => {});
-      } else if (sharedLibraryId) {
-        // --- 2. PUBLIC SHARED LIBRARY VIEW MODE ---
-        // Subscribe to public folders
-        const foldersColRef = collection(
-          db,
-          "shared_libraries",
-          sharedLibraryId,
-          "folders",
-        );
-        unsubFolders = onSnapshot(
-          foldersColRef,
-          (snapshot) => {
-            const loadedFolders: FolderItem[] = [];
-            snapshot.forEach((doc) => {
-              const data = doc.data();
-              loadedFolders.push({
-                id: doc.id,
-                name: data.name || "Untitled Folder",
-                createdAt: data.createdAt || Date.now(),
-              });
-            });
-            setFolders(loadedFolders);
-          },
-          (error) => {
-            console.error("Failed to sync shared library folders:", error);
-          },
-        );
-
-        // Subscribe to public papers
-        const papersColRef = collection(
-          db,
-          "shared_libraries",
-          sharedLibraryId,
-          "papers",
-        );
-        unsubPapers = onSnapshot(
-          papersColRef,
-          (snapshot) => {
-            const loadedPapers: PaperItem[] = [];
-            snapshot.forEach((doc) => {
-              const data = doc.data();
-              loadedPapers.push({
-                author:
-                  typeof data.author === "string"
-                    ? data.author
-                    : String(data.author || ""),
-                title:
-                  typeof data.title === "string"
-                    ? data.title
-                    : String(data.title || ""),
-                description:
-                  typeof data.description === "string"
-                    ? data.description
-                    : String(data.description || ""),
-                url: data.url || "",
-                added: data.added || "",
-                fullTextStatus: data.fullTextStatus || "",
-                viewed: data.viewed || "",
-                fileType: data.fileType || "",
-                summary: data.summary || "",
-                fileId: data.fileId || "",
-                mimetype: data.mimetype || "",
-                extractedText: data.extractedText || "",
-                folderId: data.folderId || "",
-                notes: data.notes || "",
-              });
-            });
-            setPapers(loadedPapers);
-          },
-          (error) => {
-            console.error("Failed to sync shared library papers:", error);
-          },
-        );
-
-        // Load private user session if they are logged in
-        if (user) {
-          try {
-            const sessionDoc = await getDocFromServer(
-              doc(db, "users", user.uid, "workspace", "session"),
-            );
-            if (sessionDoc.exists()) {
-              const data = sessionDoc.data();
-              if (
-                data.tabs &&
-                Array.isArray(data.tabs) &&
-                data.tabs.length > 0
-              ) {
-                setTabs(data.tabs);
-              }
-              if (data.activeTabId) {
-                setActiveTabId(data.activeTabId);
-              }
-              if (data.messages && Array.isArray(data.messages)) {
-                setMessages(data.messages);
-              }
-            }
-          } catch (error) {
-            console.error(
-              "Failed loading workspace session in library view mode:",
-              error,
-            );
-          } finally {
-            setIsSessionLoaded(true);
+        // Load workspace session state from server
+        try {
+          const sessionDoc = await getDocFromServer(
+            doc(db, "users", user.uid, "workspace", "session"),
+          );
+          if (sessionDoc.exists()) {
+            const data = sessionDoc.data();
+            if (data.tabs && data.tabs.length > 0) setTabs(data.tabs);
+            if (data.activeTabId) setActiveTabId(data.activeTabId);
+            if (data.messages) setMessages(data.messages);
           }
-
-          // User's private chats / annotations can still sync
-          const chatsColRef = collection(db, "users", user.uid, "chats");
-          unsubChats = onSnapshot(chatsColRef, (snapshot) => {
-            const loadedChats: Tab[] = [];
-            snapshot.forEach((doc) => {
-              const data = doc.data();
-              loadedChats.push({
-                id: doc.id,
-                type: "chat",
-                title: data.title || "Untitled",
-                messages: data.messages || [],
-              });
-            });
-            setAllChats(
-              loadedChats.sort((a, b) => {
-                const aLast =
-                  a.messages && a.messages.length > 0
-                    ? a.messages[a.messages.length - 1].timestamp
-                    : 0;
-                const bLast =
-                  b.messages && b.messages.length > 0
-                    ? b.messages[b.messages.length - 1].timestamp
-                    : 0;
-                return bLast - aLast;
-              }),
-            );
-          });
-
-          const annosColRef = collection(db, "users", user.uid, "annotations");
-          unsubAnnos = onSnapshot(annosColRef, (snapshot) => {
-            const groupedAnnos: Record<string, any[]> = {};
-            snapshot.forEach((doc) => {
-              const data = doc.data();
-              const fileId = data.fileId || "default";
-              if (!groupedAnnos[fileId]) groupedAnnos[fileId] = [];
-              groupedAnnos[fileId].push({
-                id: doc.id,
-                fileId,
-                text: data.text || "",
-                comment: data.comment || "",
-                page: data.page || 1,
-                color: data.color || "#fef08a",
-                timestamp: data.timestamp || Date.now(),
-              });
-            });
-            Object.keys(groupedAnnos).forEach((fileId) => {
-              localStorage.setItem(
-                `annotations_${fileId}`,
-                JSON.stringify(groupedAnnos[fileId]),
-              );
-            });
-            window.dispatchEvent(new Event("annotationsUpdated"));
-          });
-        } else {
-          // Guest fallback for shared library visitors
+        } catch (error) {
+          console.error("Failed loading workspace session:", error);
+        } finally {
           setIsSessionLoaded(true);
-          setTabs([
-            { id: "initial-library", type: "library", title: "Library" },
-          ]);
-          setActiveTabId("initial-library");
         }
+
+        // Real-time listeners
+        const foldersColRef = collection(db, "users", user.uid, "folders");
+        unsubFolders = onSnapshot(foldersColRef, (snapshot) => {
+          const loadedFolders: FolderItem[] = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            loadedFolders.push({
+              id: doc.id,
+              name: data.name || "Untitled Folder",
+              createdAt: data.createdAt || Date.now(),
+            });
+          });
+          if (loadedFolders.length > 0) {
+            setFolders(loadedFolders);
+          } else {
+            const defaultFolder: FolderItem = { id: "f1", name: "My Research", createdAt: Date.now() };
+            setDoc(doc(db, "users", user.uid, "folders", defaultFolder.id), defaultFolder);
+          }
+        });
+
+        const papersColRef = collection(db, "users", user.uid, "papers");
+        unsubPapers = onSnapshot(papersColRef, (snapshot) => {
+          const loadedPapers: PaperItem[] = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            loadedPapers.push({
+              author: typeof data.author === "string" ? data.author : String(data.author || ""),
+              title: typeof data.title === "string" ? data.title : String(data.title || ""),
+              description: typeof data.description === "string" ? data.description : String(data.description || ""),
+              url: data.url || "",
+              added: data.added || "",
+              fullTextStatus: data.fullTextStatus || "",
+              viewed: data.viewed || "",
+              fileType: data.fileType || "",
+              summary: data.summary || "",
+              fileId: data.fileId || "",
+              mimetype: data.mimetype || "",
+              extractedText: data.extractedText || "",
+              folderId: data.folderId || "",
+              notes: data.notes || "",
+            });
+          });
+          setPapers(loadedPapers);
+        });
+
+        const chatsColRef = collection(db, "users", user.uid, "chats");
+        unsubChats = onSnapshot(chatsColRef, (snapshot) => {
+          const loadedChats: Tab[] = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            loadedChats.push({
+              id: doc.id,
+              type: "chat",
+              title: data.title || "Untitled",
+              messages: data.messages || [],
+            });
+          });
+          setAllChats(loadedChats.sort((a,b) => {
+            const aLast = a.messages && a.messages.length > 0 ? a.messages[a.messages.length - 1].timestamp : 0;
+            const bLast = b.messages && b.messages.length > 0 ? b.messages[b.messages.length - 1].timestamp : 0;
+            return bLast - aLast;
+          }));
+        });
+
+        const annosColRef = collection(db, "users", user.uid, "annotations");
+        unsubAnnos = onSnapshot(annosColRef, (snapshot) => {
+          const groupedAnnos: Record<string, any[]> = {};
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            const fileId = data.fileId || "default";
+            if (!groupedAnnos[fileId]) groupedAnnos[fileId] = [];
+            groupedAnnos[fileId].push({
+              id: doc.id,
+              fileId,
+              text: data.text || "",
+              comment: data.comment || "",
+              page: data.page || 1,
+              color: data.color || "#fef08a",
+              timestamp: data.timestamp || Date.now(),
+            });
+          });
+          Object.keys(groupedAnnos).forEach((fileId) => {
+            localStorage.setItem(
+              `annotations_${fileId}`,
+              JSON.stringify(groupedAnnos[fileId]),
+            );
+          });
+          window.dispatchEvent(new Event("annotationsUpdated"));
+        });
       } else {
-        // --- 3. PRIVATE STANDARD MODE ---
-        if (user) {
-          // Immediately hydrate cached data
-          try {
-            const cachedFolders = localStorage.getItem(
-              `cosmi_folders_${user.uid}`,
-            );
-            if (cachedFolders) setFolders(JSON.parse(cachedFolders));
-            const cachedPapers = localStorage.getItem(
-              `cosmi_papers_${user.uid}`,
-            );
-            if (cachedPapers) setPapers(JSON.parse(cachedPapers));
-            const cachedTabs = localStorage.getItem(`cosmi_tabs_${user.uid}`);
-            if (cachedTabs) setTabs(JSON.parse(cachedTabs));
-            const cachedActiveTabId = localStorage.getItem(
-              `cosmi_activeTabId_${user.uid}`,
-            );
-            if (cachedActiveTabId) setActiveTabId(cachedActiveTabId);
-            const cachedMessages = localStorage.getItem(
-              `cosmi_messages_${user.uid}`,
-            );
-            if (cachedMessages) setMessages(JSON.parse(cachedMessages));
-          } catch (e) {
-            console.error("Failed loading cached user data on auth change:", e);
-          }
-
-          // Save profile
-          try {
-            setDoc(
-              doc(db, "users", user.uid),
-              {
-                uid: user.uid,
-                email: user.email || "",
-                displayName: user.displayName || "Researcher",
-                createdAt: Date.now(),
-              },
-              { merge: true },
-            );
-          } catch (error) {
-            console.error("Failed saving user profile:", error);
-          }
-
-          // Load workspace session state
-          try {
-            const sessionDoc = await getDocFromServer(
-              doc(db, "users", user.uid, "workspace", "session"),
-            );
-            if (sessionDoc.exists()) {
-              const data = sessionDoc.data();
-              if (
-                data.tabs &&
-                Array.isArray(data.tabs) &&
-                data.tabs.length > 0
-              ) {
-                setTabs(data.tabs);
-              }
-              if (data.activeTabId) {
-                setActiveTabId(data.activeTabId);
-              }
-              if (data.messages && Array.isArray(data.messages)) {
-                setMessages(data.messages);
-              }
-            }
-          } catch (error) {
-            console.error("Failed loading workspace session:", error);
-          } finally {
-            setIsSessionLoaded(true);
-          }
-
-          // Listen to private folders
-          const foldersColRef = collection(db, "users", user.uid, "folders");
-          unsubFolders = onSnapshot(
-            foldersColRef,
-            (snapshot) => {
-              const loadedFolders: FolderItem[] = [];
-              snapshot.forEach((doc) => {
-                const data = doc.data();
-                loadedFolders.push({
-                  id: doc.id,
-                  name: data.name || "Untitled Folder",
-                  createdAt: data.createdAt || Date.now(),
-                });
-              });
-              if (loadedFolders.length > 0) {
-                setFolders(loadedFolders);
-              } else {
-                const defaultFolder: FolderItem = {
-                  id: "f1",
-                  name: "My Research",
-                  createdAt: Date.now(),
-                };
-                setDoc(
-                  doc(db, "users", user.uid, "folders", defaultFolder.id),
-                  defaultFolder,
-                );
-              }
-            },
-            (error) => {
-              handleFirestoreError(
-                error,
-                OperationType.LIST,
-                `users/${user.uid}/folders`,
-              );
-            },
-          );
-
-          // Listen to private papers
-          const papersColRef = collection(db, "users", user.uid, "papers");
-          unsubPapers = onSnapshot(
-            papersColRef,
-            (snapshot) => {
-              const loadedPapers: PaperItem[] = [];
-              snapshot.forEach((doc) => {
-                const data = doc.data();
-                loadedPapers.push({
-                  author:
-                    typeof data.author === "string"
-                      ? data.author
-                      : String(data.author || ""),
-                  title:
-                    typeof data.title === "string"
-                      ? data.title
-                      : String(data.title || ""),
-                  description:
-                    typeof data.description === "string"
-                      ? data.description
-                      : String(data.description || ""),
-                  url: data.url || "",
-                  added: data.added || "",
-                  fullTextStatus: data.fullTextStatus || "",
-                  viewed: data.viewed || "",
-                  fileType: data.fileType || "",
-                  summary: data.summary || "",
-                  fileId: data.fileId || "",
-                  mimetype: data.mimetype || "",
-                  extractedText: data.extractedText || "",
-                  folderId: data.folderId || "",
-                  notes: data.notes || "",
-                });
-              });
-              setPapers(loadedPapers);
-            },
-            (error) => {
-              handleFirestoreError(
-                error,
-                OperationType.LIST,
-                `users/${user.uid}/papers`,
-              );
-            },
-          );
-
-          // Listen to private chats
-          const chatsColRef = collection(db, "users", user.uid, "chats");
-          unsubChats = onSnapshot(
-            chatsColRef,
-            (snapshot) => {
-              const loadedChats: Tab[] = [];
-              snapshot.forEach((doc) => {
-                const data = doc.data();
-                loadedChats.push({
-                  id: doc.id,
-                  type: "chat",
-                  title: data.title || "Untitled",
-                  messages: data.messages || [],
-                });
-              });
-              setAllChats(
-                loadedChats.sort((a, b) => {
-                  const aLast =
-                    a.messages && a.messages.length > 0
-                      ? a.messages[a.messages.length - 1].timestamp
-                      : 0;
-                  const bLast =
-                    b.messages && b.messages.length > 0
-                      ? b.messages[b.messages.length - 1].timestamp
-                      : 0;
-                  return bLast - aLast;
-                }),
-              );
-            },
-            (error) => {
-              handleFirestoreError(
-                error,
-                OperationType.LIST,
-                `users/${user.uid}/chats`,
-              );
-            },
-          );
-
-          // Listen to private annotations
-          const annosColRef = collection(db, "users", user.uid, "annotations");
-          unsubAnnos = onSnapshot(
-            annosColRef,
-            (snapshot) => {
-              const groupedAnnos: Record<string, any[]> = {};
-              snapshot.forEach((doc) => {
-                const data = doc.data();
-                const fileId = data.fileId || "default";
-                if (!groupedAnnos[fileId]) groupedAnnos[fileId] = [];
-                groupedAnnos[fileId].push({
-                  id: doc.id,
-                  fileId,
-                  text: data.text || "",
-                  comment: data.comment || "",
-                  page: data.page || 1,
-                  color: data.color || "#fef08a",
-                  timestamp: data.timestamp || Date.now(),
-                });
-              });
-              Object.keys(groupedAnnos).forEach((fileId) => {
-                localStorage.setItem(
-                  `annotations_${fileId}`,
-                  JSON.stringify(groupedAnnos[fileId]),
-                );
-              });
-              window.dispatchEvent(new Event("annotationsUpdated"));
-            },
-            (error) => {
-              handleFirestoreError(
-                error,
-                OperationType.LIST,
-                `users/${user.uid}/annotations`,
-              );
-            },
-          );
-        } else {
-          // Standard guest path
-          setIsSessionLoaded(true);
-          try {
-            const cachedFolders = localStorage.getItem(`cosmi_folders_guest`);
-            setFolders(
-              cachedFolders
-                ? JSON.parse(cachedFolders)
-                : [
-                    {
-                      id: "f1",
-                      name: "My Research",
-                      createdAt: Date.now() - 172800000,
-                    },
-                  ],
-            );
-            const cachedPapers = localStorage.getItem(`cosmi_papers_guest`);
-            setPapers(cachedPapers ? JSON.parse(cachedPapers) : []);
-            const cachedTabs = localStorage.getItem(`cosmi_tabs_guest`);
-            setTabs(
-              cachedTabs
-                ? JSON.parse(cachedTabs)
-                : [{ id: "initial-home", type: "home", title: "Home" }],
-            );
-            const cachedActiveTabId = localStorage.getItem(
-              `cosmi_activeTabId_guest`,
-            );
-            setActiveTabId(cachedActiveTabId || "initial-home");
-            const cachedMessages = localStorage.getItem(`cosmi_messages_guest`);
-            setMessages(cachedMessages ? JSON.parse(cachedMessages) : []);
-          } catch {
-            setFolders([
-              {
-                id: "f1",
-                name: "My Research",
-                createdAt: Date.now() - 172800000,
-              },
-            ]);
-            setPapers([]);
-            setTabs([{ id: "initial-home", type: "home", title: "Home" }]);
-            setActiveTabId("initial-home");
-            setMessages([]);
-          }
-          setActiveViewingPaper(null);
-          setDocumentContent("");
-          setDocumentTitle("");
-          setSearchResults([]);
+        // --- GUEST / OFFLINE MODE ---
+        setIsSessionLoaded(true);
+        try {
+          const cachedFolders = localStorage.getItem(`cosmi_folders_guest`);
+          setFolders(cachedFolders ? JSON.parse(cachedFolders) : [{ id: "f1", name: "My Research", createdAt: Date.now() - 172800000 }]);
+          const cachedPapers = localStorage.getItem(`cosmi_papers_guest`);
+          setPapers(cachedPapers ? JSON.parse(cachedPapers) : []);
+          const cachedTabs = localStorage.getItem(`cosmi_tabs_guest`);
+          setTabs(cachedTabs ? JSON.parse(cachedTabs) : [{ id: "initial-home", type: "home", title: "Home" }]);
+          const cachedActiveTabId = localStorage.getItem(`cosmi_activeTabId_guest`);
+          setActiveTabId(cachedActiveTabId || "initial-home");
+          const cachedMessages = localStorage.getItem(`cosmi_messages_guest`);
+          setMessages(cachedMessages ? JSON.parse(cachedMessages) : []);
+        } catch {
+          setFolders([{ id: "f1", name: "My Research", createdAt: Date.now() - 172800000 }]);
+          setPapers([]);
+          setTabs([{ id: "initial-home", type: "home", title: "Home" }]);
+          setActiveTabId("initial-home");
+          setMessages([]);
         }
       }
     };
@@ -2678,21 +1720,15 @@ export default function App() {
       setupListeners(user);
     });
 
-    unsubscribeUser = () => {
+    return () => {
       unsubscribeAuth();
       unsubFolders();
       unsubPapers();
       unsubChats();
       unsubAnnos();
-      unsubPresence();
-      unsubWorkspaceDoc();
-      unsubVisitors();
     };
+  }, []);
 
-    return () => {
-      unsubscribeUser();
-    };
-  }, [sharedWorkspaceId, sharedLibraryId]);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
@@ -2861,37 +1897,19 @@ export default function App() {
 
     // If the title changed, delete the old document
     if (tab.originalTitle && tab.originalTitle !== paperTitle) {
-      if (sharedWorkspaceId) {
-        const oldPaperId = encodeURIComponent(tab.originalTitle).replace(
-          /\./g,
-          "%2E",
+    if (currentUser) {
+      const oldPaperId = encodeURIComponent(tab.originalTitle).replace(
+        /\./g,
+        "%2E",
+      );
+      try {
+        await deleteDoc(
+          doc(db, "users", currentUser.uid, "papers", oldPaperId),
         );
-        try {
-          await deleteDoc(
-            doc(
-              db,
-              "shared_workspaces",
-              sharedWorkspaceId,
-              "papers",
-              oldPaperId,
-            ),
-          );
-        } catch (err) {
-          console.error("Failed to delete renamed collaborative draft", err);
-        }
-      } else if (currentUser) {
-        const oldPaperId = encodeURIComponent(tab.originalTitle).replace(
-          /\./g,
-          "%2E",
-        );
-        try {
-          await deleteDoc(
-            doc(db, "users", currentUser.uid, "papers", oldPaperId),
-          );
-        } catch (err) {
-          console.error("Failed to delete renamed draft", err);
-        }
+      } catch (err) {
+        console.error("Failed to delete renamed draft", err);
       }
+    }
 
       // Update tab's originalTitle so we don't try to delete it again
       setTabs((prev) =>
@@ -2914,16 +1932,7 @@ export default function App() {
       folderId: tab.folderId || folders[0]?.id || "f1",
     };
 
-    if (sharedWorkspaceId) {
-      try {
-        await setDoc(
-          doc(db, "shared_workspaces", sharedWorkspaceId, "papers", paperId),
-          draftPaper,
-        );
-      } catch (err) {
-        console.error("Failed saving collaborative paper draft:", err);
-      }
-    } else if (currentUser) {
+    if (currentUser) {
       const path = `users/${currentUser.uid}/papers/${paperId}`;
       try {
         await setDoc(
@@ -3026,117 +2035,13 @@ export default function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
   }, [messages, isAiTyping]);
 
-  // Presence reporting loop for shared workspaces
-  useEffect(() => {
-    if (!sharedWorkspaceId || !isSessionLoaded) return;
-
-    const pid = presenceIdRef.current;
-    const uid = currentUser ? currentUser.uid : "guest";
-    let fallbackName = currentUser
-      ? currentUser.displayName || currentUser.email?.split("@")[0]
-      : `Guest ${pid.substr(-4)}`;
-    fallbackName = fallbackName || "Anonymous";
-
-    const colors = [
-      "bg-red-500",
-      "bg-blue-500",
-      "bg-emerald-500",
-      "bg-purple-500",
-      "bg-pink-500",
-      "bg-amber-500",
-    ];
-    const pColor =
-      colors[parseInt(pid.replace(/\D/g, "") || "0") % colors.length] ||
-      "bg-zinc-500";
-
-    const pRef = doc(
-      db,
-      "shared_workspaces",
-      sharedWorkspaceId,
-      "presence",
-      pid,
-    );
-
-    const updatePresence = () => {
-      setDoc(pRef, {
-        uid,
-        displayName: fallbackName,
-        photoURL: currentUser ? currentUser.photoURL : null,
-        color: pColor,
-        activeTabId,
-        lastActive: Date.now(),
-      }).catch(() => {});
-    };
-
-    updatePresence();
-    const interval = setInterval(updatePresence, 30000);
-
-    return () => clearInterval(interval);
-  }, [sharedWorkspaceId, activeTabId, currentUser, isSessionLoaded]);
+  // Presence reporting loop has been removed
 
   // Sync workspace session to Firestore periodically when changes occur
   useEffect(() => {
     if (!isSessionLoaded || !tabs || tabs.length === 0) return;
 
-    if (sharedWorkspaceId) {
-      const cleanTabs = JSON.parse(JSON.stringify(tabs));
-      const cleanTabsStr = JSON.stringify(cleanTabs);
-
-      if (cleanTabsStr === lastReceivedSnapshotTabsStr.current) {
-        // This precise state was received from the network. Do not echo it back.
-        return;
-      }
-
-      const now = Date.now();
-      const timeSinceLastSync = now - lastSyncTimeRef.current;
-
-      // If we edited locally very recently, wait for debounce
-      if (now - lastLocalEditTimeRef.current < 500 && timeSinceLastSync < 500) {
-        return;
-      }
-
-      // If they are actively typing but haven't synced for more than 200ms, force sync!
-      if (timeSinceLastSync >= 200) {
-        lastSyncTimeRef.current = now;
-        const sessionRef = doc(db, "shared_workspaces", sharedWorkspaceId);
-        const cleanMessages = JSON.parse(JSON.stringify(messages));
-
-        setDoc(
-          sessionRef,
-          {
-            tabs: cleanTabs,
-            activeTabId,
-            messages: cleanMessages,
-          },
-          { merge: true },
-        ).catch((err) =>
-          console.error("Workspace collaborative sync failed:", err),
-        );
-
-        return;
-      }
-
-      // Otherwise, set a very fast debounce of 150ms
-      const handler = setTimeout(() => {
-        lastSyncTimeRef.current = Date.now();
-        const sessionRef = doc(db, "shared_workspaces", sharedWorkspaceId);
-        const cleanMessages = JSON.parse(JSON.stringify(messages));
-
-        setDoc(
-          sessionRef,
-          {
-            tabs: cleanTabs,
-            activeTabId,
-            messages: cleanMessages,
-          },
-          { merge: true },
-        ).catch((err) =>
-          console.error("Workspace collaborative sync failed:", err),
-        );
-      }, 150);
-
-      return () => clearTimeout(handler);
-    } else if (currentUser) {
+    if (currentUser) {
       const handler = setTimeout(() => {
         const sessionRef = doc(
           db,
@@ -3160,14 +2065,7 @@ export default function App() {
       }, 1500);
       return () => clearTimeout(handler);
     }
-  }, [
-    tabs,
-    activeTabId,
-    messages,
-    currentUser,
-    isSessionLoaded,
-    sharedWorkspaceId,
-  ]);
+  }, [tabs, activeTabId, messages, currentUser, isSessionLoaded]);
 
   // Synchronize workspace changes to LocalStorage instantly
   useEffect(() => {
@@ -4345,15 +3243,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
     return valA.localeCompare(valB) * orderMultiplier;
   });
 
-  const isWorkspaceOwner = currentUser
-    ? workspaceOwnerId === currentUser.uid
-    : workspaceOwnerId === presenceIdRef.current ||
-      (sharedWorkspaceId &&
-        workspaceOwnerId ===
-          localStorage.getItem(`workspace_owner_${sharedWorkspaceId}`));
-
-  const isReadOnly =
-    sharedLibraryId !== null;
 
   if (isAuthLoading) {
     return (
@@ -7358,21 +6247,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    {sharedWorkspaceId && <div className="mr-1" />}
-
-                    <button
-                      disabled={isSharingLoading}
-                      onClick={handleShareDocumentLink}
-                      className="flex items-center gap-1.5 text-zinc-300 hover:text-white bg-[#1a1a1c] hover:bg-[#252528] border border-[#2d2d30] transition-colors px-3 py-1.5 rounded-lg select-none text-[11px] font-semibold h-8 cursor-pointer focus:outline-none disabled:opacity-40 select-none mr-1"
-                      title="Share Document / Collab Link"
-                    >
-                      <Icon
-                        icon="ph:share-network"
-                        className="w-[14px] h-[14px]"
-                      />
-                      <span>Share</span>
-                    </button>
-
                     {!isSidePanelOpen && (
                       <button
                         onClick={() => setIsSidePanelOpen(true)}
@@ -7535,28 +6409,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                           window.dispatchEvent(new Event("annotationsUpdated"));
 
-                          if (sharedWorkspaceId) {
-                            try {
-                              await setDoc(
-                                doc(
-                                  db,
-                                  "shared_workspaces",
-                                  sharedWorkspaceId,
-                                  "annotations",
-                                  newAnno.id,
-                                ),
-                                {
-                                  ...newAnno,
-                                  uid: currentUser ? currentUser.uid : "guest",
-                                },
-                              );
-                            } catch (err) {
-                              console.error(
-                                "Collaborative annotation save failed:",
-                                err,
-                              );
-                            }
-                          } else if (currentUser) {
+                          if (currentUser) {
                             try {
                               await setDoc(
                                 doc(
@@ -7690,23 +6543,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             JSON.stringify([...currentAnnos, newAnno]),
                           );
                           window.dispatchEvent(new Event("annotationsUpdated"));
-                          if (sharedWorkspaceId) {
-                            try {
-                              await setDoc(
-                                doc(
-                                  db,
-                                  "shared_workspaces",
-                                  sharedWorkspaceId,
-                                  "annotations",
-                                  newAnno.id,
-                                ),
-                                {
-                                  ...newAnno,
-                                  uid: currentUser ? currentUser.uid : "guest",
-                                },
-                              );
-                            } catch {}
-                          } else if (currentUser) {
+                          if (currentUser) {
                             try {
                               await setDoc(
                                 doc(
@@ -7754,8 +6591,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
                         <Icon
-                          icon="ph:magnifying-glass"
-                          className="w-4 h-4 text-zinc-500 group-hover:text-white"
+                          icon="logos:google-icon"
+                          className="w-4 h-4"
                         />
                         <span>Google Search</span>
                       </button>
@@ -7836,8 +6673,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
                         <Icon
-                          icon="ph:globe"
-                          className="w-4 h-4 text-zinc-500 group-hover:text-white"
+                          icon="simple-icons:wikipedia"
+                          className="w-4 h-4 text-[#f8f9fa]"
                         />
                         <span>Wikipedia Search</span>
                       </button>
@@ -7927,8 +6764,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <div
                   className={`absolute top-3.5 z-30 transition-all duration-200 ${isSidePanelOpen ? "right-4" : "right-12"} flex items-center gap-2.5`}
                 >
-                  {sharedWorkspaceId && <div className="mr-1" />}
-
                   {docSaveStatus === "saving" ? (
                     <span className="flex items-center gap-1.5 text-zinc-400 bg-[#121212]/80 px-2.5 py-1.5 rounded-lg backdrop-blur-sm select-none text-[11px] font-mono h-8">
                       <Icon
@@ -7947,15 +6782,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </span>
                   ) : null}
 
-                  <button
-                    disabled={isSharingLoading}
-                    onClick={handleShareDocumentLink}
-                    className="flex items-center gap-1.5 text-zinc-300 hover:text-white bg-[#1a1a1c] hover:bg-[#252528] border border-[#2d2d30] transition-colors px-3 py-1.5 rounded-lg select-none text-[11.5px] font-semibold h-8 cursor-pointer focus:outline-none disabled:opacity-40"
-                    title="Share Document / Collab Link"
-                  >
-                    <Icon icon="ph:share-network" className="w-3.5 h-3.5" />
-                    <span>Share</span>
-                  </button>
+                  {/* Share button removed */}
                 </div>
                 {!isSidePanelOpen && (
                   <button
@@ -9261,11 +8088,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   </button>
                 )}
               </div>
-              {workspaceOwnerId !== null && !isWorkspaceOwner && (
-                <p className="text-[9.5px] text-zinc-500 italic mt-1 leading-normal">
-                  Only the owner can modify privacy controls.
-                </p>
-              )}
             </div>
 
             {/* People with Access Display */}
@@ -9312,62 +8134,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     Owner
                   </span>
                 </div>
-
-                {/* Other Collaborative Space Visitors */}
-                {workspaceVisitors
-                  .filter((visitor) => {
-                    const visitorId = currentUser
-                      ? currentUser.uid
-                      : presenceIdRef.current;
-                    return visitor.id !== visitorId;
-                  })
-                  .map((visitor) => (
-                    <div
-                      key={visitor.id}
-                      className="flex items-center justify-between py-1 px-1 rounded-lg"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className={`w-8 h-8 rounded-full ${visitor.color || "bg-zinc-800"} flex items-center justify-center shrink-0 border border-[#27272a] overflow-hidden text-[#e4e4e7]`}
-                        >
-                          {visitor.photoURL ? (
-                            <img
-                              src={visitor.photoURL}
-                              alt={visitor.displayName}
-                              className="w-full h-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <span className="text-xs font-bold uppercase">
-                              {visitor.displayName?.charAt(0)}
-                            </span>
-                          )}
-                        </div>
-                        <div>
-                          <p className="text-[11px] font-semibold text-[#f4f4f5] leading-none mb-1">
-                            {visitor.displayName}
-                          </p>
-                          <p className="text-[9.5px] text-zinc-500">
-                            {visitor.email || "Guest co-author"}
-                          </p>
-                        </div>
-                      </div>
-                      <span className="text-[9.5px] font-medium text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/10">
-                        Joined
-                      </span>
-                    </div>
-                  ))}
-
-                {workspaceVisitors.filter((visitor) => {
-                  const visitorId = currentUser
-                    ? currentUser.uid
-                    : presenceIdRef.current;
-                  return visitor.id !== visitorId;
-                }).length === 0 && (
-                  <p className="text-zinc-500 text-[10.5px] py-1 text-center italic">
-                    No co-authors in this session yet.
-                  </p>
-                )}
               </div>
             </div>
 
