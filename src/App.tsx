@@ -1184,6 +1184,13 @@ export default function App() {
 
   // Handle Tauri authentication redirection
   useEffect(() => {
+    const isTauri = () => typeof window !== 'undefined' && ('___TAURI___' in window || (window as any).__TAURI__ !== undefined);
+    
+    if (isTauri()) {
+      console.log("Tauri environment detected: Skipping third-party storage auth redirects.");
+      return;
+    }
+    
     const checkRedirect = async () => {
       try {
         const { getRedirectResult } = await import('firebase/auth');

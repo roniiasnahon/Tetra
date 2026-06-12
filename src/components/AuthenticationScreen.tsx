@@ -299,13 +299,20 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     setIsLoading(true);
     setErrorMessage('');
     
-    try {
-      const { signInWithRedirect } = await import('firebase/auth');
-      await signInWithRedirect(auth, googleProvider);
-    } catch (err: any) {
-      console.error('Google Sign-In failed:', err);
-      setErrorMessage(err.message || 'Failed to sign in with Google');
-      setIsLoading(false);
+    const isTauri = () => typeof window !== 'undefined' && ('___TAURI___' in window || (window as any).__TAURI__ !== undefined);
+    
+    if (isTauri()) {
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      await openUrl('https://cosmiwise.vercel.app/login-redirect');
+    } else {
+      try {
+        const { signInWithRedirect } = await import('firebase/auth');
+        await signInWithRedirect(auth, googleProvider);
+      } catch (err: any) {
+        console.error('Google Sign-In failed:', err);
+        setErrorMessage(err.message || 'Failed to sign in with Google');
+        setIsLoading(false);
+      }
     }
   };
 
