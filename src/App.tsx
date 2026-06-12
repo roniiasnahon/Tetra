@@ -1184,13 +1184,7 @@ export default function App() {
   const currentUserIdRef = useRef<string | null>(
     currentUser ? currentUser.uid : null,
   );
-  const [isAuthLoading, setIsAuthLoading] = useState(() => {
-    try {
-      return !localStorage.getItem("cosmi_user_snapshot");
-    } catch {
-      return true;
-    }
-  });
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
 
   const lastLocalEditTimeRef = useRef<number>(0);
   const lastSyncTimeRef = useRef<number>(0);
@@ -1728,10 +1722,14 @@ export default function App() {
       }
     };
 
+    let isMounted = true;
+    let authUnsubscribe: (() => void) | null = null;
+
     const initializeAuth = async () => {
       try {
+        // 1. Check for a redirect result first
         const result = await getRedirectResult(auth);
-        if (result?.user) {
+        if (result?.user && isMounted) {
           syncUserToLocal(result.user);
           setCurrentUser(result.user);
           currentUserIdRef.current = result.user.uid;
@@ -1740,19 +1738,30 @@ export default function App() {
         console.error("Redirect check failed:", error);
       }
 
-      return auth.onAuthStateChanged((user) => {
+      if (!isMounted) return;
+
+      // 2. Set up the baseline auth state listener
+      authUnsubscribe = auth.onAuthStateChanged((user) => {
+        if (!isMounted) return;
+        
         syncUserToLocal(user);
         setCurrentUser(user);
         currentUserIdRef.current = user ? user.uid : null;
+        
+        if (user) {
+          setupListeners(user);
+        }
+        
+        // 3. Finally reveal the UI
         setIsAuthLoading(false);
-        setupListeners(user);
       });
     };
 
-    const authUnsubPromise = initializeAuth();
+    initializeAuth();
 
     return () => {
-      authUnsubPromise.then(unsub => unsub?.());
+      isMounted = false;
+      if (authUnsubscribe) authUnsubscribe();
       unsubFolders();
       unsubPapers();
       unsubChats();
