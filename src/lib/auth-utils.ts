@@ -11,6 +11,7 @@ export const handleGoogleLogin = async () => {
       await openUrl('https://cosmiwise.vercel.app/login-redirect');
     } catch (err) {
       console.error("Tauri breakout failed:", err);
+      throw err;
     }
   } else {
     // Normal web behavior: use the popup
