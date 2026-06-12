@@ -1139,6 +1139,7 @@ export default function App() {
   const [presence, setPresence] = useState<Record<string, any>>({});
   const presenceIdRef = useRef(`guest-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`);
   const lastLocalEditTimeRef = useRef<number>(0);
+  const lastSyncTimeRef = useRef<number>(0);
   const [workspaceVisitors, setWorkspaceVisitors] = useState<any[]>([]);
   const [workspacePrivacy, setWorkspacePrivacy] = useState<'edit' | 'view'>('edit');
   const [workspaceOwnerId, setWorkspaceOwnerId] = useState<string | null>(null);
@@ -1606,7 +1607,7 @@ export default function App() {
           if (snapshot.exists()) {
             const data = snapshot.data();
             const now = Date.now();
-            const isTypingActiveTab = now - lastLocalEditTimeRef.current < 2000;
+            const isTypingActiveTab = now - lastLocalEditTimeRef.current < 750;
             
             if (data.tabs && Array.isArray(data.tabs)) {
               setTabs(prev => {
@@ -2319,7 +2320,12 @@ export default function App() {
     if (!isSessionLoaded || !tabs || tabs.length === 0) return;
 
     if (sharedWorkspaceId) {
-      const handler = setTimeout(() => {
+      const now = Date.now();
+      const timeSinceLastSync = now - lastSyncTimeRef.current;
+
+      // If they are actively typing but haven't synced for more than 400ms, force sync!
+      if (timeSinceLastSync >= 400) {
+        lastSyncTimeRef.current = now;
         const sessionRef = doc(db, 'shared_workspaces', sharedWorkspaceId);
         const cleanTabs = JSON.parse(JSON.stringify(tabs));
         const cleanMessages = JSON.parse(JSON.stringify(messages));
@@ -2329,7 +2335,24 @@ export default function App() {
           activeTabId,
           messages: cleanMessages
         }, { merge: true }).catch(err => console.error("Workspace collaborative sync failed:", err));
-      }, 800);
+        
+        return;
+      }
+
+      // Otherwise, set a very fast debounce of 150ms
+      const handler = setTimeout(() => {
+        lastSyncTimeRef.current = Date.now();
+        const sessionRef = doc(db, 'shared_workspaces', sharedWorkspaceId);
+        const cleanTabs = JSON.parse(JSON.stringify(tabs));
+        const cleanMessages = JSON.parse(JSON.stringify(messages));
+        
+        setDoc(sessionRef, {
+          tabs: cleanTabs,
+          activeTabId,
+          messages: cleanMessages
+        }, { merge: true }).catch(err => console.error("Workspace collaborative sync failed:", err));
+      }, 150);
+
       return () => clearTimeout(handler);
     } else if (currentUser) {
       const handler = setTimeout(() => {
@@ -2342,7 +2365,7 @@ export default function App() {
           activeTabId,
           messages: cleanMessages
         }, { merge: true }).catch(err => console.error("Workspace sync failed:", err));
-      }, 3000);
+      }, 1500);
       return () => clearTimeout(handler);
     }
   }, [tabs, activeTabId, messages, currentUser, isSessionLoaded, sharedWorkspaceId]);
@@ -2591,7 +2614,7 @@ export default function App() {
         }
       }
       setDocSaveStatus('saved');
-    }, 1200); // 1.2s debounce for fast and modern response
+    }, 400); // 400ms debounce for fast and modern response
 
     return () => clearTimeout(timer);
   }, [docSaveStatus, documentTitle, documentContent, activeTabId, tabs]);
@@ -4151,12 +4174,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
             {Object.entries(presence)
                .filter(([k, p]) => k !== presenceIdRef.current && p.activeTabId === tab.id)
                .map(([k, p]) => (
-                <div key={k} className={`w-[14px] h-[14px] rounded-full ${p.color} flex items-center justify-center border border-[#121212] z-10 shrink-0 overflow-hidden`} title={p.displayName}>
-                  {p.photoURL ? (
-                    <img src={p.photoURL} alt={p.displayName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                  ) : (
-                    <span className="text-[7.5px] font-bold text-white leading-none">{p.displayName?.charAt(0)?.toUpperCase()}</span>
-                  )}
+                <div key={k} className="relative group/avatar hover:z-30 z-10">
+                  <div className={`w-[14.5px] h-[14.5px] rounded-full ${p.color} flex items-center justify-center border border-[#121212] shrink-0 overflow-hidden`}>
+                    {p.photoURL ? (
+                      <img src={p.photoURL} alt={p.displayName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <span className="text-[7.5px] font-bold text-white leading-none">{p.displayName?.charAt(0)?.toUpperCase()}</span>
+                    )}
+                  </div>
+                  <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 pointer-events-none hidden group-hover/avatar:block bg-zinc-950 border border-zinc-800 text-zinc-200 text-[9px] font-medium px-1.5 py-0.5 rounded shadow-lg whitespace-nowrap z-[150]">
+                    {p.displayName || 'Guest User'}
+                  </div>
                 </div>
             ))}
           </div>
@@ -5706,12 +5734,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
                            {Object.entries(presence)
                               .filter(([k, p]) => k !== presenceIdRef.current && p.activeTabId === activeTabId)
                               .map(([k, p]) => (
-                               <div key={k} className={`w-6 h-6 rounded-full ${p.color} flex items-center justify-center border-[1.5px] border-[#0e0e10] z-10 shrink-0 overflow-hidden`} title={p.displayName}>
+                               <div key={k} className="relative group/avatar hover:z-30 z-10">
+                                 <div className={`w-6 h-6 rounded-full ${p.color} flex items-center justify-center border-[1.5px] border-[#0e0e10] shrink-0 overflow-hidden`}>
                                  {p.photoURL ? (
                                    <img src={p.photoURL} alt={p.displayName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                                  ) : (
                                    <span className="text-[10px] font-bold text-white tracking-wide leading-none">{p.displayName?.charAt(0)?.toUpperCase()}</span>
                                  )}
+                                 </div>
+                                 <div className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 pointer-events-none hidden group-hover/avatar:block bg-zinc-950 border border-zinc-800 text-zinc-200 text-[10px] font-medium px-2 py-0.5 rounded shadow-lg whitespace-nowrap z-[150]">
+                                   {p.displayName || 'Guest User'}
+                                 </div>
                                </div>
                            ))}
                          </div>
@@ -6128,12 +6161,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       {Object.entries(presence)
                          .filter(([k, p]) => k !== presenceIdRef.current && p.activeTabId === activeTabId)
                          .map(([k, p]) => (
-                          <div key={k} className={`w-7 h-7 rounded-full ${p.color} flex items-center justify-center border-2 border-[#121212] z-10 shrink-0 shadow-sm overflow-hidden`} title={p.displayName}>
+                          <div key={k} className="relative group/avatar hover:z-30 z-10">
+                            <div className={`w-7 h-7 rounded-full ${p.color} flex items-center justify-center border-2 border-[#121212] shrink-0 shadow-sm overflow-hidden`}>
                             {p.photoURL ? (
                               <img src={p.photoURL} alt={p.displayName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                             ) : (
                               <span className="text-[11px] font-bold text-white leading-none tracking-wide">{p.displayName?.charAt(0)?.toUpperCase()}</span>
                             )}
+                            </div>
+                            <div className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 pointer-events-none hidden group-hover/avatar:block bg-zinc-950 border border-zinc-800 text-zinc-200 text-[10.5px] font-medium px-2 py-1 rounded shadow-lg whitespace-nowrap z-[150]">
+                              {p.displayName || 'Guest User'}
+                            </div>
                           </div>
                       ))}
                     </div>
