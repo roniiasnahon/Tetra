@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Icon } from '@iconify/react';
 import { Eye, EyeOff, Check, AlertCircle, ArrowLeft, Database, Sparkles } from 'lucide-react';
-import { auth, googleProvider, signInWithPopup } from '../firebase';
+import { auth, googleProvider, signInWithRedirect } from '../firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 
 // --- Pupil Sub-component ---
@@ -299,15 +299,11 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     setErrorMessage('');
     setSuccessMessage('');
     try {
-      await signInWithPopup(auth, googleProvider);
-      onSuccess?.();
+      await signInWithRedirect(auth, googleProvider);
+      // Note: onSuccess will be handled in App.tsx via onAuthStateChanged after redirect
     } catch (err: any) {
       console.error("Google Sign-In failed:", err);
-      if (err.code === 'auth/popup-blocked') {
-        setErrorMessage('Pop-up blocked. Please enable pop-ups for this site or click try again.');
-      } else {
-        setErrorMessage(err.message || 'Failed to sign in with Google');
-      }
+      setErrorMessage(err.message || 'Failed to sign in with Google');
     } finally {
       setIsLoading(false);
     }

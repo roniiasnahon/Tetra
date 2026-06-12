@@ -30,7 +30,8 @@ import {
   db,
   OperationType,
   handleFirestoreError,
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   googleProvider,
   signOut,
 } from "./firebase";
@@ -1719,6 +1720,17 @@ export default function App() {
       setIsAuthLoading(false);
       setupListeners(user);
     });
+
+    // Handle redirect result for Tauri/Mobile environments
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          console.log("Successfully signed in via redirect:", result.user.email);
+        }
+      })
+      .catch((error) => {
+        console.error("Redirect sign-in error:", error);
+      });
 
     return () => {
       unsubscribeAuth();
@@ -4307,7 +4319,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   <button
                     onClick={async () => {
                       try {
-                        await signInWithPopup(auth, googleProvider);
+                        await signInWithRedirect(auth, googleProvider);
                       } catch (err) {
                         console.error("Sign in failed:", err);
                       }
