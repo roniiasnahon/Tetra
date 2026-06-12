@@ -818,6 +818,7 @@ export default function App() {
   useEffect(() => {
     const handleOutsideClick = () => {
       setLinkContextMenu(null);
+      setPdfContextMenu(null);
       setIsCreateDropdownOpen(false);
       setIsHomeCreateDropdownOpen(false);
     };
@@ -930,6 +931,7 @@ export default function App() {
   // PDF Annotation States
   const [selectionText, setSelectionText] = useState("");
   const [selectionPos, setSelectionPos] = useState<{ x: number; y: number } | null>(null);
+  const [pdfContextMenu, setPdfContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [selectedPageNum, setSelectedPageNum] = useState<number | null>(null);
   const [commentDraft, setCommentDraft] = useState("");
   const [activeHighlightColor, setActiveHighlightColor] = useState("#fef08a");
@@ -1847,31 +1849,6 @@ export default function App() {
       
       const pageNum = findPageFromNode(selection.anchorNode) || findPageFromNode(selection.focusNode);
       setSelectedPageNum(pageNum);
-      
-      // Get selection coordinates for popover positioning relative to pdf-viewer-workspace container
-      try {
-        const range = selection.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-        
-        // Find outer relative container
-        const outerWorkspace = document.getElementById("pdf-viewer-workspace");
-        if (outerWorkspace) {
-          const containerRect = outerWorkspace.getBoundingClientRect();
-          setSelectionPos({
-            x: rect.left - containerRect.left + (rect.width / 2),
-            y: rect.top - containerRect.top - 150 // Above selection
-          });
-        } else {
-          const containerRect = e.currentTarget.getBoundingClientRect();
-          setSelectionPos({
-            x: rect.left - containerRect.left + (rect.width / 2),
-            y: rect.top - containerRect.top - 150
-          });
-        }
-      } catch (err) {
-        console.warn("Could not determine selection rect", err);
-        setSelectionPos({ x: e.clientX, y: e.clientY - 120 });
-      }
     } else {
       const target = e.target as HTMLElement;
       if (target && !target.closest('.pdf-annotation-popover')) {
@@ -1880,6 +1857,35 @@ export default function App() {
         setSelectedPageNum(null);
         setCommentDraft("");
       }
+    }
+  };
+
+  const handlePdfContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Calculate smart positioning for the context menu to keep it within viewport
+    const menuWidth = 210;
+    const menuHeight = 400; // Estimated max height
+    let x = e.clientX;
+    let y = e.clientY;
+
+    if (x + menuWidth > window.innerWidth) {
+      x = window.innerWidth - menuWidth - 10;
+    }
+    if (y + menuHeight > window.innerHeight) {
+      y = window.innerHeight - menuHeight - 10;
+    }
+    
+    setPdfContextMenu({ x, y });
+    
+    // Also try to capture selection if any (in case mouseup didn't fire as expected)
+    const selection = window.getSelection();
+    if (selection && selection.toString().trim().length > 0) {
+      const text = selection.toString().trim();
+      setSelectionText(text);
+      const pageNum = findPageFromNode(selection.anchorNode) || findPageFromNode(selection.focusNode);
+      setSelectedPageNum(pageNum);
     }
   };
 
@@ -4918,6 +4924,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                      <div 
                        className="w-full h-full overflow-y-auto bg-[#0f0f10] custom-scrollbar-v"
                        onMouseUp={handlePdfMouseUp}
+                       onContextMenu={handlePdfContextMenu}
                        id="pdf-scroll-container"
                      >
                        <Document
@@ -4933,7 +4940,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         error={<div className="text-red-400 py-12">Failed to load PDF file.</div>}
                       >
                         {Array.from(new Array(pdfNumPages || 0), (el, index) => (
-                          <div key={`page_container_${index + 1}`} id={`pdf-page-${index + 1}`} className="relative pdf-page-wrapper" style={{ transformOrigin: "top center" }}>
+                          <div key={`page_container_${index + 1}`} id={`pdf-page-${index + 1}`} className="relative pdf-page-wrapper" onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); handlePdfContextMenu(e); }} style={{ transformOrigin: "top center" }}>
                             <Page
                               pageNumber={index + 1}
                               renderTextLayer={true}
@@ -5048,6 +5055,159 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           className="w-full py-1.5 bg-[#fb7185] hover:bg-[#fda4af] font-bold text-black text-[11px] rounded-lg transition-colors cursor-pointer text-center select-none"
                         >
                           Save Annotation
+                        </button>
+                      </div>
+                    )}
+
+                    {pdfContextMenu && (
+                      <div 
+                        className="fixed z-[100] bg-[#161618] border border-[#2d2d30] rounded-xl py-1.5 shadow-2xl min-w-[200px] select-none"
+                        style={{
+                          left: `${pdfContextMenu.x}px`,
+                          top: `${pdfContextMenu.y}px`
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="px-3 py-1 text-[10px] text-zinc-500 font-bold uppercase tracking-wider select-none border-b border-[#2d2d30] mb-1 pb-1.5">
+                          PDF Selection
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (selectionText) {
+                              navigator.clipboard.writeText(selectionText);
+                            }
+                            setPdfContextMenu(null);
+                          }}
+                          disabled={!selectionText}
+                          className="w-full flex items-center justify-between px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <Icon icon="ph:copy" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                            <span>Copy Selection</span>
+                          </div>
+                          <span className="text-[9px] text-zinc-600 font-mono">⌘C</span>
+                        </button>
+                        
+                        <button
+                          onClick={() => {
+                            if (selectionText && !selectionPos) {
+                              const outerWorkspace = document.getElementById("pdf-viewer-workspace");
+                              if (outerWorkspace) {
+                                const containerRect = outerWorkspace.getBoundingClientRect();
+                                let posX = pdfContextMenu!.x - containerRect.left;
+                                let posY = pdfContextMenu!.y - containerRect.top - 180; // Offset up
+
+                                // Intelligence: keep popover in container bounds
+                                const popWidth = 280;
+                                if (posX - (popWidth/2) < 10) posX = (popWidth/2) + 10;
+                                if (posX + (popWidth/2) > containerRect.width - 10) posX = containerRect.width - (popWidth/2) - 10;
+                                if (posY < 10) posY = pdfContextMenu!.y - containerRect.top + 20; // Flip to bottom if too high
+
+                                setSelectionPos({ x: posX, y: posY });
+                              }
+                            }
+                            setPdfContextMenu(null);
+                          }}
+                          disabled={!selectionText}
+                          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        >
+                          <Icon icon="ph:note-pencil" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                          <span>Annotate</span>
+                        </button>
+
+                        <button
+                          onClick={async () => {
+                            if (!selectionText) return;
+                            const newAnno = {
+                              id: `anno-${Date.now()}`,
+                              fileId: activeTab.fileId || activeTab.id,
+                              text: selectionText,
+                              comment: "",
+                              page: selectedPageNum || 1,
+                              color: activeHighlightColor,
+                              timestamp: Date.now()
+                            };
+                            const storageKey = `annotations_${activeTab.id || activeTab.fileId}`;
+                            const currentAnnosStr = localStorage.getItem(storageKey) || '[]';
+                            let currentAnnos = [];
+                            try { currentAnnos = JSON.parse(currentAnnosStr); } catch (_) {}
+                            localStorage.setItem(storageKey, JSON.stringify([...currentAnnos, newAnno]));
+                            window.dispatchEvent(new Event('annotationsUpdated'));
+                            if (currentUser) {
+                               try {
+                                 await setDoc(doc(db, 'users', currentUser.uid, 'annotations', newAnno.id), {
+                                   ...newAnno, uid: currentUser.uid
+                                 });
+                               } catch {}
+                            }
+                            setPdfContextMenu(null);
+                            setSelectionText("");
+                            setSelectionPos(null);
+                            setTimeout(highlightPDFSpans, 100);
+                          }}
+                          disabled={!selectionText}
+                          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        >
+                          <Icon icon="ph:highlighter" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                          <span>Quick Highlight</span>
+                        </button>
+
+                        <div className="h-[1px] bg-[#2d2d30] mx-2 my-1" />
+
+                        <button
+                          onClick={() => {
+                            if (selectionText) {
+                               window.open(`https://www.google.com/search?q=${encodeURIComponent(selectionText)}`, '_blank');
+                            }
+                            setPdfContextMenu(null);
+                          }}
+                          disabled={!selectionText}
+                          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        >
+                          <Icon icon="ph:magnifying-glass" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                          <span>Google Search</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            if (selectionText) {
+                               setChatInput(`I found this interesting in the text: "${selectionText}". Can you explain it or link it to my existing research?`);
+                               if (!isSidePanelOpen) setIsSidePanelOpen(true);
+                            }
+                            setPdfContextMenu(null);
+                          }}
+                          disabled={!selectionText}
+                          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        >
+                          <Icon icon="ph:sparkle" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                          <span>Research Assistant</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            if (selectionText) {
+                               window.open(`https://translate.google.com/?sl=auto&tl=en&text=${encodeURIComponent(selectionText)}&op=translate`, '_blank');
+                            }
+                            setPdfContextMenu(null);
+                          }}
+                          disabled={!selectionText}
+                          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        >
+                          <Icon icon="ph:translate" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                          <span>Translate Selection</span>
+                        </button>
+
+                        <div className="h-[1px] bg-[#2d2d30] mx-2 my-1" />
+
+                        <button
+                          onClick={() => {
+                            window.print();
+                            setPdfContextMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors group"
+                        >
+                          <Icon icon="ph:printer" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                          <span>Print Page</span>
                         </button>
                       </div>
                     )}
