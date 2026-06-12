@@ -1,19 +1,27 @@
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { auth, googleProvider, signInWithPopup } from '../firebase';
+import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
+import { auth, googleProvider } from '../firebase';
+import { signInWithPopup, signInWithCustomToken } from 'firebase/auth';
 
 export const handleGoogleLogin = async () => {
-  // Detect if we are inside Tauri
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
   if (isTauri) {
-    try {
-      // Breakout to system browser to handle authentication
-      await openUrl('https://cosmiwise.vercel.app/login-redirect');
-    } catch (err) {
-      console.error("Tauri breakout failed:", err);
-    }
+    // 1. Listen for the deep link callback FIRST
+    await onOpenUrl(async (urls) => {
+      const url = urls[0];
+      const params = new URL(url).searchParams;
+      const token = params.get('token'); // grab token from redirect
+
+      if (token) {
+        await signInWithCustomToken(auth, token); // log in with firebase
+      }
+    });
+
+    // 2. Then open browser to your OAuth page
+    await openUrl('https://cosmiwise.vercel.app/login-redirect');
+
   } else {
-    // Normal web behavior: use the popup
     await signInWithPopup(auth, googleProvider);
   }
 };
