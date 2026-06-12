@@ -298,31 +298,48 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
     setErrorMessage('');
-    setSuccessMessage('');
-    try {
-      const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-      
-      if (isTauri) {
+    
+    const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  
+    if (isTauri) {
+      try {
+        // open Google OAuth in system browser
         const { openUrl } = await import('@tauri-apps/plugin-opener');
-        
-        // open google auth in system browser
+        const { onOpenUrl } = await import('@tauri-apps/plugin-deep-link');
+        const { signInWithCustomToken } = await import('firebase/auth');
+  
+        const unlisten = await onOpenUrl(async (urls) => {
+          try {
+            const url = new URL(urls[0]);
+            const token = url.searchParams.get('token');
+            if (token) {
+              await signInWithCustomToken(auth, token);
+              unlisten();
+              onSuccess?.();
+            }
+          } catch (err: any) {
+            setErrorMessage('Login failed. Try again.');
+          } finally {
+            setIsLoading(false);
+          }
+        });
+  
         await openUrl('https://cosmiwise.vercel.app/?google_callback=1');
-      } else {
-        if (onGoogleSignIn) {
-          await onGoogleSignIn();
-        } else {
-          await signInWithPopup(auth, googleProvider);
-        }
-        onSuccess?.();
-      }
-    } catch (err: any) {
-      console.error("Google Sign-In failed:", err);
-      if (err.code === 'auth/popup-blocked') {
-        setErrorMessage('Pop-up blocked. Please enable pop-ups for this site.');
-      } else {
+  
+      } catch (err: any) {
+        console.error('Google Sign-In failed:', err);
         setErrorMessage(err.message || 'Failed to sign in with Google');
+        setIsLoading(false);
       }
-      setIsLoading(false);
+    } else {
+      try {
+        await signInWithPopup(auth, googleProvider);
+        onSuccess?.();
+      } catch (err: any) {
+        setErrorMessage(err.message || 'Failed to sign in with Google');
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
