@@ -1715,6 +1715,17 @@ export default function App() {
     };
 
     const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        const userToStore = {
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName,
+          photoURL: user.photoURL,
+        };
+        localStorage.setItem("cosmi_user_snapshot", JSON.stringify(userToStore));
+      } else {
+        localStorage.removeItem("cosmi_user_snapshot");
+      }
       setCurrentUser(user);
       currentUserIdRef.current = user ? user.uid : null;
       setIsAuthLoading(false);
@@ -1725,7 +1736,16 @@ export default function App() {
     getRedirectResult(auth)
       .then((result) => {
         if (result?.user) {
-          console.log("Successfully signed in via redirect:", result.user.email);
+          const userToStore = {
+            uid: result.user.uid,
+            email: result.user.email,
+            displayName: result.user.displayName,
+            photoURL: result.user.photoURL,
+          };
+          localStorage.setItem("cosmi_user_snapshot", JSON.stringify(userToStore));
+          setCurrentUser(result.user);
+          currentUserIdRef.current = result.user.uid;
+          setIsAuthLoading(false);
         }
       })
       .catch((error) => {
