@@ -302,45 +302,29 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     try {
       const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
       
-      if (isTauri && !window.location.search.includes('tauri_auth=1')) {
-        // open google auth in a child window inside the app 🔥
-        const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-        const { listen } = await import('@tauri-apps/api/event');
-        const { signInWithCredential, GoogleAuthProvider } = await import('firebase/auth');
+      if (isTauri) {
+        const { openUrl } = await import('@tauri-apps/plugin-opener');
+        const { onOpenUrl } = await import('@tauri-apps/plugin-deep-link');
+        const { signInWithCustomToken } = await import('firebase/auth');
 
-        const authWindow = new WebviewWindow('google-auth', {
-          url: 'https://cosmiwise.vercel.app/?tauri_auth=1',
-          title: 'Sign in with Google',
-          width: 500,
-          height: 700,
-          center: true,
+        // listen for deep link callback
+        await onOpenUrl(async (urls) => {
+          const url = new URL(urls[0]);
+          const token = url.searchParams.get('token');
+          if (token) {
+            await signInWithCustomToken(auth, token);
+            onSuccess?.();
+            setIsLoading(false);
+          }
         });
 
-        const unlisten = await listen('tauri://auth-complete', async (event: any) => {
-          const { idToken } = event.payload;
-          const credential = GoogleAuthProvider.credential(idToken);
-          await signInWithCredential(auth, credential);
-          await authWindow.close();
-          unlisten();
-          onSuccess?.();
-          setIsLoading(false);
-        });
-
+        // open google auth in system browser
+        await openUrl('https://cosmiwise.vercel.app/auth/callback?from=desktop');
       } else {
         if (onGoogleSignIn) {
           await onGoogleSignIn();
         } else {
-          const result = await signInWithPopup(auth, googleProvider);
-          const { GoogleAuthProvider } = await import('firebase/auth');
-          const credential = GoogleAuthProvider.credentialFromResult(result);
-          
-          if (window.location.search.includes('tauri_auth=1')) {
-            const { emit } = await import('@tauri-apps/api/event');
-            await emit('tauri://auth-complete', { 
-              idToken: credential?.idToken 
-            });
-            return; // Don't call onSuccess in child window as it will be handled by the parent
-          }
+          await signInWithPopup(auth, googleProvider);
         }
         onSuccess?.();
       }
