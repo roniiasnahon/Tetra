@@ -1730,6 +1730,18 @@ export default function App() {
       return;
     }
 
+    // Handle Firebase Redirect result (important for environments where popups are blocked)
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          syncUserToLocal(result.user);
+          setCurrentUser(result.user);
+        }
+      })
+      .catch((error) => {
+        console.error("Redirect auth error:", error);
+      });
+
     const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
       syncUserToLocal(user);
       setCurrentUser(user);
@@ -1757,13 +1769,14 @@ export default function App() {
 
     if (isTauri) {
       try {
-        // Breakout: Tell the OS to open the URL in the system browser
-        // We hit the specialized route we handled in the useEffect above
-        await openUrl("https://cosmiwise.vercel.app/login-redirect");
+        // Use internal redirect instead of breakout to system browser.
+        // This avoids popups AND ensures the session is saved in the app's webview.
+        await signInWithRedirect(auth, googleProvider);
       } catch (err) {
-        console.error("Tauri breakout failed:", err);
-        // Fallback if breakout fails
-        await signInWithPopup(auth, googleProvider);
+        console.error("Tauri redirect login failed:", err);
+        // Fallback to breakout only if internal redirect fails
+        const { openUrl } = await import("@tauri-apps/plugin-opener");
+        await openUrl("https://cosmiwise.vercel.app/login-redirect");
       }
     } else {
       // Normal web behavior: use the popup
