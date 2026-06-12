@@ -1395,8 +1395,16 @@ export default function App() {
   const [collaborators, setCollaborators] = useState<any[]>([]);
   const [presence, setPresence] = useState<Record<string, any>>({});
   const presenceIdRef = useRef(
-    `guest-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    localStorage.getItem("cosmi_presence_id") ||
+      `guest-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
   );
+
+  // Initialize once
+  useEffect(() => {
+    if (!localStorage.getItem("cosmi_presence_id")) {
+      localStorage.setItem("cosmi_presence_id", presenceIdRef.current);
+    }
+  }, []);
   const lastLocalEditTimeRef = useRef<number>(0);
   const lastSyncTimeRef = useRef<number>(0);
   const lastReceivedSnapshotTabsStr = useRef<string>("");
@@ -2059,7 +2067,7 @@ export default function App() {
               const data = snapshot.data();
               const now = Date.now();
               const isTypingActiveTab =
-                now - lastLocalEditTimeRef.current < 750;
+                now - lastLocalEditTimeRef.current < 5000;
 
               if (data.tabs && Array.isArray(data.tabs)) {
                 setTabs((prev) => {
@@ -3085,6 +3093,11 @@ export default function App() {
 
       const now = Date.now();
       const timeSinceLastSync = now - lastSyncTimeRef.current;
+
+      // If we edited locally very recently, wait for debounce
+      if (now - lastLocalEditTimeRef.current < 2000 && timeSinceLastSync < 2000) {
+        return;
+      }
 
       // If they are actively typing but haven't synced for more than 400ms, force sync!
       if (timeSinceLastSync >= 400) {
@@ -4345,9 +4358,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
   const isReadOnly =
     sharedLibraryId !== null ||
-    (sharedWorkspaceId !== null &&
-      workspacePrivacy === "view" &&
-      !isWorkspaceOwner);
+    (sharedWorkspaceId !== null && !isWorkspaceOwner);
 
   if (isAuthLoading) {
     return (
@@ -6893,46 +6904,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       )}
 
                       <div className="space-y-4">
-                        {/* Collaborative Generator Tools */}
-                        {!sharedWorkspaceId && !sharedLibraryId && (
-                          <div className="grid grid-cols-2 gap-3 pb-2 border-b border-[#2d2d30]">
-                            <button
-                              disabled={isSharingLoading}
-                              onClick={handleGenerateWorkspaceShareLink}
-                              className="flex flex-col items-center justify-center p-4 bg-[#18181b] border border-[#27272a] hover:border-zinc-500 rounded-xl transition-all text-center cursor-pointer disabled:opacity-40"
-                            >
-                              <Icon
-                                icon="ph:users-three-fill"
-                                className="w-6 h-6 text-emerald-400 mb-2"
-                              />
-                              <span className="text-[#f4f4f5] text-[11.5px] font-semibold">
-                                Share Workspace
-                              </span>
-                              <span className="text-zinc-500 text-[9.5px] mt-1 leading-snug">
-                                Generate a real-time edit link for team
-                                collaboration
-                              </span>
-                            </button>
-
-                            <button
-                              disabled={isSharingLoading}
-                              onClick={handleGenerateLibraryShareLink}
-                              className="flex flex-col items-center justify-center p-4 bg-[#18181b] border border-[#27272a] hover:border-zinc-500 rounded-xl transition-all text-center cursor-pointer disabled:opacity-40"
-                            >
-                              <Icon
-                                icon="ph:books-fill"
-                                className="w-6 h-6 text-indigo-400 mb-2"
-                              />
-                              <span className="text-[#f4f4f5] text-[11.5px] font-semibold">
-                                Share Research Library
-                              </span>
-                              <span className="text-zinc-500 text-[9.5px] mt-1 leading-snug">
-                                Generate a public link to library documents
-                              </span>
-                            </button>
-                          </div>
-                        )}
-
                         {/* Display generated link */}
                         {generatedLink && (
                           <div className="bg-[#161618] border border-zinc-700 rounded-xl p-4 text-left">
@@ -9560,45 +9531,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
               </h3>
             </div>
             <p className="text-zinc-400 text-xs mb-5">
-              Invite contributors to review and edit this document in real-time.
+              Generate a shareable link to this document.
             </p>
 
-            {/* General Access */}
-            {generatedLinkType === "workspace" && (
-              <div className="space-y-3 mb-5 bg-[#18181b]/30 p-4 rounded-xl border border-[#27272a]/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-[#1c1c1e] flex items-center justify-center shrink-0 text-zinc-300 border border-[#27272a]">
-                    <Icon
-                      icon={
-                        workspacePrivacy === "edit"
-                          ? "ph:globe-hemisphere-east"
-                          : "ph:lock"
-                      }
-                      className="w-5 h-5 text-zinc-400"
-                    />
-                  </div>
-                  <div>
-                    <h4 className="text-[13px] font-semibold text-[#f4f4f5] leading-none mb-1">
-                      General access
-                    </h4>
-                    <p className="text-[10.5px] text-zinc-500">
-                      {workspacePrivacy === "edit"
-                        ? "Anyone with this link can co-edit"
-                        : "Anyone with this link can only view"}
-                    </p>
-                  </div>
-                </div>
-                <select
-                  value={workspacePrivacy}
-                  onChange={handlePrivacyChange}
-                  disabled={workspaceOwnerId !== null && !isWorkspaceOwner}
-                  className="bg-[#1c1c1e] text-[11px] cursor-pointer text-zinc-200 border border-[#2d2d30] rounded-lg px-2.5 py-1.5 outline-none hover:bg-[#27272a] transition-all focus:outline-none w-full sm:w-auto min-w-[100px]"
-                >
-                  <option value="view">Viewer</option>
-                  <option value="edit">Editor</option>
-                </select>
-              </div>
-            )}
+            {/* General Access removed as per user request to only share documents and owner only typing */}
 
             {/* Copier Input Bar */}
             <div className="space-y-1.5 mb-5">
