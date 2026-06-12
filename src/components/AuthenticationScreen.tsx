@@ -306,7 +306,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
         const { openUrl } = await import('@tauri-apps/plugin-opener');
         
         // open google auth in system browser
-        await openUrl('https://cosmiwise.vercel.app/?tauri_auth=1');
+        await openUrl('https://cosmiwise.vercel.app/?google_callback=1');
       } else {
         if (onGoogleSignIn) {
           await onGoogleSignIn();
