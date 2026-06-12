@@ -1399,6 +1399,7 @@ export default function App() {
   );
   const lastLocalEditTimeRef = useRef<number>(0);
   const lastSyncTimeRef = useRef<number>(0);
+  const lastReceivedSnapshotTabsStr = useRef<string>("");
   const [workspaceVisitors, setWorkspaceVisitors] = useState<any[]>([]);
   const [workspacePrivacy, setWorkspacePrivacy] = useState<"edit" | "view">(
     "edit",
@@ -2062,7 +2063,10 @@ export default function App() {
 
               if (data.tabs && Array.isArray(data.tabs)) {
                 setTabs((prev) => {
-                  if (!isSessionLoaded) return data.tabs;
+                  if (!isSessionLoaded) {
+                    lastReceivedSnapshotTabsStr.current = JSON.stringify(data.tabs);
+                    return data.tabs;
+                  }
                   const merged = data.tabs.map((incomingTab: Tab) => {
                     const localTab = prev.find((t) => t.id === incomingTab.id);
                     if (
@@ -2102,6 +2106,7 @@ export default function App() {
                     }
                   });
 
+                  lastReceivedSnapshotTabsStr.current = JSON.stringify(merged);
                   return merged;
                 });
 
@@ -3070,6 +3075,14 @@ export default function App() {
     if (!isSessionLoaded || !tabs || tabs.length === 0) return;
 
     if (sharedWorkspaceId) {
+      const cleanTabs = JSON.parse(JSON.stringify(tabs));
+      const cleanTabsStr = JSON.stringify(cleanTabs);
+
+      if (cleanTabsStr === lastReceivedSnapshotTabsStr.current) {
+        // This precise state was received from the network. Do not echo it back.
+        return;
+      }
+
       const now = Date.now();
       const timeSinceLastSync = now - lastSyncTimeRef.current;
 
@@ -3077,7 +3090,6 @@ export default function App() {
       if (timeSinceLastSync >= 400) {
         lastSyncTimeRef.current = now;
         const sessionRef = doc(db, "shared_workspaces", sharedWorkspaceId);
-        const cleanTabs = JSON.parse(JSON.stringify(tabs));
         const cleanMessages = JSON.parse(JSON.stringify(messages));
 
         setDoc(
@@ -3099,7 +3111,6 @@ export default function App() {
       const handler = setTimeout(() => {
         lastSyncTimeRef.current = Date.now();
         const sessionRef = doc(db, "shared_workspaces", sharedWorkspaceId);
-        const cleanTabs = JSON.parse(JSON.stringify(tabs));
         const cleanMessages = JSON.parse(JSON.stringify(messages));
 
         setDoc(
@@ -5525,7 +5536,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               </span>
                             )}
                           </div>
-                          <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 pointer-events-none hidden group-hover/avatar:block bg-zinc-950 border border-zinc-800 text-zinc-200 text-[9px] font-medium px-1.5 py-0.5 rounded shadow-lg whitespace-nowrap z-[150]">
+                          <div className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 pointer-events-none hidden group-hover/avatar:block bg-zinc-950 border border-zinc-800 text-zinc-200 text-[9px] font-medium px-1.5 py-0.5 rounded shadow-lg whitespace-nowrap z-[150]">
                             {p.displayName || "Guest User"}
                           </div>
                         </div>
@@ -7652,7 +7663,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                   </span>
                                 )}
                               </div>
-                              <div className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 pointer-events-none hidden group-hover/avatar:block bg-zinc-950 border border-zinc-800 text-zinc-200 text-[10px] font-medium px-2 py-0.5 rounded shadow-lg whitespace-nowrap z-[150]">
+                              <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 pointer-events-none hidden group-hover/avatar:block bg-zinc-950 border border-zinc-800 text-zinc-200 text-[10px] font-medium px-2 py-0.5 rounded shadow-lg whitespace-nowrap z-[150]">
                                 {p.displayName || "Guest User"}
                               </div>
                             </div>
@@ -8256,7 +8267,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 </span>
                               )}
                             </div>
-                            <div className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 pointer-events-none hidden group-hover/avatar:block bg-zinc-950 border border-zinc-800 text-zinc-200 text-[10.5px] font-medium px-2 py-1 rounded shadow-lg whitespace-nowrap z-[150]">
+                            <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 pointer-events-none hidden group-hover/avatar:block bg-zinc-950 border border-zinc-800 text-zinc-200 text-[10.5px] font-medium px-2 py-1 rounded shadow-lg whitespace-nowrap z-[150]">
                               {p.displayName || "Guest User"}
                             </div>
                           </div>
