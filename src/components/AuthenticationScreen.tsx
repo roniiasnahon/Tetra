@@ -302,7 +302,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     try {
       const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
       
-      if (isTauri) {
+      if (isTauri && !window.location.search.includes('tauri_auth=1')) {
         // open google auth in a child window inside the app 🔥
         const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
         const { listen } = await import('@tauri-apps/api/event');
@@ -330,7 +330,17 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
         if (onGoogleSignIn) {
           await onGoogleSignIn();
         } else {
-          await signInWithPopup(auth, googleProvider);
+          const result = await signInWithPopup(auth, googleProvider);
+          const { GoogleAuthProvider } = await import('firebase/auth');
+          const credential = GoogleAuthProvider.credentialFromResult(result);
+          
+          if (window.location.search.includes('tauri_auth=1')) {
+            const { emit } = await import('@tauri-apps/api/event');
+            await emit('tauri://auth-complete', { 
+              idToken: credential?.idToken 
+            });
+            return; // Don't call onSuccess in child window as it will be handled by the parent
+          }
         }
         onSuccess?.();
       }

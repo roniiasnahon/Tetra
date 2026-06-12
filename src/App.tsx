@@ -1183,6 +1183,7 @@ export default function App() {
   });
 
   // Handle Tauri authentication redirection
+  /* 
   useEffect(() => {
     const handleTauriAuth = async () => {
       const params = new URLSearchParams(window.location.search);
@@ -1200,6 +1201,8 @@ export default function App() {
     };
     handleTauriAuth();
   }, []);
+  */
+
 
   const currentUserIdRef = useRef<string | null>(
     currentUser ? currentUser.uid : null,
