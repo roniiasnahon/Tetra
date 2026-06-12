@@ -1184,33 +1184,19 @@ export default function App() {
 
   // Handle Tauri authentication redirection
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    
-    if (params.get('google_callback') === '1') {
-      const doAuth = async () => {
-        try {
-          const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
-          
-          const result = await signInWithPopup(auth, googleProvider);
-          const idToken = await result.user.getIdToken();
-
-          // call your backend for custom token
-          const res = await fetch('/api/auth/custom-token', {
-            method: 'POST',
-            body: JSON.stringify({ idToken }),
-            headers: { 'Content-Type': 'application/json' }
-          });
-          const { customToken } = await res.json();
-
-          // redirect back to desktop app 🔥
-          window.location.href = `cosmiwise://auth?token=${customToken}`;
-
-        } catch (err: any) {
-          console.error('callback auth failed', err.code, err.message);
+    const checkRedirect = async () => {
+      try {
+        const { getRedirectResult } = await import('firebase/auth');
+        const result = await getRedirectResult(auth);
+        if (result?.user) {
+          // user is logged in 🔥
+          console.log('redirect login success', result.user);
         }
-      };
-      doAuth();
-    }
+      } catch (err: any) {
+        console.error('redirect result error:', err.code, err.message);
+      }
+    };
+    checkRedirect();
   }, []);
 
   const currentUserIdRef = useRef<string | null>(
