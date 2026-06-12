@@ -1,7 +1,7 @@
 {
   "build": {
-    "devPath": "https://ais-pre-phgcpzoj4mc2krne2ezqca-712227639235.asia-east1.run.app",
-    "distDir": "https://ais-pre-phgcpzoj4mc2krne2ezqca-712227639235.asia-east1.run.app"
+    "devPath": "https://cosmiwise.vercel.app",
+    "distDir": "https://cosmiwise.vercel.app"
   },
   "package": {
     "productName": "Cosmi",
@@ -17,11 +17,7 @@
       "copyright": "",
       "externalBin": [],
       "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
+        "cosmi.png"
       ],
       "identifier": "com.cosmi.research.app",
       "longDescription": "Interactive research assistant",
