@@ -33,8 +33,6 @@ import {
   handleFirestoreError,
   signInWithPopup,
   googleProvider,
-  signInWithRedirect,
-  getRedirectResult,
   signOut,
 } from "./firebase";
 import {
@@ -1725,22 +1723,9 @@ export default function App() {
     };
 
     // Handle login breakout trigger
-    if (window.location.pathname === "/login-redirect") {
-      signInWithRedirect(auth, googleProvider);
-      return;
-    }
+    // (code removed)
 
-    // Handle Firebase Redirect result (important for environments where popups are blocked)
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result?.user) {
-          syncUserToLocal(result.user);
-          setCurrentUser(result.user);
-        }
-      })
-      .catch((error) => {
-        console.error("Redirect auth error:", error);
-      });
+    // Handle Firebase Redirect result (removed as Tauri breakout is preferred)
 
     const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
       syncUserToLocal(user);
@@ -1769,14 +1754,11 @@ export default function App() {
 
     if (isTauri) {
       try {
-        // Use internal redirect instead of breakout to system browser.
-        // This avoids popups AND ensures the session is saved in the app's webview.
-        await signInWithRedirect(auth, googleProvider);
-      } catch (err) {
-        console.error("Tauri redirect login failed:", err);
-        // Fallback to breakout only if internal redirect fails
+        // Breakout to system browser to handle authentication
         const { openUrl } = await import("@tauri-apps/plugin-opener");
         await openUrl("https://cosmiwise.vercel.app/login-redirect");
+      } catch (err) {
+        console.error("Tauri breakout failed:", err);
       }
     } else {
       // Normal web behavior: use the popup
