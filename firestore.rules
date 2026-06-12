@@ -165,6 +165,10 @@ service cloud.firestore {
         allow create, update: if isValidId(workspaceId) && isValidId(annotationId) && isValidAnnotation(incoming());
         allow delete: if isValidId(workspaceId) && isValidId(annotationId);
       }
+      match /presence/{memberId} {
+        allow list, get: if isValidId(workspaceId);
+        allow create, update, delete: if isValidId(workspaceId);
+      }
     }
 
     // 6. Shared Libraries

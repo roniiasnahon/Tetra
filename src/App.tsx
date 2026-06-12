@@ -1061,6 +1061,8 @@ export default function App() {
     }
   });
   const [collaborators, setCollaborators] = useState<any[]>([]);
+  const [presence, setPresence] = useState<Record<string, any>>({});
+  const presenceIdRef = useRef(`guest-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`);
 
   const [isSessionLoaded, setIsSessionLoaded] = useState(false);
   const [isCloudMenuOpen, setIsCloudMenuOpen] = useState(false);
@@ -1390,6 +1392,7 @@ export default function App() {
     let unsubPapers = () => {};
     let unsubChats = () => {};
     let unsubAnnos = () => {};
+    let unsubPresence = () => {};
 
     const setupListeners = async (user: any) => {
       // Clean up previous listeners
@@ -1397,6 +1400,7 @@ export default function App() {
       unsubPapers();
       unsubChats();
       unsubAnnos();
+      unsubPresence();
 
       if (sharedWorkspaceId) {
         // --- 1. COLLABORATIVE WORKSPACE MODE ---
@@ -1497,6 +1501,21 @@ export default function App() {
           window.dispatchEvent(new Event('annotationsUpdated'));
         }, (error) => {
           console.error("Collaborative annotations sync error:", error);
+        });
+
+        const presenceColRef = collection(db, 'shared_workspaces', sharedWorkspaceId, 'presence');
+        unsubPresence = onSnapshot(presenceColRef, (snapshot) => {
+          const loadedPresence: Record<string, any> = {};
+          const now = Date.now();
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            if (now - (data.lastActive || 0) < 5 * 60 * 1000) {
+              loadedPresence[doc.id] = data;
+            }
+          });
+          setPresence(loadedPresence);
+        }, (error) => {
+          console.error("Collaborative presence sync error:", error);
         });
 
         // Load collaborative session document
@@ -2104,6 +2123,34 @@ export default function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages, isAiTyping]);
+
+  // Presence reporting loop for shared workspaces
+  useEffect(() => {
+    if (!sharedWorkspaceId || !isSessionLoaded) return;
+    
+    let pid = currentUser ? currentUser.uid : presenceIdRef.current;
+    let fallbackName = currentUser ? (currentUser.displayName || currentUser.email?.split('@')[0]) : `Guest ${pid.substr(-4)}`;
+    fallbackName = fallbackName || 'Anonymous';
+    
+    const colors = ['bg-red-500', 'bg-blue-500', 'bg-emerald-500', 'bg-purple-500', 'bg-pink-500', 'bg-amber-500'];
+    const pColor = colors[parseInt(pid.replace(/\D/g, '') || '0') % colors.length] || 'bg-zinc-500';
+
+    const pRef = doc(db, 'shared_workspaces', sharedWorkspaceId, 'presence', pid);
+    
+    const updatePresence = () => {
+      setDoc(pRef, {
+        displayName: fallbackName,
+        color: pColor,
+        activeTabId,
+        lastActive: Date.now()
+      }).catch(() => {});
+    };
+
+    updatePresence();
+    const interval = setInterval(updatePresence, 30000);
+    
+    return () => clearInterval(interval);
+  }, [sharedWorkspaceId, activeTabId, currentUser, isSessionLoaded]);
 
   // Sync workspace session to Firestore periodically when changes occur
   useEffect(() => {
@@ -3930,6 +3977,19 @@ Once you have content, I can help you draft sections, summarize findings, or for
         <span className="truncate max-w-[130px]">
           {tab.type === 'home' ? 'Home' : tab.type === 'library' ? 'Library' : tab.type === 'tools' ? 'Tools' : (tab.id === activeTabId && tab.type === 'document' && (!tab.fileId || tab.mimetype !== 'application/pdf') ? documentTitle : cleanTitleStr(tab.title)) || 'Untitled'}
         </span>
+        
+        {sharedWorkspaceId && (
+          <div className="flex -space-x-1 ml-1 items-center">
+            {Object.entries(presence)
+               .filter(([k, p]) => k !== (currentUser ? currentUser.uid : presenceIdRef.current) && p.activeTabId === tab.id)
+               .map(([k, p]) => (
+                <div key={k} className={`w-[14px] h-[14px] rounded-full ${p.color} flex items-center justify-center border border-[#121212] z-10 shrink-0`} title={p.displayName}>
+                  <span className="text-[7.5px] font-bold text-white leading-none">{p.displayName?.charAt(0)?.toUpperCase()}</span>
+                </div>
+            ))}
+          </div>
+        )}
+
         {tabs.length > 1 && (
           <button 
             onClick={(e) => {
