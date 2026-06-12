@@ -304,22 +304,9 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
       
       if (isTauri) {
         const { openUrl } = await import('@tauri-apps/plugin-opener');
-        const { onOpenUrl } = await import('@tauri-apps/plugin-deep-link');
-        const { signInWithCustomToken } = await import('firebase/auth');
-
-        // listen for deep link callback
-        await onOpenUrl(async (urls) => {
-          const url = new URL(urls[0]);
-          const token = url.searchParams.get('token');
-          if (token) {
-            await signInWithCustomToken(auth, token);
-            onSuccess?.();
-            setIsLoading(false);
-          }
-        });
-
+        
         // open google auth in system browser
-        await openUrl('https://cosmiwise.vercel.app/auth/callback?from=desktop');
+        await openUrl('https://cosmiwise.vercel.app/?tauri_auth=1');
       } else {
         if (onGoogleSignIn) {
           await onGoogleSignIn();

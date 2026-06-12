@@ -1078,6 +1078,27 @@ async function startServer() {
     }
   });
 
+  app.post("/api/auth/custom-token", async (req, res) => {
+    try {
+      const { idToken } = req.body;
+      if (!idToken) {
+        return res.status(400).json({ error: "Missing idToken" });
+      }
+
+      // Verify the ID token
+      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      const uid = decodedToken.uid;
+
+      // Create a custom token
+      const customToken = await admin.auth().createCustomToken(uid);
+      
+      res.json({ customToken });
+    } catch (err: any) {
+      console.error("[AUTH] Error creating custom token:", err);
+      res.status(500).json({ error: "Failed to create custom token" });
+    }
+  });
+
   app.get("/api/files/:id", async (req, res) => {
     const file = await getFile(req.params.id);
     if (!file) {

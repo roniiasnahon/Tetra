@@ -1189,23 +1189,58 @@ export default function App() {
     if (params.get('tauri_auth') === '1') {
       const doAuth = async () => {
         try {
-          const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
-          
-          // popup works fine in child window 🔥
-          const result = await signInWithPopup(auth, googleProvider);
-          const credential = GoogleAuthProvider.credentialFromResult(result);
-          
-          const { emit } = await import('@tauri-apps/api/event');
-          await emit('tauri://auth-complete', { idToken: credential?.idToken });
+          const { onOpenUrl } = await import('@tauri-apps/plugin-deep-link');
+          const { signInWithCustomToken } = await import('firebase/auth');
 
-          const { getCurrentWindow } = await import('@tauri-apps/api/window');
-          await getCurrentWindow().close();
-          
+          // listen for deep link coming back
+          const unlisten = await onOpenUrl(async (urls) => {
+            const url = new URL(urls[0]);
+            const token = url.searchParams.get('token');
+            if (token) {
+              await signInWithCustomToken(auth, token);
+              unlisten();
+              window.location.href = '/';
+            }
+          });
+
+          // trigger google auth in system browser
+          const { openUrl } = await import('@tauri-apps/plugin-opener');
+          await openUrl('https://cosmiwise.vercel.app/?google_callback=1');
+
         } catch (err: any) {
-          console.error('auth failed', err.code, err.message);
+          console.error('auth failed', err);
         }
       };
+      doAuth();
+    }
+  }, []);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    
+    if (params.get('google_callback') === '1') {
+      const doAuth = async () => {
+        try {
+          const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
+          
+          const result = await signInWithPopup(auth, googleProvider);
+          const idToken = await result.user.getIdToken();
+
+          // call your backend for custom token
+          const res = await fetch('/api/auth/custom-token', {
+            method: 'POST',
+            body: JSON.stringify({ idToken }),
+            headers: { 'Content-Type': 'application/json' }
+          });
+          const { customToken } = await res.json();
+
+          // redirect back to desktop app 🔥
+          window.location.href = `cosmiwise://auth?token=${customToken}`;
+
+        } catch (err: any) {
+          console.error('callback auth failed', err);
+        }
+      };
       doAuth();
     }
   }, []);
