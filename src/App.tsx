@@ -2140,6 +2140,7 @@ export default function App() {
     const updatePresence = () => {
       setDoc(pRef, {
         displayName: fallbackName,
+        photoURL: currentUser ? currentUser.photoURL : null,
         color: pColor,
         activeTabId,
         lastActive: Date.now()
@@ -3983,8 +3984,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
             {Object.entries(presence)
                .filter(([k, p]) => k !== (currentUser ? currentUser.uid : presenceIdRef.current) && p.activeTabId === tab.id)
                .map(([k, p]) => (
-                <div key={k} className={`w-[14px] h-[14px] rounded-full ${p.color} flex items-center justify-center border border-[#121212] z-10 shrink-0`} title={p.displayName}>
-                  <span className="text-[7.5px] font-bold text-white leading-none">{p.displayName?.charAt(0)?.toUpperCase()}</span>
+                <div key={k} className={`w-[14px] h-[14px] rounded-full ${p.color} flex items-center justify-center border border-[#121212] z-10 shrink-0 overflow-hidden`} title={p.displayName}>
+                  {p.photoURL ? (
+                    <img src={p.photoURL} alt={p.displayName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <span className="text-[7.5px] font-bold text-white leading-none">{p.displayName?.charAt(0)?.toUpperCase()}</span>
+                  )}
                 </div>
             ))}
           </div>
@@ -5526,7 +5531,23 @@ Once you have content, I can help you draft sections, summarize findings, or for
                            </button>
                         </div>
                      </div>
-                     <div className="flex items-center">
+                     <div className="flex items-center gap-3">
+                       {sharedWorkspaceId && (
+                         <div className="flex -space-x-1.5 items-center">
+                           {Object.entries(presence)
+                              .filter(([k, p]) => k !== (currentUser ? currentUser.uid : presenceIdRef.current) && p.activeTabId === activeTabId)
+                              .map(([k, p]) => (
+                               <div key={k} className={`w-6 h-6 rounded-full ${p.color} flex items-center justify-center border-[1.5px] border-[#0e0e10] z-10 shrink-0 overflow-hidden`} title={p.displayName}>
+                                 {p.photoURL ? (
+                                   <img src={p.photoURL} alt={p.displayName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                 ) : (
+                                   <span className="text-[10px] font-bold text-white tracking-wide leading-none">{p.displayName?.charAt(0)?.toUpperCase()}</span>
+                                 )}
+                               </div>
+                           ))}
+                         </div>
+                       )}
+
                        {!isSidePanelOpen && (
                          <button
                            onClick={() => setIsSidePanelOpen(true)}
@@ -5922,6 +5943,22 @@ Once you have content, I can help you draft sections, summarize findings, or for
               <div className="relative flex-1 flex flex-col h-full overflow-hidden">
                 {/* Repositioned Auto-Save Indicator next to SidePanel icon */}
                 <div className={`absolute top-3.5 z-30 transition-all duration-200 ${isSidePanelOpen ? 'right-4' : 'right-12'} flex items-center`}>
+                  {sharedWorkspaceId && (
+                    <div className="flex -space-x-1.5 mr-3 items-center">
+                      {Object.entries(presence)
+                         .filter(([k, p]) => k !== (currentUser ? currentUser.uid : presenceIdRef.current) && p.activeTabId === activeTabId)
+                         .map(([k, p]) => (
+                          <div key={k} className={`w-7 h-7 rounded-full ${p.color} flex items-center justify-center border-2 border-[#121212] z-10 shrink-0 shadow-sm overflow-hidden`} title={p.displayName}>
+                            {p.photoURL ? (
+                              <img src={p.photoURL} alt={p.displayName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <span className="text-[11px] font-bold text-white leading-none tracking-wide">{p.displayName?.charAt(0)?.toUpperCase()}</span>
+                            )}
+                          </div>
+                      ))}
+                    </div>
+                  )}
+
                   {docSaveStatus === 'saving' ? (
                     <span className="flex items-center gap-1.5 text-zinc-400 bg-[#121212]/80 px-2.5 py-1.5 rounded-lg backdrop-blur-sm select-none text-[11px] font-mono h-8">
                       <Icon icon="ph:spinner-gap" className="w-3.5 h-3.5 animate-spin text-zinc-400" />
