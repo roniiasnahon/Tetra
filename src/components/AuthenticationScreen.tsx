@@ -301,24 +301,46 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     setSuccessMessage('');
     try {
       const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-      if (onGoogleSignIn) {
-        await onGoogleSignIn();
-      } else {
-        await signInWithPopup(auth, googleProvider);
-      }
       
-      // Only call onSuccess if we're not in Tauri, as Tauri flow completes externally
-      if (!isTauri) {
+      if (isTauri) {
+        // open google auth in a child window inside the app 🔥
+        const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+        const { listen } = await import('@tauri-apps/api/event');
+        const { signInWithCredential, GoogleAuthProvider } = await import('firebase/auth');
+
+        const authWindow = new WebviewWindow('google-auth', {
+          url: 'https://cosmiwise.vercel.app/?tauri_auth=1',
+          title: 'Sign in with Google',
+          width: 500,
+          height: 700,
+          center: true,
+        });
+
+        const unlisten = await listen('tauri://auth-complete', async (event: any) => {
+          const { idToken } = event.payload;
+          const credential = GoogleAuthProvider.credential(idToken);
+          await signInWithCredential(auth, credential);
+          await authWindow.close();
+          unlisten();
+          onSuccess?.();
+          setIsLoading(false);
+        });
+
+      } else {
+        if (onGoogleSignIn) {
+          await onGoogleSignIn();
+        } else {
+          await signInWithPopup(auth, googleProvider);
+        }
         onSuccess?.();
       }
     } catch (err: any) {
       console.error("Google Sign-In failed:", err);
       if (err.code === 'auth/popup-blocked') {
-        setErrorMessage('Pop-up blocked. Please enable pop-ups for this site or click try again.');
+        setErrorMessage('Pop-up blocked. Please enable pop-ups for this site.');
       } else {
         setErrorMessage(err.message || 'Failed to sign in with Google');
       }
-    } finally {
       setIsLoading(false);
     }
   };

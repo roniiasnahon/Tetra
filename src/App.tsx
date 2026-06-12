@@ -1172,7 +1172,7 @@ export default function App() {
   const [folderName, setFolderName] = useState("");
   const [savedNoteName, setSavedNoteName] = useState("");
 
-  // Firebase Authentication & Authorization State
+  // Authentication & session loaded state
   const [currentUser, setCurrentUser] = useState<any>(() => {
     try {
       const cached = localStorage.getItem("cosmi_user_snapshot");
@@ -1181,6 +1181,26 @@ export default function App() {
       return null;
     }
   });
+
+  // Handle Tauri authentication redirection
+  useEffect(() => {
+    const handleTauriAuth = async () => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('tauri_auth') === '1') {
+        const { emit } = await import('@tauri-apps/api/event');
+        const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
+        
+        const result = await signInWithPopup(auth, googleProvider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        
+        await emit('tauri://auth-complete', { 
+          idToken: credential?.idToken 
+        });
+      }
+    };
+    handleTauriAuth();
+  }, []);
+
   const currentUserIdRef = useRef<string | null>(
     currentUser ? currentUser.uid : null,
   );
