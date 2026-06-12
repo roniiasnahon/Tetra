@@ -1724,10 +1724,18 @@ export default function App() {
 
     let isMounted = true;
     let authUnsubscribe: (() => void) | null = null;
+    let isInitialAuthCheckDone = false;
 
     const initializeAuth = async () => {
+      let authFired = false;
+      const maybeDone = () => {
+        if (isInitialAuthCheckDone && authFired && isMounted) {
+          setIsAuthLoading(false);
+        }
+      };
+
       try {
-        // 1. Check for a redirect result first
+        // 1. Check for a redirect result first (crucial for Tauri/Mobile)
         const result = await getRedirectResult(auth);
         if (result?.user && isMounted) {
           syncUserToLocal(result.user);
@@ -1736,6 +1744,9 @@ export default function App() {
         }
       } catch (error) {
         console.error("Redirect check failed:", error);
+      } finally {
+        isInitialAuthCheckDone = true;
+        maybeDone();
       }
 
       if (!isMounted) return;
@@ -1752,9 +1763,18 @@ export default function App() {
           setupListeners(user);
         }
         
-        // 3. Finally reveal the UI
-        setIsAuthLoading(false);
+        authFired = true;
+        maybeDone();
       });
+      
+      // Fallback: If onAuthStateChanged takes too long but we finished redirect check
+      setTimeout(() => {
+        if (isMounted) {
+          isInitialAuthCheckDone = true;
+          authFired = true;
+          maybeDone();
+        }
+      }, 3500);
     };
 
     initializeAuth();
