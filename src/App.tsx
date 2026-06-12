@@ -1184,67 +1184,20 @@ export default function App() {
 
   // Handle Tauri authentication redirection
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    
-    if (params.get('tauri_auth') === '1') {
-      const doAuth = async () => {
-        try {
-          const { onOpenUrl } = await import('@tauri-apps/plugin-deep-link');
-          const { signInWithCustomToken } = await import('firebase/auth');
-
-          // listen for deep link coming back
-          const unlisten = await onOpenUrl(async (urls) => {
-            const url = new URL(urls[0]);
-            const token = url.searchParams.get('token');
-            if (token) {
-              await signInWithCustomToken(auth, token);
-              unlisten();
-              window.location.href = '/';
-            }
-          });
-
-          // trigger google auth in system browser
-          const { openUrl } = await import('@tauri-apps/plugin-opener');
-          await openUrl('https://cosmiwise.vercel.app/?google_callback=1');
-
-        } catch (err: any) {
-          console.error('auth failed', err);
+    const checkRedirect = async () => {
+      try {
+        const { getRedirectResult } = await import('firebase/auth');
+        const result = await getRedirectResult(auth);
+        if (result?.user) {
+          // user is logged in 🔥
+          console.log('redirect login success', result.user);
         }
-      };
-      doAuth();
-    }
+      } catch (err: any) {
+        console.error('redirect result error:', err.code, err.message);
+      }
+    };
+    checkRedirect();
   }, []);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    
-    if (params.get('google_callback') === '1') {
-      const doAuth = async () => {
-        try {
-          const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
-          
-          const result = await signInWithPopup(auth, googleProvider);
-          const idToken = await result.user.getIdToken();
-
-          // call your backend for custom token
-          const res = await fetch('/api/auth/custom-token', {
-            method: 'POST',
-            body: JSON.stringify({ idToken }),
-            headers: { 'Content-Type': 'application/json' }
-          });
-          const { customToken } = await res.json();
-
-          // redirect back to desktop app 🔥
-          window.location.href = `cosmiwise://auth?token=${customToken}`;
-
-        } catch (err: any) {
-          console.error('callback auth failed', err);
-        }
-      };
-      doAuth();
-    }
-  }, []);
-
 
   const currentUserIdRef = useRef<string | null>(
     currentUser ? currentUser.uid : null,

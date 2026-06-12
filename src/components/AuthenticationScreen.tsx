@@ -299,47 +299,13 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     setIsLoading(true);
     setErrorMessage('');
     
-    const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-  
-    if (isTauri) {
-      try {
-        // open Google OAuth in system browser
-        const { openUrl } = await import('@tauri-apps/plugin-opener');
-        const { onOpenUrl } = await import('@tauri-apps/plugin-deep-link');
-        const { signInWithCustomToken } = await import('firebase/auth');
-  
-        const unlisten = await onOpenUrl(async (urls) => {
-          try {
-            const url = new URL(urls[0]);
-            const token = url.searchParams.get('token');
-            if (token) {
-              await signInWithCustomToken(auth, token);
-              unlisten();
-              onSuccess?.();
-            }
-          } catch (err: any) {
-            setErrorMessage('Login failed. Try again.');
-          } finally {
-            setIsLoading(false);
-          }
-        });
-  
-        await openUrl('https://cosmiwise.vercel.app/?google_callback=1');
-  
-      } catch (err: any) {
-        console.error('Google Sign-In failed:', err);
-        setErrorMessage(err.message || 'Failed to sign in with Google');
-        setIsLoading(false);
-      }
-    } else {
-      try {
-        await signInWithPopup(auth, googleProvider);
-        onSuccess?.();
-      } catch (err: any) {
-        setErrorMessage(err.message || 'Failed to sign in with Google');
-      } finally {
-        setIsLoading(false);
-      }
+    try {
+      const { signInWithRedirect } = await import('firebase/auth');
+      await signInWithRedirect(auth, googleProvider);
+    } catch (err: any) {
+      console.error('Google Sign-In failed:', err);
+      setErrorMessage(err.message || 'Failed to sign in with Google');
+      setIsLoading(false);
     }
   };
 

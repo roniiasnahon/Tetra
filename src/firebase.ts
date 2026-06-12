@@ -1,17 +1,20 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut } from 'firebase/auth';
 import { initializeFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+const app = initializeApp({
+  ...firebaseConfig,
+  authDomain: 'cosmiwise.vercel.app'
+});
 export const db = initializeFirestore(app, {
   ignoreUndefinedProperties: true,
 }, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
-export const auth = getAuth();
+export const auth = getAuth(app);
 auth.useDeviceLanguage();
 export const googleProvider = new GoogleAuthProvider();
 
-export { signInWithPopup, signOut };
+export { signInWithPopup, signInWithRedirect, getRedirectResult, signOut };
 
 export enum OperationType {
   CREATE = 'create',
