@@ -33,6 +33,8 @@ import {
   handleFirestoreError,
   signInWithPopup,
   googleProvider,
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
 } from "./firebase";
 import {
@@ -1722,6 +1724,12 @@ export default function App() {
       }
     };
 
+    // Handle login breakout trigger
+    if (window.location.pathname === "/login-redirect") {
+      signInWithRedirect(auth, googleProvider);
+      return;
+    }
+
     const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
       syncUserToLocal(user);
       setCurrentUser(user);
@@ -1750,11 +1758,12 @@ export default function App() {
     if (isTauri) {
       try {
         // Breakout: Tell the OS to open the URL in the system browser
-        // The user logs in there, and the browser handles the cookies/session safely.
+        // We hit the specialized route we handled in the useEffect above
         await openUrl("https://cosmiwise.vercel.app/login-redirect");
       } catch (err) {
         console.error("Tauri breakout failed:", err);
-        throw err;
+        // Fallback if breakout fails
+        await signInWithPopup(auth, googleProvider);
       }
     } else {
       // Normal web behavior: use the popup
