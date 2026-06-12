@@ -1750,11 +1750,10 @@ export default function App() {
     if (isTauri) {
       try {
         // Breakout: Tell the OS to open the URL in the system browser
+        // The user logs in there, and the browser handles the cookies/session safely.
         await openUrl("https://cosmiwise.vercel.app/login-redirect");
       } catch (err) {
-        console.error("Tauri external login failed:", err);
-        // Fallback to popup if external opening fails
-        await signInWithPopup(auth, googleProvider);
+        console.error("Tauri breakout failed:", err);
       }
     } else {
       // Normal web behavior: use the popup

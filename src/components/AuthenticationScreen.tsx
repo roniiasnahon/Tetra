@@ -300,12 +300,17 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     setErrorMessage('');
     setSuccessMessage('');
     try {
+      const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
       if (onGoogleSignIn) {
         await onGoogleSignIn();
       } else {
         await signInWithPopup(auth, googleProvider);
       }
-      onSuccess?.();
+      
+      // Only call onSuccess if we're not in Tauri, as Tauri flow completes externally
+      if (!isTauri) {
+        onSuccess?.();
+      }
     } catch (err: any) {
       console.error("Google Sign-In failed:", err);
       if (err.code === 'auth/popup-blocked') {
