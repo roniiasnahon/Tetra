@@ -30,8 +30,7 @@ import {
   db,
   OperationType,
   handleFirestoreError,
-  signInWithRedirect,
-  getRedirectResult,
+  signInWithPopup,
   googleProvider,
   signOut,
 } from "./firebase";
@@ -1722,72 +1721,42 @@ export default function App() {
       }
     };
 
-    let isMounted = true;
-    let authUnsubscribe: (() => void) | null = null;
-    let isInitialAuthCheckDone = false;
-
-    const initializeAuth = async () => {
-      let authFired = false;
-      const maybeDone = () => {
-        if (isInitialAuthCheckDone && authFired && isMounted) {
-          setIsAuthLoading(false);
-        }
-      };
-
-      try {
-        // 1. Check for a redirect result first (crucial for Tauri/Mobile)
-        const result = await getRedirectResult(auth);
-        if (result?.user && isMounted) {
-          syncUserToLocal(result.user);
-          setCurrentUser(result.user);
-          currentUserIdRef.current = result.user.uid;
-        }
-      } catch (error) {
-        console.error("Redirect check failed:", error);
-      } finally {
-        isInitialAuthCheckDone = true;
-        maybeDone();
-      }
-
-      if (!isMounted) return;
-
-      // 2. Set up the baseline auth state listener
-      authUnsubscribe = auth.onAuthStateChanged((user) => {
-        if (!isMounted) return;
-        
-        syncUserToLocal(user);
-        setCurrentUser(user);
-        currentUserIdRef.current = user ? user.uid : null;
-        
-        if (user) {
-          setupListeners(user);
-        }
-        
-        authFired = true;
-        maybeDone();
-      });
+    const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
+      syncUserToLocal(user);
+      setCurrentUser(user);
+      currentUserIdRef.current = user ? user.uid : null;
       
-      // Fallback: If onAuthStateChanged takes too long but we finished redirect check
-      setTimeout(() => {
-        if (isMounted) {
-          isInitialAuthCheckDone = true;
-          authFired = true;
-          maybeDone();
-        }
-      }, 3500);
-    };
-
-    initializeAuth();
+      if (user) {
+        setupListeners(user);
+      }
+      setIsAuthLoading(false);
+    });
 
     return () => {
-      isMounted = false;
-      if (authUnsubscribe) authUnsubscribe();
+      unsubscribeAuth();
       unsubFolders();
       unsubPapers();
       unsubChats();
       unsubAnnos();
     };
   }, []);
+
+  const handleGoogleLogin = async () => {
+    if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
+      try {
+        const { openUrl } = await import("@tauri-apps/plugin-opener");
+        const apiKey = auth.app.options.apiKey;
+        const authDomain = auth.app.options.authDomain;
+        const authUrl = `https://${authDomain}/__/auth/handler?apiKey=${apiKey}&providerId=google.com&authType=popup`;
+        await openUrl(authUrl);
+      } catch (err) {
+        console.error("Tauri external login failed:", err);
+        await signInWithPopup(auth, googleProvider);
+      }
+    } else {
+      await signInWithPopup(auth, googleProvider);
+    }
+  };
 
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -3329,7 +3298,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
   }
 
   if (!currentUser) {
-    return <AuthenticationScreen />;
+    return <AuthenticationScreen onGoogleSignIn={handleGoogleLogin} />;
   }
 
   return (
@@ -4365,13 +4334,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   </>
                 ) : (
                   <button
-                    onClick={async () => {
-                      try {
-                        await signInWithRedirect(auth, googleProvider);
-                      } catch (err) {
-                        console.error("Sign in failed:", err);
-                      }
-                    }}
+                    onClick={handleGoogleLogin}
                     className="w-full flex items-center gap-2.5 text-zinc-300 hover:text-white hover:bg-[#1a1a1a] p-1.5 rounded-lg transition-colors group cursor-pointer text-[12px] font-medium"
                   >
                     <div className="w-6 h-6 rounded-full bg-[#1c1c1e] border border-[#27272a] flex-shrink-0 flex items-center justify-center text-zinc-400 group-hover:text-zinc-200">

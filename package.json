@@ -17,6 +17,8 @@
     "@iconify/react": "^6.0.2",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.1.14",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "@types/multer": "^1.4.11",
     "@vitejs/plugin-react": "^5.0.4",
     "audiomotion-analyzer": "^4.5.4",

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Icon } from '@iconify/react';
 import { Eye, EyeOff, Check, AlertCircle, ArrowLeft, Database, Sparkles } from 'lucide-react';
-import { auth, googleProvider, signInWithRedirect } from '../firebase';
+import { auth, googleProvider, signInWithPopup } from '../firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 
 // --- Pupil Sub-component ---
@@ -170,9 +170,10 @@ const EyeBall = ({
 // --- Main Authentication Screen Component ---
 interface AuthenticationScreenProps {
   onSuccess?: () => void;
+  onGoogleSignIn?: () => Promise<void>;
 }
 
-export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSuccess }) => {
+export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSuccess, onGoogleSignIn }) => {
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot_password'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -299,11 +300,19 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     setErrorMessage('');
     setSuccessMessage('');
     try {
-      await signInWithRedirect(auth, googleProvider);
-      // Note: onSuccess will be handled in App.tsx via onAuthStateChanged after redirect
+      if (onGoogleSignIn) {
+        await onGoogleSignIn();
+      } else {
+        await signInWithPopup(auth, googleProvider);
+      }
+      onSuccess?.();
     } catch (err: any) {
       console.error("Google Sign-In failed:", err);
-      setErrorMessage(err.message || 'Failed to sign in with Google');
+      if (err.code === 'auth/popup-blocked') {
+        setErrorMessage('Pop-up blocked. Please enable pop-ups for this site or click try again.');
+      } else {
+        setErrorMessage(err.message || 'Failed to sign in with Google');
+      }
     } finally {
       setIsLoading(false);
     }
