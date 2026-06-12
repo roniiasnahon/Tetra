@@ -1714,7 +1714,7 @@ export default function App() {
       }
     };
 
-    const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
+    const syncUserToLocal = (user: any) => {
       if (user) {
         const userToStore = {
           uid: user.uid,
@@ -1726,34 +1726,33 @@ export default function App() {
       } else {
         localStorage.removeItem("cosmi_user_snapshot");
       }
-      setCurrentUser(user);
-      currentUserIdRef.current = user ? user.uid : null;
-      setIsAuthLoading(false);
-      setupListeners(user);
-    });
+    };
 
-    // Handle redirect result for Tauri/Mobile environments
-    getRedirectResult(auth)
-      .then((result) => {
+    const initializeAuth = async () => {
+      try {
+        const result = await getRedirectResult(auth);
         if (result?.user) {
-          const userToStore = {
-            uid: result.user.uid,
-            email: result.user.email,
-            displayName: result.user.displayName,
-            photoURL: result.user.photoURL,
-          };
-          localStorage.setItem("cosmi_user_snapshot", JSON.stringify(userToStore));
+          syncUserToLocal(result.user);
           setCurrentUser(result.user);
           currentUserIdRef.current = result.user.uid;
-          setIsAuthLoading(false);
         }
-      })
-      .catch((error) => {
-        console.error("Redirect sign-in error:", error);
+      } catch (error) {
+        console.error("Redirect check failed:", error);
+      }
+
+      return auth.onAuthStateChanged((user) => {
+        syncUserToLocal(user);
+        setCurrentUser(user);
+        currentUserIdRef.current = user ? user.uid : null;
+        setIsAuthLoading(false);
+        setupListeners(user);
       });
+    };
+
+    const authUnsubPromise = initializeAuth();
 
     return () => {
-      unsubscribeAuth();
+      authUnsubPromise.then(unsub => unsub?.());
       unsubFolders();
       unsubPapers();
       unsubChats();
