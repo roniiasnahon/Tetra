@@ -1194,8 +1194,8 @@ export default function App() {
           // check if we're coming back from redirect
           const result = await getRedirectResult(auth);
           
-          if (result) {
-            // we got the result, emit back to main window
+          if (result?.user) {
+            // redirect came back with user 🔥
             const { emit } = await import('@tauri-apps/api/event');
             const credential = GoogleAuthProvider.credentialFromResult(result);
             
@@ -1211,8 +1211,8 @@ export default function App() {
             await signInWithRedirect(auth, googleProvider);
           }
           
-        } catch (err) {
-          console.error('auth failed', err);
+        } catch (err: any) {
+          console.error('auth failed', err.code, err.message);
         }
       };
 
