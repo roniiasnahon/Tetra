@@ -1183,25 +1183,35 @@ export default function App() {
   });
 
   // Handle Tauri authentication redirection
-  /* 
   useEffect(() => {
-    const handleTauriAuth = async () => {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('tauri_auth') === '1') {
-        const { emit } = await import('@tauri-apps/api/event');
-        const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
-        
-        const result = await signInWithPopup(auth, googleProvider);
-        const credential = GoogleAuthProvider.credentialFromResult(result);
-        
-        await emit('tauri://auth-complete', { 
-          idToken: credential?.idToken 
-        });
-      }
-    };
-    handleTauriAuth();
+    const params = new URLSearchParams(window.location.search);
+    
+    if (params.get('tauri_auth') === '1') {
+      const doAuth = async () => {
+        try {
+          const { emit } = await import('@tauri-apps/api/event');
+          const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
+          
+          const result = await signInWithPopup(auth, googleProvider);
+          const credential = GoogleAuthProvider.credentialFromResult(result);
+          
+          // send token back to main window
+          await emit('tauri://auth-complete', {
+            idToken: credential?.idToken
+          });
+
+          // close this window after
+          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+          await getCurrentWindow().close();
+          
+        } catch (err) {
+          console.error('auth failed', err);
+        }
+      };
+
+      doAuth();
+    }
   }, []);
-  */
 
 
   const currentUserIdRef = useRef<string | null>(
