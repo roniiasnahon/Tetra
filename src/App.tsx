@@ -1742,13 +1742,11 @@ export default function App() {
   }, []);
 
   const handleGoogleLogin = async () => {
-    if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
       try {
         const { openUrl } = await import("@tauri-apps/plugin-opener");
-        const apiKey = auth.app.options.apiKey;
-        const authDomain = auth.app.options.authDomain;
-        const authUrl = `https://${authDomain}/__/auth/handler?apiKey=${apiKey}&providerId=google.com&authType=popup`;
-        await openUrl(authUrl);
+        // Use the requested specific login-redirect URL for the desktop wrapper
+        await openUrl("https://cosmiwise.vercel.app/login-redirect");
       } catch (err) {
         console.error("Tauri external login failed:", err);
         await signInWithPopup(auth, googleProvider);
