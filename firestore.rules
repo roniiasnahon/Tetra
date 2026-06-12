@@ -85,7 +85,7 @@ service cloud.firestore {
         && data.page is number
         && data.get('color', '') is string
         && data.timestamp is number
-        && data.uid == request.auth.uid;
+        && data.uid is string;
     }
 
     // 4. Collection Matches
@@ -136,7 +136,57 @@ service cloud.firestore {
       }
     }
 
-    // 5. Test connection match
+    // 5. Collaborative Workspaces
+    match /shared_workspaces/{workspaceId} {
+      allow get: if isValidId(workspaceId);
+      allow create, update: if isValidId(workspaceId) && isValidSession(incoming());
+      allow delete: if isValidId(workspaceId);
+
+      match /folders/{folderId} {
+        allow list, get: if isValidId(workspaceId);
+        allow create, update: if isValidId(workspaceId) && isValidId(folderId) && isValidFolder(incoming());
+        allow delete: if isValidId(workspaceId) && isValidId(folderId);
+      }
+
+      match /papers/{paperId} {
+        allow list, get: if isValidId(workspaceId);
+        allow create, update: if isValidId(workspaceId) && isValidId(paperId) && isValidPaper(incoming());
+        allow delete: if isValidId(workspaceId) && isValidId(paperId);
+      }
+
+      match /chats/{chatId} {
+        allow list, get: if isValidId(workspaceId);
+        allow create, update: if isValidId(workspaceId) && isValidId(chatId) && isValidChat(incoming());
+        allow delete: if isValidId(workspaceId) && isValidId(chatId);
+      }
+
+      match /annotations/{annotationId} {
+        allow list, get: if isValidId(workspaceId);
+        allow create, update: if isValidId(workspaceId) && isValidId(annotationId) && isValidAnnotation(incoming());
+        allow delete: if isValidId(workspaceId) && isValidId(annotationId);
+      }
+    }
+
+    // 6. Shared Libraries
+    match /shared_libraries/{libraryId} {
+      allow get: if isValidId(libraryId);
+      allow create, update: if isValidId(libraryId);
+      allow delete: if isValidId(libraryId);
+
+      match /folders/{folderId} {
+        allow list, get: if isValidId(libraryId);
+        allow create, update: if isValidId(libraryId) && isValidId(folderId) && isValidFolder(incoming());
+        allow delete: if isValidId(libraryId) && isValidId(folderId);
+      }
+
+      match /papers/{paperId} {
+        allow list, get: if isValidId(libraryId);
+        allow create, update: if isValidId(libraryId) && isValidId(paperId) && isValidPaper(incoming());
+        allow delete: if isValidId(libraryId) && isValidId(paperId);
+      }
+    }
+
+    // 7. Test connection match
     match /test/connection {
       allow get: if true;
     }

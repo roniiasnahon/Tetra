@@ -820,7 +820,13 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                           try {
                             const { auth: firebaseAuth, db: firestoreDb } = await import('../firebase');
                             const user = firebaseAuth.currentUser;
-                            if (user) {
+                            const params = new URLSearchParams(window.location.search);
+                            const workspaceId = params.get('workspace');
+                            
+                            if (workspaceId) {
+                              const { deleteDoc, doc: fDoc } = await import('firebase/firestore');
+                              await deleteDoc(fDoc(firestoreDb, 'shared_workspaces', workspaceId, 'annotations', anno.id));
+                            } else if (user) {
                               const { deleteDoc, doc: fDoc } = await import('firebase/firestore');
                               await deleteDoc(fDoc(firestoreDb, 'users', user.uid, 'annotations', anno.id));
                             }
@@ -867,7 +873,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
               <button
                 onClick={handleGenerateCosmiNotes}
                 disabled={isGeneratingNotes || isTyping}
-                className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium bg-[#27272a] hover:bg-[#323235] text-[#f4f4f5] disabled:opacity-50 transition-colors rounded cursor-pointer border-none"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium bg-[#27272a] hover:bg-[#323235] text-[#f4f4f5] disabled:opacity-50 transition-colors rounded-full cursor-pointer border-none"
                 title="Let Cosmi generate structured concept notes for this document"
               >
                 {isGeneratingNotes ? (

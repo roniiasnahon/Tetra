@@ -732,6 +732,95 @@ export default function App() {
   const [pdfScale, setPdfScale] = useState<number>(1);
   const [inviteEmail, setInviteEmail] = useState('');
   const [isInviteSuccess, setIsInviteSuccess] = useState(false);
+
+  const [isSharingLoading, setIsSharingLoading] = useState(false);
+  const [generatedLink, setGeneratedLink] = useState('');
+  const [generatedLinkType, setGeneratedLinkType] = useState<'workspace' | 'library' | null>(null);
+
+  const handleGenerateWorkspaceShareLink = async () => {
+    setIsSharingLoading(true);
+    setGeneratedLink('');
+    try {
+      const workspaceId = `w-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      
+      // Write current tabs, active tab, messages to `/shared_workspaces/{workspaceId}`
+      await setDoc(doc(db, 'shared_workspaces', workspaceId), {
+        tabs: tabs || [],
+        activeTabId: activeTabId || 'initial-home',
+        messages: messages || [],
+        createdAt: Date.now()
+      });
+
+      // Clone folders
+      for (const f of folders) {
+        await setDoc(doc(db, 'shared_workspaces', workspaceId, 'folders', f.id), {
+          id: f.id,
+          name: f.name,
+          createdAt: f.createdAt
+        });
+      }
+
+      // Clone papers
+      for (const p of papers) {
+        const paperId = encodeURIComponent(p.title).replace(/\./g, '%2E');
+        await setDoc(doc(db, 'shared_workspaces', workspaceId, 'papers', paperId), {
+          ...p,
+          folderId: p.folderId || 'f1'
+        });
+      }
+
+      const shareUrl = `${window.location.origin}${window.location.pathname}?workspace=${workspaceId}`;
+      setGeneratedLink(shareUrl);
+      setGeneratedLinkType('workspace');
+      showToast("Workspace Share Link generated successfully!", "success");
+    } catch (err) {
+      console.error("Failed to generate collaborative workspace:", err);
+      showToast("Could not generate workspace share link", "error");
+    } finally {
+      setIsSharingLoading(false);
+    }
+  };
+
+  const handleGenerateLibraryShareLink = async () => {
+    setIsSharingLoading(true);
+    setGeneratedLink('');
+    try {
+      const libraryId = `lib-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      
+      // Create library doc to ensure existence
+      await setDoc(doc(db, 'shared_libraries', libraryId), {
+        createdAt: Date.now()
+      });
+
+      // Clone folders
+      for (const f of folders) {
+        await setDoc(doc(db, 'shared_libraries', libraryId, 'folders', f.id), {
+          id: f.id,
+          name: f.name,
+          createdAt: f.createdAt
+        });
+      }
+
+      // Clone papers
+      for (const p of papers) {
+        const paperId = encodeURIComponent(p.title).replace(/\./g, '%2E');
+        await setDoc(doc(db, 'shared_libraries', libraryId, 'papers', paperId), {
+          ...p,
+          folderId: p.folderId || 'f1'
+        });
+      }
+
+      const shareUrl = `${window.location.origin}${window.location.pathname}?library=${libraryId}`;
+      setGeneratedLink(shareUrl);
+      setGeneratedLinkType('library');
+      showToast("Public Library Share Link generated successfully!", "success");
+    } catch (err) {
+      console.error("Failed to share library:", err);
+      showToast("Could not generate library share link", "error");
+    } finally {
+      setIsSharingLoading(false);
+    }
+  };
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [isAddDropdownOpen, setIsAddDropdownOpen] = useState(false);
   const [addDropdownNested, setAddDropdownNested] = useState<string | null>(null);
@@ -955,8 +1044,27 @@ export default function App() {
       return true;
     }
   });
+  const [sharedWorkspaceId, setSharedWorkspaceId] = useState<string | null>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('workspace');
+    } catch {
+      return null;
+    }
+  });
+  const [sharedLibraryId, setSharedLibraryId] = useState<string | null>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('library');
+    } catch {
+      return null;
+    }
+  });
+  const [collaborators, setCollaborators] = useState<any[]>([]);
+
   const [isSessionLoaded, setIsSessionLoaded] = useState(false);
   const [isCloudMenuOpen, setIsCloudMenuOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Folder Management State
   const [folders, setFolders] = useState<FolderItem[]>(() => {
@@ -1031,7 +1139,18 @@ export default function App() {
   // Database helper wrappers to sync automatically to Firestore or guest local state
   const dbSetFolder = async (folder: FolderItem) => {
     const isRename = folders.some(f => f.id === folder.id);
-    if (currentUser) {
+    if (sharedWorkspaceId) {
+      try {
+        await setDoc(doc(db, 'shared_workspaces', sharedWorkspaceId, 'folders', folder.id), {
+          id: folder.id,
+          name: folder.name,
+          createdAt: folder.createdAt
+        });
+        showToast(isRename ? `Folder renamed to "${folder.name}"` : `Folder "${folder.name}" created successfully`, "success");
+      } catch (error) {
+        showToast(`Failed to save folder: ${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+    } else if (currentUser) {
       try {
         await setDoc(doc(db, 'users', currentUser.uid, 'folders', folder.id), {
           id: folder.id,
@@ -1056,37 +1175,47 @@ export default function App() {
 
   const dbDeleteFolder = async (folderId: string) => {
     const folderName = folders.find(f => f.id === folderId)?.name || 'Folder';
-    if (currentUser) {
+    
+    // Close tabs associated with deleted papers
+    const papersToDelete = papers.filter(p => p.folderId === folderId);
+    if (papersToDelete.length > 0) {
+      const titlesToDelete = papersToDelete.map(p => p.title);
+      setTabs(prev => {
+        const tabsToDelete = prev.filter(t => t.type === 'document' && titlesToDelete.includes(t.title));
+        if (tabsToDelete.length === 0) return prev;
+        
+        const updated = prev.filter(t => t.type !== 'document' || !titlesToDelete.includes(t.title));
+        
+        if (updated.length === 0) {
+          const newId = `chat-${Date.now()}`;
+          setActiveTabId(newId);
+          setActiveAssistantTabId(newId);
+          setMessages([]);
+          return [{ id: newId, type: 'chat', title: 'Untitled' }];
+        }
+        
+        if (tabsToDelete.some(t => t.id === activeTabId)) {
+          setActiveTabId(updated[0].id);
+        }
+        
+        return updated;
+      });
+    }
+
+    if (sharedWorkspaceId) {
+      try {
+        await deleteDoc(doc(db, 'shared_workspaces', sharedWorkspaceId, 'folders', folderId));
+        for (const p of papersToDelete) {
+          const paperId = encodeURIComponent(p.title).replace(/\./g, '%2E');
+          await deleteDoc(doc(db, 'shared_workspaces', sharedWorkspaceId, 'papers', paperId));
+        }
+        showToast(`Folder "${folderName}" and its documents deleted successfully`, "success");
+      } catch (error) {
+        showToast(`Failed to delete folder: ${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+    } else if (currentUser) {
       try {
         await deleteDoc(doc(db, 'users', currentUser.uid, 'folders', folderId));
-        // Also remove referencing papers
-        const papersToDelete = papers.filter(p => p.folderId === folderId);
-        
-        // Close tabs associated with deleted papers
-        if (papersToDelete.length > 0) {
-          const titlesToDelete = papersToDelete.map(p => p.title);
-          setTabs(prev => {
-            const tabsToDelete = prev.filter(t => t.type === 'document' && titlesToDelete.includes(t.title));
-            if (tabsToDelete.length === 0) return prev;
-            
-            const updated = prev.filter(t => t.type !== 'document' || !titlesToDelete.includes(t.title));
-            
-            if (updated.length === 0) {
-              const newId = `chat-${Date.now()}`;
-              setActiveTabId(newId);
-              setActiveAssistantTabId(newId);
-              setMessages([]);
-              return [{ id: newId, type: 'chat', title: 'Untitled' }];
-            }
-            
-            if (tabsToDelete.some(t => t.id === activeTabId)) {
-              setActiveTabId(updated[0].id);
-            }
-            
-            return updated;
-          });
-        }
-
         for (const p of papersToDelete) {
           const paperId = encodeURIComponent(p.title).replace(/\./g, '%2E');
           await deleteDoc(doc(db, 'users', currentUser.uid, 'papers', paperId));
@@ -1108,7 +1237,37 @@ export default function App() {
     const isNew = !papers.some(p => p.title === paper.title);
     const hasFolderChanged = papers.some(p => p.title === paper.title && p.folderId !== paper.folderId);
     
-    if (currentUser) {
+    if (sharedWorkspaceId) {
+      try {
+        await setDoc(doc(db, 'shared_workspaces', sharedWorkspaceId, 'papers', paperId), {
+          author: paper.author || '',
+          title: paper.title || '',
+          description: paper.description || '',
+          url: paper.url || '',
+          added: paper.added || '',
+          fullTextStatus: paper.fullTextStatus || '',
+          viewed: paper.viewed || '',
+          fileType: paper.fileType || '',
+          summary: paper.summary || '',
+          fileId: paper.fileId || '',
+          mimetype: paper.mimetype || '',
+          extractedText: paper.extractedText || '',
+          folderId: paper.folderId || '',
+          notes: paper.notes || ''
+        });
+        
+        if (!silent) {
+          if (hasFolderChanged) {
+            const destFolder = folders.find(f => f.id === paper.folderId)?.name || 'Default';
+            showToast(`Moved "${paper.title}" to ${destFolder}`, "success");
+          } else if (isNew) {
+            showToast(`Document "${paper.title}" added to workspace`, "success");
+          }
+        }
+      } catch (error) {
+        showToast(`Failed to save document: ${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+    } else if (currentUser) {
       try {
         await setDoc(doc(db, 'users', currentUser.uid, 'papers', paperId), {
           author: paper.author || '',
@@ -1203,7 +1362,14 @@ export default function App() {
       return updated;
     });
 
-    if (currentUser) {
+    if (sharedWorkspaceId) {
+      try {
+        await deleteDoc(doc(db, 'shared_workspaces', sharedWorkspaceId, 'papers', paperId));
+        showToast(`Document "${paperTitle}" deleted successfully`, "success");
+      } catch (error) {
+        showToast(`Failed to delete document: ${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+    } else if (currentUser) {
       try {
         await deleteDoc(doc(db, 'users', currentUser.uid, 'papers', paperId));
         showToast(`Document "${paperTitle}" deleted successfully`, "success");
@@ -1219,80 +1385,24 @@ export default function App() {
 
   // Real-time Firestore synchronization effect
   useEffect(() => {
-    let unsubscribeUser: () => void = () => {};
-    
-    const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
-      setCurrentUser(user);
-      currentUserIdRef.current = user ? user.uid : null;
-      setIsAuthLoading(false);
-      
-      if (user) {
-        // Save user snapshot to localStorage
-        const userObj = { uid: user.uid, email: user.email, displayName: user.displayName };
-        localStorage.setItem('cosmi_user_snapshot', JSON.stringify(userObj));
+    let unsubscribeUser = () => {};
+    let unsubFolders = () => {};
+    let unsubPapers = () => {};
+    let unsubChats = () => {};
+    let unsubAnnos = () => {};
 
-        // Immediately hydrate from local storage for this user to avoid loading lag
-        try {
-          const cachedFolders = localStorage.getItem(`cosmi_folders_${user.uid}`);
-          if (cachedFolders) setFolders(JSON.parse(cachedFolders));
-          const cachedPapers = localStorage.getItem(`cosmi_papers_${user.uid}`);
-          if (cachedPapers) setPapers(JSON.parse(cachedPapers));
-          const cachedTabs = localStorage.getItem(`cosmi_tabs_${user.uid}`);
-          if (cachedTabs) setTabs(JSON.parse(cachedTabs));
-          const cachedActiveTabId = localStorage.getItem(`cosmi_activeTabId_${user.uid}`);
-          if (cachedActiveTabId) setActiveTabId(cachedActiveTabId);
-          const cachedMessages = localStorage.getItem(`cosmi_messages_${user.uid}`);
-          if (cachedMessages) setMessages(JSON.parse(cachedMessages));
-        } catch (e) {
-          console.error("Failed loading cached user data on auth change:", e);
-        }
+    const setupListeners = async (user: any) => {
+      // Clean up previous listeners
+      unsubFolders();
+      unsubPapers();
+      unsubChats();
+      unsubAnnos();
 
-        // Save user profile state
-        try {
-          const userDocRef = doc(db, 'users', user.uid);
-          await setDoc(userDocRef, {
-            uid: user.uid,
-            email: user.email || '',
-            displayName: user.displayName || 'Researcher',
-            createdAt: Date.now()
-          }, { merge: true });
-        } catch (error) {
-          console.error("Failed saving user profile:", error);
-        }
-
-        // Load workspace session state
-        try {
-          const sessionDoc = await getDocFromServer(doc(db, 'users', user.uid, 'workspace', 'session'));
-          if (sessionDoc.exists()) {
-            const data = sessionDoc.data();
-            if (data.tabs && Array.isArray(data.tabs) && data.tabs.length > 0) {
-              setTabs(data.tabs);
-            }
-            if (data.activeTabId) {
-              setActiveTabId(data.activeTabId);
-            }
-            if (data.messages && Array.isArray(data.messages)) {
-                setMessages(data.messages);
-            }
-          }
-        } catch (error) {
-          console.error("Failed loading workspace session:", error);
-        } finally {
-          setIsSessionLoaded(true);
-        }
-
-        // Test database connection
-        try {
-          await getDocFromServer(doc(db, 'test', 'connection'));
-        } catch (error) {
-          if (error instanceof Error && error.message.includes('the client is offline')) {
-            console.error("Please check your Firebase configuration.");
-          }
-        }
-
-        // Subscribe to folders
-        const foldersColRef = collection(db, 'users', user.uid, 'folders');
-        const unsubFolders = onSnapshot(foldersColRef, (snapshot) => {
+      if (sharedWorkspaceId) {
+        // --- 1. COLLABORATIVE WORKSPACE MODE ---
+        // Subscribe to folders in shared workspace
+        const foldersColRef = collection(db, 'shared_workspaces', sharedWorkspaceId, 'folders');
+        unsubFolders = onSnapshot(foldersColRef, (snapshot) => {
           const loadedFolders: FolderItem[] = [];
           snapshot.forEach((doc) => {
             const data = doc.data();
@@ -1302,26 +1412,25 @@ export default function App() {
               createdAt: data.createdAt || Date.now()
             });
           });
-          
           if (loadedFolders.length > 0) {
             setFolders(loadedFolders);
           } else {
             // Seed a default folder if empty
-            const defaultFolder: FolderItem = { id: 'f1', name: 'My Research', createdAt: Date.now() };
-            setDoc(doc(db, 'users', user.uid, 'folders', defaultFolder.id), defaultFolder);
+            const defaultFolder: FolderItem = { id: 'f1', name: 'Shared Research', createdAt: Date.now() };
+            setDoc(doc(db, 'shared_workspaces', sharedWorkspaceId, 'folders', defaultFolder.id), defaultFolder);
           }
         }, (error) => {
-          handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/folders`);
+          console.error("Collaborative folders sync error:", error);
         });
 
-        // Subscribe to papers
-        const papersColRef = collection(db, 'users', user.uid, 'papers');
-        const unsubPapers = onSnapshot(papersColRef, (snapshot) => {
+        // Subscribe to papers in shared workspace
+        const papersColRef = collection(db, 'shared_workspaces', sharedWorkspaceId, 'papers');
+        unsubPapers = onSnapshot(papersColRef, (snapshot) => {
           const loadedPapers: PaperItem[] = [];
           snapshot.forEach((doc) => {
             const data = doc.data();
             loadedPapers.push({
-              author: typeof data.author === 'string' ? data.author : (typeof data.author === 'object' && data.author !== null ? JSON.stringify(data.author) : String(data.author || '')),
+              author: typeof data.author === 'string' ? data.author : String(data.author || ''),
               title: typeof data.title === 'string' ? data.title : String(data.title || ''),
               description: typeof data.description === 'string' ? data.description : String(data.description || ''),
               url: data.url || '',
@@ -1339,12 +1448,12 @@ export default function App() {
           });
           setPapers(loadedPapers);
         }, (error) => {
-          handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/papers`);
+          console.error("Collaborative papers sync error:", error);
         });
 
-        // Subscribe to all chats for persistence
-        const chatsColRef = collection(db, 'users', user.uid, 'chats');
-        const unsubChats = onSnapshot(chatsColRef, (snapshot) => {
+        // Subscribe to chats in shared workspace
+        const chatsColRef = collection(db, 'shared_workspaces', sharedWorkspaceId, 'chats');
+        unsubChats = onSnapshot(chatsColRef, (snapshot) => {
           const loadedChats: Tab[] = [];
           snapshot.forEach((doc) => {
             const data = doc.data();
@@ -1355,18 +1464,14 @@ export default function App() {
               messages: data.messages || []
             });
           });
-          setAllChats(loadedChats.sort((a, b) => {
-              const aLast = a.messages && a.messages.length > 0 ? a.messages[a.messages.length - 1].timestamp : 0;
-              const bLast = b.messages && b.messages.length > 0 ? b.messages[b.messages.length - 1].timestamp : 0;
-              return bLast - aLast;
-          }));
+          setAllChats(loadedChats);
         }, (error) => {
-          handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/chats`);
+          console.error("Collaborative chats sync error:", error);
         });
 
-        // Subscribe to all annotations
-        const annosColRef = collection(db, 'users', user.uid, 'annotations');
-        const unsubAnnos = onSnapshot(annosColRef, (snapshot) => {
+        // Subscribe to annotations in shared workspace
+        const annosColRef = collection(db, 'shared_workspaces', sharedWorkspaceId, 'annotations');
+        unsubAnnos = onSnapshot(annosColRef, (snapshot) => {
           const groupedAnnos: Record<string, any[]> = {};
           snapshot.forEach((doc) => {
             const data = doc.data();
@@ -1391,56 +1496,350 @@ export default function App() {
           
           window.dispatchEvent(new Event('annotationsUpdated'));
         }, (error) => {
-          handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/annotations`);
+          console.error("Collaborative annotations sync error:", error);
         });
 
-        unsubscribeUser = () => {
-          unsubFolders();
-          unsubPapers();
-          unsubChats();
-          unsubAnnos();
-        };
-      } else {
-        unsubscribeUser();
-        localStorage.removeItem('cosmi_user_snapshot');
-
-        // Immediately load guest workspace cache so the workspace resets/retains guest identity
+        // Load collaborative session document
         try {
-          const cachedFolders = localStorage.getItem(`cosmi_folders_guest`);
-          setFolders(cachedFolders ? JSON.parse(cachedFolders) : [
-            { id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 }
-          ]);
-          const cachedPapers = localStorage.getItem(`cosmi_papers_guest`);
-          setPapers(cachedPapers ? JSON.parse(cachedPapers) : []);
-          const cachedTabs = localStorage.getItem(`cosmi_tabs_guest`);
-          setTabs(cachedTabs ? JSON.parse(cachedTabs) : [{ id: 'initial-home', type: 'home', title: 'Home' }]);
-          const cachedActiveTabId = localStorage.getItem(`cosmi_activeTabId_guest`);
-          setActiveTabId(cachedActiveTabId || 'initial-home');
-          const cachedMessages = localStorage.getItem(`cosmi_messages_guest`);
-          setMessages(cachedMessages ? JSON.parse(cachedMessages) : []);
-        } catch {
-          setFolders([
-            { id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 }
-          ]);
-          setPapers([]);
-          setTabs([{ id: 'initial-home', type: 'home', title: 'Home' }]);
-          setActiveTabId('initial-home');
-          setMessages([]);
+          const sessionDoc = await getDocFromServer(doc(db, 'shared_workspaces', sharedWorkspaceId));
+          if (sessionDoc.exists()) {
+            const data = sessionDoc.data();
+            if (data.tabs && Array.isArray(data.tabs) && data.tabs.length > 0) {
+              setTabs(data.tabs);
+            }
+            if (data.activeTabId) {
+              setActiveTabId(data.activeTabId);
+            }
+            if (data.messages && Array.isArray(data.messages)) {
+              setMessages(data.messages);
+            }
+          }
+        } catch (error) {
+          console.error("Failed loading collaborative workspace session state:", error);
+        } finally {
+          setIsSessionLoaded(true);
         }
 
-        setActiveViewingPaper(null);
-        setDocumentContent('');
-        setDocumentTitle('');
-        setSearchResults([]);
-        setIsSessionLoaded(false);
+      } else if (sharedLibraryId) {
+        // --- 2. PUBLIC SHARED LIBRARY VIEW MODE ---
+        // Subscribe to public folders
+        const foldersColRef = collection(db, 'shared_libraries', sharedLibraryId, 'folders');
+        unsubFolders = onSnapshot(foldersColRef, (snapshot) => {
+          const loadedFolders: FolderItem[] = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            loadedFolders.push({
+              id: doc.id,
+              name: data.name || 'Untitled Folder',
+              createdAt: data.createdAt || Date.now()
+            });
+          });
+          setFolders(loadedFolders);
+        }, (error) => {
+          console.error("Failed to sync shared library folders:", error);
+        });
+
+        // Subscribe to public papers
+        const papersColRef = collection(db, 'shared_libraries', sharedLibraryId, 'papers');
+        unsubPapers = onSnapshot(papersColRef, (snapshot) => {
+          const loadedPapers: PaperItem[] = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            loadedPapers.push({
+              author: typeof data.author === 'string' ? data.author : String(data.author || ''),
+              title: typeof data.title === 'string' ? data.title : String(data.title || ''),
+              description: typeof data.description === 'string' ? data.description : String(data.description || ''),
+              url: data.url || '',
+              added: data.added || '',
+              fullTextStatus: data.fullTextStatus || '',
+              viewed: data.viewed || '',
+              fileType: data.fileType || '',
+              summary: data.summary || '',
+              fileId: data.fileId || '',
+              mimetype: data.mimetype || '',
+              extractedText: data.extractedText || '',
+              folderId: data.folderId || '',
+              notes: data.notes || ''
+            });
+          });
+          setPapers(loadedPapers);
+        }, (error) => {
+          console.error("Failed to sync shared library papers:", error);
+        });
+
+        // Load private user session if they are logged in
+        if (user) {
+          try {
+            const sessionDoc = await getDocFromServer(doc(db, 'users', user.uid, 'workspace', 'session'));
+            if (sessionDoc.exists()) {
+              const data = sessionDoc.data();
+              if (data.tabs && Array.isArray(data.tabs) && data.tabs.length > 0) {
+                setTabs(data.tabs);
+              }
+              if (data.activeTabId) {
+                setActiveTabId(data.activeTabId);
+              }
+              if (data.messages && Array.isArray(data.messages)) {
+                setMessages(data.messages);
+              }
+            }
+          } catch (error) {
+            console.error("Failed loading workspace session in library view mode:", error);
+          } finally {
+            setIsSessionLoaded(true);
+          }
+
+          // User's private chats / annotations can still sync
+          const chatsColRef = collection(db, 'users', user.uid, 'chats');
+          unsubChats = onSnapshot(chatsColRef, (snapshot) => {
+            const loadedChats: Tab[] = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              loadedChats.push({
+                id: doc.id,
+                type: 'chat',
+                title: data.title || 'Untitled',
+                messages: data.messages || []
+              });
+            });
+            setAllChats(loadedChats.sort((a, b) => {
+              const aLast = a.messages && a.messages.length > 0 ? a.messages[a.messages.length - 1].timestamp : 0;
+              const bLast = b.messages && b.messages.length > 0 ? b.messages[b.messages.length - 1].timestamp : 0;
+              return bLast - aLast;
+            }));
+          });
+
+          const annosColRef = collection(db, 'users', user.uid, 'annotations');
+          unsubAnnos = onSnapshot(annosColRef, (snapshot) => {
+            const groupedAnnos: Record<string, any[]> = {};
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              const fileId = data.fileId || 'default';
+              if (!groupedAnnos[fileId]) groupedAnnos[fileId] = [];
+              groupedAnnos[fileId].push({
+                id: doc.id,
+                fileId,
+                text: data.text || '',
+                comment: data.comment || '',
+                page: data.page || 1,
+                color: data.color || '#fef08a',
+                timestamp: data.timestamp || Date.now()
+              });
+            });
+            Object.keys(groupedAnnos).forEach((fileId) => {
+              localStorage.setItem(`annotations_${fileId}`, JSON.stringify(groupedAnnos[fileId]));
+            });
+            window.dispatchEvent(new Event('annotationsUpdated'));
+          });
+        } else {
+          // Guest fallback for shared library visitors
+          setIsSessionLoaded(true);
+          setTabs([{ id: 'initial-library', type: 'library', title: 'Library' }]);
+          setActiveTabId('initial-library');
+        }
+
+      } else {
+        // --- 3. PRIVATE STANDARD MODE ---
+        if (user) {
+          // Immediately hydrate cached data
+          try {
+            const cachedFolders = localStorage.getItem(`cosmi_folders_${user.uid}`);
+            if (cachedFolders) setFolders(JSON.parse(cachedFolders));
+            const cachedPapers = localStorage.getItem(`cosmi_papers_${user.uid}`);
+            if (cachedPapers) setPapers(JSON.parse(cachedPapers));
+            const cachedTabs = localStorage.getItem(`cosmi_tabs_${user.uid}`);
+            if (cachedTabs) setTabs(JSON.parse(cachedTabs));
+            const cachedActiveTabId = localStorage.getItem(`cosmi_activeTabId_${user.uid}`);
+            if (cachedActiveTabId) setActiveTabId(cachedActiveTabId);
+            const cachedMessages = localStorage.getItem(`cosmi_messages_${user.uid}`);
+            if (cachedMessages) setMessages(JSON.parse(cachedMessages));
+          } catch (e) {
+            console.error("Failed loading cached user data on auth change:", e);
+          }
+
+          // Save profile
+          try {
+            setDoc(doc(db, 'users', user.uid), {
+              uid: user.uid,
+              email: user.email || '',
+              displayName: user.displayName || 'Researcher',
+              createdAt: Date.now()
+            }, { merge: true });
+          } catch (error) {
+            console.error("Failed saving user profile:", error);
+          }
+
+          // Load workspace session state
+          try {
+            const sessionDoc = await getDocFromServer(doc(db, 'users', user.uid, 'workspace', 'session'));
+            if (sessionDoc.exists()) {
+              const data = sessionDoc.data();
+              if (data.tabs && Array.isArray(data.tabs) && data.tabs.length > 0) {
+                setTabs(data.tabs);
+              }
+              if (data.activeTabId) {
+                setActiveTabId(data.activeTabId);
+              }
+              if (data.messages && Array.isArray(data.messages)) {
+                setMessages(data.messages);
+              }
+            }
+          } catch (error) {
+            console.error("Failed loading workspace session:", error);
+          } finally {
+            setIsSessionLoaded(true);
+          }
+
+          // Listen to private folders
+          const foldersColRef = collection(db, 'users', user.uid, 'folders');
+          unsubFolders = onSnapshot(foldersColRef, (snapshot) => {
+            const loadedFolders: FolderItem[] = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              loadedFolders.push({
+                id: doc.id,
+                name: data.name || 'Untitled Folder',
+                createdAt: data.createdAt || Date.now()
+              });
+            });
+            if (loadedFolders.length > 0) {
+              setFolders(loadedFolders);
+            } else {
+              const defaultFolder: FolderItem = { id: 'f1', name: 'My Research', createdAt: Date.now() };
+              setDoc(doc(db, 'users', user.uid, 'folders', defaultFolder.id), defaultFolder);
+            }
+          }, (error) => {
+            handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/folders`);
+          });
+
+          // Listen to private papers
+          const papersColRef = collection(db, 'users', user.uid, 'papers');
+          unsubPapers = onSnapshot(papersColRef, (snapshot) => {
+            const loadedPapers: PaperItem[] = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              loadedPapers.push({
+                author: typeof data.author === 'string' ? data.author : String(data.author || ''),
+                title: typeof data.title === 'string' ? data.title : String(data.title || ''),
+                description: typeof data.description === 'string' ? data.description : String(data.description || ''),
+                url: data.url || '',
+                added: data.added || '',
+                fullTextStatus: data.fullTextStatus || '',
+                viewed: data.viewed || '',
+                fileType: data.fileType || '',
+                summary: data.summary || '',
+                fileId: data.fileId || '',
+                mimetype: data.mimetype || '',
+                extractedText: data.extractedText || '',
+                folderId: data.folderId || '',
+                notes: data.notes || ''
+              });
+            });
+            setPapers(loadedPapers);
+          }, (error) => {
+            handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/papers`);
+          });
+
+          // Listen to private chats
+          const chatsColRef = collection(db, 'users', user.uid, 'chats');
+          unsubChats = onSnapshot(chatsColRef, (snapshot) => {
+            const loadedChats: Tab[] = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              loadedChats.push({
+                id: doc.id,
+                type: 'chat',
+                title: data.title || 'Untitled',
+                messages: data.messages || []
+              });
+            });
+            setAllChats(loadedChats.sort((a, b) => {
+              const aLast = a.messages && a.messages.length > 0 ? a.messages[a.messages.length - 1].timestamp : 0;
+              const bLast = b.messages && b.messages.length > 0 ? b.messages[b.messages.length - 1].timestamp : 0;
+              return bLast - aLast;
+            }));
+          }, (error) => {
+            handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/chats`);
+          });
+
+          // Listen to private annotations
+          const annosColRef = collection(db, 'users', user.uid, 'annotations');
+          unsubAnnos = onSnapshot(annosColRef, (snapshot) => {
+            const groupedAnnos: Record<string, any[]> = {};
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              const fileId = data.fileId || 'default';
+              if (!groupedAnnos[fileId]) groupedAnnos[fileId] = [];
+              groupedAnnos[fileId].push({
+                id: doc.id,
+                fileId,
+                text: data.text || '',
+                comment: data.comment || '',
+                page: data.page || 1,
+                color: data.color || '#fef08a',
+                timestamp: data.timestamp || Date.now()
+              });
+            });
+            Object.keys(groupedAnnos).forEach((fileId) => {
+              localStorage.setItem(`annotations_${fileId}`, JSON.stringify(groupedAnnos[fileId]));
+            });
+            window.dispatchEvent(new Event('annotationsUpdated'));
+          }, (error) => {
+            handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/annotations`);
+          });
+
+        } else {
+          // Standard guest path
+          setIsSessionLoaded(true);
+          try {
+            const cachedFolders = localStorage.getItem(`cosmi_folders_guest`);
+            setFolders(cachedFolders ? JSON.parse(cachedFolders) : [
+              { id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 }
+            ]);
+            const cachedPapers = localStorage.getItem(`cosmi_papers_guest`);
+            setPapers(cachedPapers ? JSON.parse(cachedPapers) : []);
+            const cachedTabs = localStorage.getItem(`cosmi_tabs_guest`);
+            setTabs(cachedTabs ? JSON.parse(cachedTabs) : [{ id: 'initial-home', type: 'home', title: 'Home' }]);
+            const cachedActiveTabId = localStorage.getItem(`cosmi_activeTabId_guest`);
+            setActiveTabId(cachedActiveTabId || 'initial-home');
+            const cachedMessages = localStorage.getItem(`cosmi_messages_guest`);
+            setMessages(cachedMessages ? JSON.parse(cachedMessages) : []);
+          } catch {
+            setFolders([
+              { id: 'f1', name: 'My Research', createdAt: Date.now() - 172800000 }
+            ]);
+            setPapers([]);
+            setTabs([{ id: 'initial-home', type: 'home', title: 'Home' }]);
+            setActiveTabId('initial-home');
+            setMessages([]);
+          }
+          setActiveViewingPaper(null);
+          setDocumentContent('');
+          setDocumentTitle('');
+          setSearchResults([]);
+        }
       }
+    };
+
+    const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
+      setCurrentUser(user);
+      currentUserIdRef.current = user ? user.uid : null;
+      setIsAuthLoading(false);
+      setupListeners(user);
     });
 
-    return () => {
+    unsubscribeUser = () => {
       unsubscribeAuth();
+      unsubFolders();
+      unsubPapers();
+      unsubChats();
+      unsubAnnos();
+    };
+
+    return () => {
       unsubscribeUser();
     };
-  }, []);
+  }, [sharedWorkspaceId, sharedLibraryId]);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -1587,7 +1986,14 @@ export default function App() {
 
     // If the title changed, delete the old document
     if (tab.originalTitle && tab.originalTitle !== paperTitle) {
-      if (currentUser) {
+      if (sharedWorkspaceId) {
+        const oldPaperId = encodeURIComponent(tab.originalTitle).replace(/\./g, '%2E');
+        try {
+          await deleteDoc(doc(db, 'shared_workspaces', sharedWorkspaceId, 'papers', oldPaperId));
+        } catch (err) {
+          console.error("Failed to delete renamed collaborative draft", err);
+        }
+      } else if (currentUser) {
         const oldPaperId = encodeURIComponent(tab.originalTitle).replace(/\./g, '%2E');
         try {
           await deleteDoc(doc(db, 'users', currentUser.uid, 'papers', oldPaperId));
@@ -1612,7 +2018,13 @@ export default function App() {
       folderId: tab.folderId || folders[0]?.id || 'f1'
     };
 
-    if (currentUser) {
+    if (sharedWorkspaceId) {
+      try {
+        await setDoc(doc(db, 'shared_workspaces', sharedWorkspaceId, 'papers', paperId), draftPaper);
+      } catch (err) {
+        console.error("Failed saving collaborative paper draft:", err);
+      }
+    } else if (currentUser) {
       const path = `users/${currentUser.uid}/papers/${paperId}`;
       try {
         await setDoc(doc(db, 'users', currentUser.uid, 'papers', paperId), draftPaper);
@@ -1621,7 +2033,7 @@ export default function App() {
       }
     }
 
-    // Reflect the change locally in the papers array (triggers LocalStorage sync useEffect automatically)
+    // Reflect the change locally in the papers array
     setPapers(prev => {
       const filtered = prev.filter(p => encodeURIComponent(p.title).replace(/\./g, '%2E') !== paperId && p.title !== tab.originalTitle);
       return [draftPaper, ...filtered];
@@ -1695,10 +2107,24 @@ export default function App() {
 
   // Sync workspace session to Firestore periodically when changes occur
   useEffect(() => {
-    if (isSessionLoaded && currentUser && tabs && tabs.length > 0) {
+    if (!isSessionLoaded || !tabs || tabs.length === 0) return;
+
+    if (sharedWorkspaceId) {
+      const handler = setTimeout(() => {
+        const sessionRef = doc(db, 'shared_workspaces', sharedWorkspaceId);
+        const cleanTabs = JSON.parse(JSON.stringify(tabs));
+        const cleanMessages = JSON.parse(JSON.stringify(messages));
+        
+        setDoc(sessionRef, {
+          tabs: cleanTabs,
+          activeTabId,
+          messages: cleanMessages
+        }, { merge: true }).catch(err => console.error("Workspace collaborative sync failed:", err));
+      }, 3000);
+      return () => clearTimeout(handler);
+    } else if (currentUser) {
       const handler = setTimeout(() => {
         const sessionRef = doc(db, 'users', currentUser.uid, 'workspace', 'session');
-        // Strip undefined values which Firebase rejects
         const cleanTabs = JSON.parse(JSON.stringify(tabs));
         const cleanMessages = JSON.parse(JSON.stringify(messages));
         
@@ -1710,7 +2136,7 @@ export default function App() {
       }, 3000);
       return () => clearTimeout(handler);
     }
-  }, [tabs, activeTabId, messages, currentUser, isSessionLoaded]);
+  }, [tabs, activeTabId, messages, currentUser, isSessionLoaded, sharedWorkspaceId]);
 
   // Synchronize workspace changes to LocalStorage instantly
   useEffect(() => {
@@ -1865,8 +2291,8 @@ export default function App() {
     e.stopPropagation();
     
     // Calculate smart positioning for the context menu to keep it within viewport
-    const menuWidth = 210;
-    const menuHeight = 400; // Estimated max height
+    const menuWidth = 220;
+    const menuHeight = 580; // Larger estimate for more items
     let x = e.clientX;
     let y = e.clientY;
 
@@ -1876,6 +2302,9 @@ export default function App() {
     if (y + menuHeight > window.innerHeight) {
       y = window.innerHeight - menuHeight - 10;
     }
+    
+    // Bottom boundary check - if x is still above menu height, we might want to flip it
+    if (y < 0) y = 10;
     
     setPdfContextMenu({ x, y });
     
@@ -3398,12 +3827,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             </button>
                             <button 
                               onClick={async () => {
-                                try {
-                                  await signOut(auth);
-                                  setIsProfileDropdownOpen(false);
-                                } catch (err) {
-                                  console.error("Sign out error:", err);
-                                }
+                                setIsLoggingOut(true);
+                                setIsProfileDropdownOpen(false);
+                                // Hold for 3.5 seconds to show the shimmering "Logging out..." screen
+                                setTimeout(async () => {
+                                  try {
+                                    await signOut(auth);
+                                    setIsLoggingOut(false);
+                                    // Clear local storage for a fresh start
+                                    localStorage.removeItem('cosmi_user_snapshot');
+                                  } catch (err) {
+                                    console.error("Sign out error:", err);
+                                    setIsLoggingOut(false);
+                                  }
+                                }, 3500);
                               }}
                               className="w-full text-left px-3 py-1.5 text-[12px] text-red-400 hover:bg-red-950/20 transition-colors flex items-center gap-2 cursor-pointer animate-none"
                             >
@@ -4370,53 +4807,174 @@ Once you have content, I can help you draft sections, summarize findings, or for
               {/* Zero-Glow Invite Popover Modal */}
               {inviteModalOpen && (
                 <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
-                  <div className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-md p-6 relative animate-scale-up">
+                  <div className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-lg p-6 relative animate-scale-up">
                     <button 
-                      onClick={() => setInviteModalOpen(false)}
+                      onClick={() => {
+                        setInviteModalOpen(false);
+                        setGeneratedLink('');
+                        setGeneratedLinkType(null);
+                        setIsInviteSuccess(false);
+                      }}
                       className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer"
                     >
                       <Icon icon="ph:x" className="w-5 h-5" />
                     </button>
                     
-                    <h3 className="text-[#f4f4f5] text-lg font-medium mb-1">Invite Collaborators</h3>
-                    <p className="text-[#71717a] text-xs mb-4">Grant access key approvals so peer authors can review or annotate together</p>
-                    
-                    {isInviteSuccess ? (
-                      <div className="text-center py-6">
-                        <Icon icon="ph:check-circle" className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-                        <h4 className="text-[#e4e4e7] font-semibold text-sm">Invitation Sent</h4>
-                        <p className="text-[#71717a] text-xs mt-1">An approval link has been issued to <span className="text-slate-300 font-mono">{inviteEmail}</span></p>
-                        <button
-                          onClick={() => setInviteModalOpen(false)}
-                          className="mt-5 w-full py-2 bg-[#27272a] hover:bg-[#333336] rounded-xl text-zinc-200 text-xs font-semibold cursor-pointer"
-                        >
-                          Dismiss
-                        </button>
+                    <h3 className="text-[#f4f4f5] text-lg font-medium mb-1">Academic Collaboration Center</h3>
+                    <p className="text-[#71717a] text-xs mb-5">Share workspaces, collaborate in real-time, or distribute documents via public links</p>
+
+                    {/* Section 1: Active Collaboration Indicators */}
+                    {sharedWorkspaceId && (
+                      <div className="mb-5 bg-[#18181b] border border-[#27272a] rounded-xl p-4">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                          <span className="text-[#f4f4f5] text-xs font-semibold">Active Real-Time Collaborative Workspace</span>
+                        </div>
+                        <p className="text-[#71717a] text-[11px] mb-3">Anyone visiting this URL interacts on the same live canvas with active syncing.</p>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            readOnly
+                            value={window.location.href}
+                            className="bg-[#09090b] text-[#a1a1aa] font-mono text-[10px] rounded-lg px-3 py-1.5 flex-1 border border-[#27272a] focus:outline-none"
+                          />
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(window.location.href);
+                              showToast("Copied collaborative workspace URL!", "success");
+                            }}
+                            className="px-3 py-1.5 bg-[#27272a] hover:bg-[#333336] text-zinc-200 font-bold text-[11px] rounded-lg cursor-pointer transition-colors"
+                          >
+                            Copy Link
+                          </button>
+                        </div>
                       </div>
-                    ) : (
-                      <form onSubmit={(e) => {
-                        e.preventDefault();
-                        if (inviteEmail.trim()) {
-                          setIsInviteSuccess(true);
-                        }
-                      }}>
-                        <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-2">Peer email address</label>
-                        <input
-                          type="email"
-                          required
-                          value={inviteEmail}
-                          onChange={(e) => setInviteEmail(e.target.value)}
-                          placeholder="e.g. peer.reviewer@academic.edu"
-                          className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2.5 text-zinc-200 text-xs mb-4 focus:border-zinc-500 focus:outline-none placeholder:text-zinc-600 transition-colors"
-                        />
-                        <button
-                          type="submit"
-                          className="w-full py-2.5 bg-zinc-200 hover:bg-white text-zinc-950 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-                        >
-                          Send Collaboration Account Link
-                        </button>
-                      </form>
                     )}
+
+                    {sharedLibraryId && (
+                      <div className="mb-5 bg-[#18181b] border border-[#27272a] rounded-xl p-4">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                          <span className="text-[#f4f4f5] text-xs font-semibold">Active Public Shared Library Mode</span>
+                        </div>
+                        <p className="text-[#71717a] text-[11px] mb-3">Visiting peers have viewing-level permissions to read any document housed here.</p>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            readOnly
+                            value={window.location.href}
+                            className="bg-[#09090b] text-[#a1a1aa] font-mono text-[10px] rounded-lg px-3 py-1.5 flex-1 border border-[#27272a] focus:outline-none"
+                          />
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(window.location.href);
+                              showToast("Copied public library URL!", "success");
+                            }}
+                            className="px-3 py-1.5 bg-[#27272a] hover:bg-[#333336] text-zinc-200 font-bold text-[11px] rounded-lg cursor-pointer transition-colors"
+                          >
+                            Copy Link
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-4">
+                      {/* Collaborative Generator Tools */}
+                      {!sharedWorkspaceId && !sharedLibraryId && (
+                        <div className="grid grid-cols-2 gap-3 pb-2 border-b border-[#2d2d30]">
+                          <button
+                            disabled={isSharingLoading}
+                            onClick={handleGenerateWorkspaceShareLink}
+                            className="flex flex-col items-center justify-center p-4 bg-[#18181b] border border-[#27272a] hover:border-zinc-500 rounded-xl transition-all text-center cursor-pointer disabled:opacity-40"
+                          >
+                            <Icon icon="ph:users-three-fill" className="w-6 h-6 text-emerald-400 mb-2" />
+                            <span className="text-[#f4f4f5] text-[11.5px] font-semibold">Share Workspace</span>
+                            <span className="text-zinc-500 text-[9.5px] mt-1 leading-snug">Generate a real-time edit link for team collaboration</span>
+                          </button>
+
+                          <button
+                            disabled={isSharingLoading}
+                            onClick={handleGenerateLibraryShareLink}
+                            className="flex flex-col items-center justify-center p-4 bg-[#18181b] border border-[#27272a] hover:border-zinc-500 rounded-xl transition-all text-center cursor-pointer disabled:opacity-40"
+                          >
+                            <Icon icon="ph:books-fill" className="w-6 h-6 text-indigo-400 mb-2" />
+                            <span className="text-[#f4f4f5] text-[11.5px] font-semibold">Share Research Library</span>
+                            <span className="text-zinc-500 text-[9.5px] mt-1 leading-snug">Generate a public link to library documents</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Display generated link */}
+                      {generatedLink && (
+                        <div className="bg-[#161618] border border-zinc-700 rounded-xl p-4 text-left">
+                          <label className="block text-[10px] font-mono uppercase tracking-wider text-zinc-400 mb-1.5">
+                            {generatedLinkType === 'workspace' ? 'Workspace Collaboration Link' : 'Public Shared Library Link'}
+                          </label>
+                          <p className="text-[#71717a] text-[11px] mb-3">
+                            {generatedLinkType === 'workspace' 
+                              ? 'Anyone with this link can edit documents, annotate research and collaborate live.' 
+                              : 'All current research papers in your active archive are now publicly readable with this link.'}
+                          </p>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              readOnly
+                              value={generatedLink}
+                              className="bg-[#09090b] text-[#f4f4f5] font-mono text-[10px] rounded-lg px-3 py-2 flex-1 border border-[#27272a] focus:outline-none select-all"
+                            />
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(generatedLink);
+                                showToast("Copied share URL!", "success");
+                              }}
+                              className="px-4 py-2 bg-zinc-200 hover:bg-white text-zinc-950 font-bold text-xs rounded-lg cursor-pointer transition-colors"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Peer Email Inviter */}
+                      <div className="pt-2">
+                        <h4 className="text-[#f4f4f5] text-xs font-semibold mb-2 flex items-center gap-2">
+                          <Icon icon="ph:envelope-simple" className="w-4 h-4 text-zinc-400" />
+                          Invite via Direct Email Invitation
+                        </h4>
+                        
+                        {isInviteSuccess ? (
+                          <div className="text-center py-4 bg-[#18181b] border border-[#27272a] rounded-xl">
+                            <Icon icon="ph:check-circle" className="w-10 h-10 text-emerald-500 mx-auto mb-2" />
+                            <h4 className="text-[#e4e4e7] font-semibold text-xs">Invitation Sent</h4>
+                            <p className="text-[#71717a] text-[11px] mt-1">An approval link has been issued to <span className="text-slate-300 font-mono">{inviteEmail}</span></p>
+                          </div>
+                        ) : (
+                          <form onSubmit={(e) => {
+                            e.preventDefault();
+                            if (inviteEmail.trim()) {
+                              setIsInviteSuccess(true);
+                            }
+                          }} className="space-y-3">
+                            <div className="flex gap-2">
+                              <input
+                                type="email"
+                                required
+                                value={inviteEmail}
+                                onChange={(e) => setInviteEmail(e.target.value)}
+                                placeholder="peer.reviewer@academic.edu"
+                                className="bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-zinc-200 text-xs flex-1 focus:border-zinc-500 focus:outline-none placeholder:text-zinc-600 transition-colors"
+                              />
+                              <button
+                                type="submit"
+                                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                              >
+                                Send Link
+                              </button>
+                            </div>
+                          </form>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -5034,7 +5592,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             
                             window.dispatchEvent(new Event('annotationsUpdated'));
                             
-                            if (currentUser) {
+                            if (sharedWorkspaceId) {
+                              try {
+                                await setDoc(doc(db, 'shared_workspaces', sharedWorkspaceId, 'annotations', newAnno.id), {
+                                  ...newAnno,
+                                  uid: currentUser ? currentUser.uid : 'guest'
+                                });
+                              } catch (err) {
+                                console.error("Collaborative annotation save failed:", err);
+                              }
+                            } else if (currentUser) {
                               try {
                                 await setDoc(doc(db, 'users', currentUser.uid, 'annotations', newAnno.id), {
                                   ...newAnno,
@@ -5068,9 +5635,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         }}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="px-3 py-1 text-[10px] text-zinc-500 font-bold uppercase tracking-wider select-none border-b border-[#2d2d30] mb-1 pb-1.5">
-                          PDF Selection
-                        </div>
                         <button
                           onClick={() => {
                             if (selectionText) {
@@ -5079,7 +5643,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             setPdfContextMenu(null);
                           }}
                           disabled={!selectionText}
-                          className="w-full flex items-center justify-between px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                          className="w-full flex items-center justify-between px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group mt-0.5"
                         >
                           <div className="flex items-center gap-2.5">
                             <Icon icon="ph:copy" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
@@ -5133,7 +5697,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             try { currentAnnos = JSON.parse(currentAnnosStr); } catch (_) {}
                             localStorage.setItem(storageKey, JSON.stringify([...currentAnnos, newAnno]));
                             window.dispatchEvent(new Event('annotationsUpdated'));
-                            if (currentUser) {
+                            if (sharedWorkspaceId) {
+                               try {
+                                 await setDoc(doc(db, 'shared_workspaces', sharedWorkspaceId, 'annotations', newAnno.id), {
+                                   ...newAnno, uid: currentUser ? currentUser.uid : 'guest'
+                                 });
+                               } catch {}
+                            } else if (currentUser) {
                                try {
                                  await setDoc(doc(db, 'users', currentUser.uid, 'annotations', newAnno.id), {
                                    ...newAnno, uid: currentUser.uid
@@ -5171,6 +5741,21 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         <button
                           onClick={() => {
                             if (selectionText) {
+                               setChatInput(`Summarize this selection from the PDF: "${selectionText}"`);
+                               if (!isSidePanelOpen) setIsSidePanelOpen(true);
+                            }
+                            setPdfContextMenu(null);
+                          }}
+                          disabled={!selectionText}
+                          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        >
+                          <Icon icon="ph:text-align-left" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                          <span>Summarize Selection</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            if (selectionText) {
                                setChatInput(`I found this interesting in the text: "${selectionText}". Can you explain it or link it to my existing research?`);
                                if (!isSidePanelOpen) setIsSidePanelOpen(true);
                             }
@@ -5182,6 +5767,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           <Icon icon="ph:sparkle" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
                           <span>Research Assistant</span>
                         </button>
+
+                        <div className="h-[1px] bg-[#2d2d30] mx-2 my-1" />
 
                         <button
                           onClick={() => {
@@ -5197,7 +5784,65 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           <span>Translate Selection</span>
                         </button>
 
+                        <button
+                          onClick={() => {
+                            if (selectionText) {
+                               window.open(`https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(selectionText)}`, '_blank');
+                            }
+                            setPdfContextMenu(null);
+                          }}
+                          disabled={!selectionText}
+                          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        >
+                          <Icon icon="ph:globe" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                          <span>Wikipedia Search</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            if (selectionText) {
+                               window.open(`https://www.merriam-webster.com/dictionary/${encodeURIComponent(selectionText)}`, '_blank');
+                            }
+                            setPdfContextMenu(null);
+                          }}
+                          disabled={!selectionText}
+                          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        >
+                          <Icon icon="ph:book-open" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                          <span>Define / Dictionary</span>
+                        </button>
+
                         <div className="h-[1px] bg-[#2d2d30] mx-2 my-1" />
+
+                        <button
+                          onClick={() => {
+                            if (selectionText) {
+                               const utterance = new SpeechSynthesisUtterance(selectionText);
+                               window.speechSynthesis.speak(utterance);
+                            }
+                            setPdfContextMenu(null);
+                          }}
+                          disabled={!selectionText}
+                          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        >
+                          <Icon icon="ph:speaker-high" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                          <span>Read Selection</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            if (selectionText) {
+                               setChatInput(`Create a flashcard from this selection: "${selectionText}"`);
+                               if (!isSidePanelOpen) setIsSidePanelOpen(true);
+                            }
+                            setPdfContextMenu(null);
+                          }}
+                          disabled={!selectionText}
+                          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        >
+                          <Icon icon="ph:cards" className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                          <span>Create Flashcard</span>
+                        </button>
 
                         <button
                           onClick={() => {
@@ -6185,6 +6830,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {isLoggingOut && (
+        <div className="fixed inset-0 z-[20000] bg-black flex flex-col items-center justify-center p-8 text-center animate-fade-in">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex flex-col items-center"
+          >
+            <h2 className="text-lg font-medium tracking-tight text-white shimmer-text" style={{ fontFamily: 'var(--font-jakarta)' }}>
+              Logging out...
+            </h2>
+          </motion.div>
         </div>
       )}
 

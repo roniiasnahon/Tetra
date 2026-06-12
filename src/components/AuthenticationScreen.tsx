@@ -616,7 +616,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
             </h1>
             
             <p className="text-zinc-400 text-[13px] mt-1.5 font-medium">
-              {authMode === 'login' && 'Enter your coordinates to restore session'}
+              {authMode === 'login' && ''}
               {authMode === 'register' && 'Establish credentials to sign up'}
               {authMode === 'forgot_password' && 'Verify your details to trigger recovery'}
             </p>
@@ -830,6 +830,21 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
           </button>
 
         </motion.div>
+
+        {/* --- PROFESSIONAL FOOTER --- */}
+        <div className="mt-auto w-full max-w-[420px] pb-8 pt-12 flex flex-col items-center">
+          <div className="flex items-center gap-6 mb-4">
+            <button className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold">Privacy</button>
+            <button className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold">Terms</button>
+            <button className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold">Support</button>
+            <button className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold">Status</button>
+          </div>
+          <div className="text-[10px] text-zinc-600 font-medium tracking-wide flex items-center gap-1.5 uppercase">
+            <span>© 2026 Cosmi</span>
+            <span className="w-1 h-1 rounded-full bg-zinc-800"></span>
+            <span>All rights reserved</span>
+          </div>
+        </div>
       </div>
 
     </div>

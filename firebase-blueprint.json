@@ -115,6 +115,34 @@
     "/users/{userId}/workspace/session": {
       "schema": "Session",
       "description": "User's current active workspace session state."
+    },
+    "/shared_workspaces/{workspaceId}": {
+      "schema": "Session",
+      "description": "Collaborative workspace session state."
+    },
+    "/shared_workspaces/{workspaceId}/folders/{folderId}": {
+      "schema": "Folder",
+      "description": "Folders belonging to a shared workspace."
+    },
+    "/shared_workspaces/{workspaceId}/papers/{paperId}": {
+      "schema": "Paper",
+      "description": "Papers belonging to a shared workspace."
+    },
+    "/shared_workspaces/{workspaceId}/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Chats belonging to a shared workspace."
+    },
+    "/shared_workspaces/{workspaceId}/annotations/{annotationId}": {
+      "schema": "Annotation",
+      "description": "Annotations belonging to a shared workspace."
+    },
+    "/shared_libraries/{libraryId}/folders/{folderId}": {
+      "schema": "Folder",
+      "description": "Folders representing a shared public library."
+    },
+    "/shared_libraries/{libraryId}/papers/{paperId}": {
+      "schema": "Paper",
+      "description": "Papers representing a shared public library."
     }
   }
 }
