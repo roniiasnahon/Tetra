@@ -2128,7 +2128,8 @@ export default function App() {
   useEffect(() => {
     if (!sharedWorkspaceId || !isSessionLoaded) return;
     
-    let pid = currentUser ? currentUser.uid : presenceIdRef.current;
+    const pid = presenceIdRef.current;
+    const uid = currentUser ? currentUser.uid : 'guest';
     let fallbackName = currentUser ? (currentUser.displayName || currentUser.email?.split('@')[0]) : `Guest ${pid.substr(-4)}`;
     fallbackName = fallbackName || 'Anonymous';
     
@@ -2139,6 +2140,7 @@ export default function App() {
     
     const updatePresence = () => {
       setDoc(pRef, {
+        uid,
         displayName: fallbackName,
         photoURL: currentUser ? currentUser.photoURL : null,
         color: pColor,
@@ -3982,7 +3984,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
         {sharedWorkspaceId && (
           <div className="flex -space-x-1 ml-1 items-center">
             {Object.entries(presence)
-               .filter(([k, p]) => k !== (currentUser ? currentUser.uid : presenceIdRef.current) && p.activeTabId === tab.id)
+               .filter(([k, p]) => k !== presenceIdRef.current && p.activeTabId === tab.id)
                .map(([k, p]) => (
                 <div key={k} className={`w-[14px] h-[14px] rounded-full ${p.color} flex items-center justify-center border border-[#121212] z-10 shrink-0 overflow-hidden`} title={p.displayName}>
                   {p.photoURL ? (
@@ -5535,7 +5537,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                        {sharedWorkspaceId && (
                          <div className="flex -space-x-1.5 items-center">
                            {Object.entries(presence)
-                              .filter(([k, p]) => k !== (currentUser ? currentUser.uid : presenceIdRef.current) && p.activeTabId === activeTabId)
+                              .filter(([k, p]) => k !== presenceIdRef.current && p.activeTabId === activeTabId)
                               .map(([k, p]) => (
                                <div key={k} className={`w-6 h-6 rounded-full ${p.color} flex items-center justify-center border-[1.5px] border-[#0e0e10] z-10 shrink-0 overflow-hidden`} title={p.displayName}>
                                  {p.photoURL ? (
@@ -5946,7 +5948,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   {sharedWorkspaceId && (
                     <div className="flex -space-x-1.5 mr-3 items-center">
                       {Object.entries(presence)
-                         .filter(([k, p]) => k !== (currentUser ? currentUser.uid : presenceIdRef.current) && p.activeTabId === activeTabId)
+                         .filter(([k, p]) => k !== presenceIdRef.current && p.activeTabId === activeTabId)
                          .map(([k, p]) => (
                           <div key={k} className={`w-7 h-7 rounded-full ${p.color} flex items-center justify-center border-2 border-[#121212] z-10 shrink-0 shadow-sm overflow-hidden`} title={p.displayName}>
                             {p.photoURL ? (
