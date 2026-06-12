@@ -1189,20 +1189,27 @@ export default function App() {
     if (params.get('tauri_auth') === '1') {
       const doAuth = async () => {
         try {
-          const { emit } = await import('@tauri-apps/api/event');
-          const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
+          const { signInWithRedirect, getRedirectResult, GoogleAuthProvider } = await import('firebase/auth');
           
-          const result = await signInWithPopup(auth, googleProvider);
-          const credential = GoogleAuthProvider.credentialFromResult(result);
+          // check if we're coming back from redirect
+          const result = await getRedirectResult(auth);
           
-          // send token back to main window
-          await emit('tauri://auth-complete', {
-            idToken: credential?.idToken
-          });
+          if (result) {
+            // we got the result, emit back to main window
+            const { emit } = await import('@tauri-apps/api/event');
+            const credential = GoogleAuthProvider.credentialFromResult(result);
+            
+            await emit('tauri://auth-complete', {
+              idToken: credential?.idToken
+            });
 
-          // close this window after
-          const { getCurrentWindow } = await import('@tauri-apps/api/window');
-          await getCurrentWindow().close();
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            await getCurrentWindow().close();
+            
+          } else {
+            // first load, trigger the redirect
+            await signInWithRedirect(auth, googleProvider);
+          }
           
         } catch (err) {
           console.error('auth failed', err);
