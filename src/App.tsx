@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import React, { useState, useEffect, useRef } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import ReactMarkdown from "react-markdown";
@@ -1742,16 +1743,21 @@ export default function App() {
   }, []);
 
   const handleGoogleLogin = async () => {
-    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+    // Detect if we are inside Tauri
+    const isTauri =
+      typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+    if (isTauri) {
       try {
-        const { openUrl } = await import("@tauri-apps/plugin-opener");
-        // Use the requested specific login-redirect URL for the desktop wrapper
+        // Breakout: Tell the OS to open the URL in the system browser
         await openUrl("https://cosmiwise.vercel.app/login-redirect");
       } catch (err) {
         console.error("Tauri external login failed:", err);
+        // Fallback to popup if external opening fails
         await signInWithPopup(auth, googleProvider);
       }
     } else {
+      // Normal web behavior: use the popup
       await signInWithPopup(auth, googleProvider);
     }
   };
