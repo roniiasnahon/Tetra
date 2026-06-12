@@ -920,13 +920,9 @@ export default function App() {
   const [isAssistantChatDropdownOpen, setIsAssistantChatDropdownOpen] =
     useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [pdfNumPages, setPdfNumPages] = useState<number | null>(null);
   const [currentPdfPage, setCurrentPdfPage] = useState<number>(1);
   const [pdfScale, setPdfScale] = useState<number>(1);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [isInviteSuccess, setIsInviteSuccess] = useState(false);
-
   const [isSharingLoading, setIsSharingLoading] = useState(false);
   const [generatedLink, setGeneratedLink] = useState("");
   const [generatedLinkType, setGeneratedLinkType] = useState<
@@ -3095,12 +3091,12 @@ export default function App() {
       const timeSinceLastSync = now - lastSyncTimeRef.current;
 
       // If we edited locally very recently, wait for debounce
-      if (now - lastLocalEditTimeRef.current < 2000 && timeSinceLastSync < 2000) {
+      if (now - lastLocalEditTimeRef.current < 500 && timeSinceLastSync < 500) {
         return;
       }
 
-      // If they are actively typing but haven't synced for more than 400ms, force sync!
-      if (timeSinceLastSync >= 400) {
+      // If they are actively typing but haven't synced for more than 200ms, force sync!
+      if (timeSinceLastSync >= 200) {
         lastSyncTimeRef.current = now;
         const sessionRef = doc(db, "shared_workspaces", sharedWorkspaceId);
         const cleanMessages = JSON.parse(JSON.stringify(messages));
@@ -4357,8 +4353,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
           localStorage.getItem(`workspace_owner_${sharedWorkspaceId}`));
 
   const isReadOnly =
-    sharedLibraryId !== null ||
-    (sharedWorkspaceId !== null && !isWorkspaceOwner);
+    sharedLibraryId !== null;
 
   if (isAuthLoading) {
     return (
@@ -5518,43 +5513,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             : cleanTitleStr(tab.title)) || "Untitled"}
                 </span>
 
-                {sharedWorkspaceId && (
-                  <div className="flex -space-x-1 ml-1 items-center">
-                    {Object.entries(presence)
-                      .filter(
-                        ([k, p]) =>
-                          k !== presenceIdRef.current &&
-                          p.activeTabId === tab.id,
-                      )
-                      .map(([k, p]) => (
-                        <div
-                          key={k}
-                          className="relative group/avatar hover:z-30 z-10"
-                        >
-                          <div
-                            className={`w-[14.5px] h-[14.5px] rounded-full ${p.color} flex items-center justify-center border border-[#121212] shrink-0 overflow-hidden`}
-                          >
-                            {p.photoURL ? (
-                              <img
-                                src={p.photoURL}
-                                alt={p.displayName}
-                                className="w-full h-full object-cover"
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : (
-                              <span className="text-[7.5px] font-bold text-white leading-none">
-                                {p.displayName?.charAt(0)?.toUpperCase()}
-                              </span>
-                            )}
-                          </div>
-                          <div className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 pointer-events-none hidden group-hover/avatar:block bg-zinc-950 border border-zinc-800 text-zinc-200 text-[9px] font-medium px-1.5 py-0.5 rounded shadow-lg whitespace-nowrap z-[150]">
-                            {p.displayName || "Guest User"}
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                )}
-
                 {tabs.length > 1 && (
                   <button
                     onClick={(e) => {
@@ -6068,16 +6026,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       <span className="text-[#71717a] text-[11px] font-medium mr-1 select-none">
                         {sortedPapers.length} files in library
                       </span>
-                      <button
-                        onClick={() => setInviteModalOpen(true)}
-                        className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#252528] rounded-xl text-zinc-200 transition-all cursor-pointer"
-                      >
-                        <Icon
-                          icon="ph:user-plus"
-                          className="w-3.5 h-3.5 text-zinc-400"
-                        />
-                        <span className="font-medium text-[11px]">Invite</span>
-                      </button>
                       <div className="relative">
                         <button
                           onClick={() => {
@@ -6804,201 +6752,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   </AnimatePresence>
                 </div>
 
-                {/* Zero-Glow Invite Popover Modal */}
-                {inviteModalOpen && (
-                  <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
-                    <div className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-lg p-6 relative animate-scale-up">
-                      <button
-                        onClick={() => {
-                          setInviteModalOpen(false);
-                          setGeneratedLink("");
-                          setGeneratedLinkType(null);
-                          setIsInviteSuccess(false);
-                        }}
-                        className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer"
-                      >
-                        <Icon icon="ph:x" className="w-5 h-5" />
-                      </button>
-
-                      <h3 className="text-[#f4f4f5] text-lg font-medium mb-1">
-                        Academic Collaboration Center
-                      </h3>
-                      <p className="text-[#71717a] text-xs mb-5">
-                        Share workspaces, collaborate in real-time, or
-                        distribute documents via public links
-                      </p>
-
-                      {/* Section 1: Active Collaboration Indicators */}
-                      {sharedWorkspaceId && (
-                        <div className="mb-5 bg-[#18181b] border border-[#27272a] rounded-xl p-4">
-                          <div className="flex items-center gap-2 mb-1.5">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                            <span className="text-[#f4f4f5] text-xs font-semibold">
-                              Active Real-Time Collaborative Workspace
-                            </span>
-                          </div>
-                          <p className="text-[#71717a] text-[11px] mb-3">
-                            Anyone visiting this URL interacts on the same live
-                            canvas with active syncing.
-                          </p>
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              readOnly
-                              value={window.location.href}
-                              className="bg-[#09090b] text-[#a1a1aa] font-mono text-[10px] rounded-lg px-3 py-1.5 flex-1 border border-[#27272a] focus:outline-none"
-                            />
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(
-                                  window.location.href,
-                                );
-                                showToast(
-                                  "Copied collaborative workspace URL!",
-                                  "success",
-                                );
-                              }}
-                              className="px-3 py-1.5 bg-[#27272a] hover:bg-[#333336] text-zinc-200 font-bold text-[11px] rounded-lg cursor-pointer transition-colors"
-                            >
-                              Copy Link
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {sharedLibraryId && (
-                        <div className="mb-5 bg-[#18181b] border border-[#27272a] rounded-xl p-4">
-                          <div className="flex items-center gap-2 mb-1.5">
-                            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-                            <span className="text-[#f4f4f5] text-xs font-semibold">
-                              Active Public Shared Library Mode
-                            </span>
-                          </div>
-                          <p className="text-[#71717a] text-[11px] mb-3">
-                            Visiting peers have viewing-level permissions to
-                            read any document housed here.
-                          </p>
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              readOnly
-                              value={window.location.href}
-                              className="bg-[#09090b] text-[#a1a1aa] font-mono text-[10px] rounded-lg px-3 py-1.5 flex-1 border border-[#27272a] focus:outline-none"
-                            />
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(
-                                  window.location.href,
-                                );
-                                showToast(
-                                  "Copied public library URL!",
-                                  "success",
-                                );
-                              }}
-                              className="px-3 py-1.5 bg-[#27272a] hover:bg-[#333336] text-zinc-200 font-bold text-[11px] rounded-lg cursor-pointer transition-colors"
-                            >
-                              Copy Link
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="space-y-4">
-                        {/* Display generated link */}
-                        {generatedLink && (
-                          <div className="bg-[#161618] border border-zinc-700 rounded-xl p-4 text-left">
-                            <label className="block text-[10px] font-mono uppercase tracking-wider text-zinc-400 mb-1.5">
-                              {generatedLinkType === "workspace"
-                                ? "Workspace Collaboration Link"
-                                : "Public Shared Library Link"}
-                            </label>
-                            <p className="text-[#71717a] text-[11px] mb-3">
-                              {generatedLinkType === "workspace"
-                                ? "Anyone with this link can edit documents, annotate research and collaborate live."
-                                : "All current research papers in your active archive are now publicly readable with this link."}
-                            </p>
-                            <div className="flex gap-2">
-                              <input
-                                type="text"
-                                readOnly
-                                value={generatedLink}
-                                className="bg-[#09090b] text-[#f4f4f5] font-mono text-[10px] rounded-lg px-3 py-2 flex-1 border border-[#27272a] focus:outline-none select-all"
-                              />
-                              <button
-                                onClick={() => {
-                                  navigator.clipboard.writeText(generatedLink);
-                                  showToast("Copied share URL!", "success");
-                                }}
-                                className="px-4 py-2 bg-zinc-200 hover:bg-white text-zinc-950 font-bold text-xs rounded-lg cursor-pointer transition-colors"
-                              >
-                                Copy
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Peer Email Inviter */}
-                        <div className="pt-2">
-                          <h4 className="text-[#f4f4f5] text-xs font-semibold mb-2 flex items-center gap-2">
-                            <Icon
-                              icon="ph:envelope-simple"
-                              className="w-4 h-4 text-zinc-400"
-                            />
-                            Invite via Direct Email Invitation
-                          </h4>
-
-                          {isInviteSuccess ? (
-                            <div className="text-center py-4 bg-[#18181b] border border-[#27272a] rounded-xl">
-                              <Icon
-                                icon="ph:check-circle"
-                                className="w-10 h-10 text-emerald-500 mx-auto mb-2"
-                              />
-                              <h4 className="text-[#e4e4e7] font-semibold text-xs">
-                                Invitation Sent
-                              </h4>
-                              <p className="text-[#71717a] text-[11px] mt-1">
-                                An approval link has been issued to{" "}
-                                <span className="text-slate-300 font-mono">
-                                  {inviteEmail}
-                                </span>
-                              </p>
-                            </div>
-                          ) : (
-                            <form
-                              onSubmit={(e) => {
-                                e.preventDefault();
-                                if (inviteEmail.trim()) {
-                                  setIsInviteSuccess(true);
-                                }
-                              }}
-                              className="space-y-3"
-                            >
-                              <div className="flex gap-2">
-                                <input
-                                  type="email"
-                                  required
-                                  value={inviteEmail}
-                                  onChange={(e) =>
-                                    setInviteEmail(e.target.value)
-                                  }
-                                  placeholder="peer.reviewer@academic.edu"
-                                  className="bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-zinc-200 text-xs flex-1 focus:border-zinc-500 focus:outline-none placeholder:text-zinc-600 transition-colors"
-                                />
-                                <button
-                                  type="submit"
-                                  className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-                                >
-                                  Send Link
-                                </button>
-                              </div>
-                            </form>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 {/* Zero-Glow Import Link Modal */}
                 {importModalOpen && (
                   <div
@@ -7605,42 +7358,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    {sharedWorkspaceId && (
-                      <div className="flex -space-x-1.5 items-center">
-                        {Object.entries(presence)
-                          .filter(
-                            ([k, p]) =>
-                              k !== presenceIdRef.current &&
-                              p.activeTabId === activeTabId,
-                          )
-                          .map(([k, p]) => (
-                            <div
-                              key={k}
-                              className="relative group/avatar hover:z-30 z-10"
-                            >
-                              <div
-                                className={`w-6 h-6 rounded-full ${p.color} flex items-center justify-center border-[1.5px] border-[#0e0e10] shrink-0 overflow-hidden`}
-                              >
-                                {p.photoURL ? (
-                                  <img
-                                    src={p.photoURL}
-                                    alt={p.displayName}
-                                    className="w-full h-full object-cover"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                ) : (
-                                  <span className="text-[10px] font-bold text-white tracking-wide leading-none">
-                                    {p.displayName?.charAt(0)?.toUpperCase()}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 pointer-events-none hidden group-hover/avatar:block bg-zinc-950 border border-zinc-800 text-zinc-200 text-[10px] font-medium px-2 py-0.5 rounded shadow-lg whitespace-nowrap z-[150]">
-                                {p.displayName || "Guest User"}
-                              </div>
-                            </div>
-                          ))}
-                      </div>
-                    )}
+                    {sharedWorkspaceId && <div className="mr-1" />}
 
                     <button
                       disabled={isSharingLoading}
@@ -8209,42 +7927,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <div
                   className={`absolute top-3.5 z-30 transition-all duration-200 ${isSidePanelOpen ? "right-4" : "right-12"} flex items-center gap-2.5`}
                 >
-                  {sharedWorkspaceId && (
-                    <div className="flex -space-x-1.5 mr-1 items-center">
-                      {Object.entries(presence)
-                        .filter(
-                          ([k, p]) =>
-                            k !== presenceIdRef.current &&
-                            p.activeTabId === activeTabId,
-                        )
-                        .map(([k, p]) => (
-                          <div
-                            key={k}
-                            className="relative group/avatar hover:z-30 z-10"
-                          >
-                            <div
-                              className={`w-7 h-7 rounded-full ${p.color} flex items-center justify-center border-2 border-[#121212] shrink-0 shadow-sm overflow-hidden`}
-                            >
-                              {p.photoURL ? (
-                                <img
-                                  src={p.photoURL}
-                                  alt={p.displayName}
-                                  className="w-full h-full object-cover"
-                                  referrerPolicy="no-referrer"
-                                />
-                              ) : (
-                                <span className="text-[11px] font-bold text-white leading-none tracking-wide">
-                                  {p.displayName?.charAt(0)?.toUpperCase()}
-                                </span>
-                              )}
-                            </div>
-                            <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 pointer-events-none hidden group-hover/avatar:block bg-zinc-950 border border-zinc-800 text-zinc-200 text-[10.5px] font-medium px-2 py-1 rounded shadow-lg whitespace-nowrap z-[150]">
-                              {p.displayName || "Guest User"}
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  )}
+                  {sharedWorkspaceId && <div className="mr-1" />}
 
                   {docSaveStatus === "saving" ? (
                     <span className="flex items-center gap-1.5 text-zinc-400 bg-[#121212]/80 px-2.5 py-1.5 rounded-lg backdrop-blur-sm select-none text-[11px] font-mono h-8">
