@@ -404,10 +404,30 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     }
   };
 
+  const isElectronApp = typeof window !== 'undefined' && (
+      (window as any).electron !== undefined || 
+      navigator.userAgent.toLowerCase().includes('electron') ||
+      (window as any).ipcRenderer !== undefined ||
+      (window as any).process?.versions?.electron !== undefined
+  );
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0c0c0f] to-[#040405] text-[#e4e4e7] flex select-none selection:bg-zinc-800 selection:text-white overflow-hidden relative font-jakarta">
+    <div className="h-screen bg-gradient-to-br from-[#0c0c0f] to-[#040405] text-[#e4e4e7] flex select-none selection:bg-zinc-800 selection:text-white overflow-hidden relative font-jakarta">
       {/* Desktop Drag Area */}
       <div className="absolute top-0 inset-x-0 h-8 z-[100] [-webkit-app-region:drag]" />
+      {isElectronApp && (
+        <div className="absolute top-0 right-0 h-8 flex items-center z-[101] [-webkit-app-region:no-drag]">
+          <button onClick={() => (window as any).electron?.minimize?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
+            <Icon icon="ph:minus" className="w-[14px] h-[14px]" />
+          </button>
+          <button onClick={() => (window as any).electron?.maximize?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
+            <Icon icon="ph:square" className="w-[12px] h-[12px]" />
+          </button>
+          <button onClick={() => (window as any).electron?.close?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-red-500 hover:text-white transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
+            <Icon icon="ph:x" className="w-[14px] h-[14px]" />
+          </button>
+        </div>
+      )}
       
       {/* LEFT COLUMN: Clean Slate/Zinc background with interactive cartoon characters */}
       <div className="hidden md:flex md:w-[50%] lg:w-[54%] relative flex-col justify-between p-12 overflow-hidden">
