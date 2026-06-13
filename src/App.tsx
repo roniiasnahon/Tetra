@@ -3484,7 +3484,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
   }
 
   return (
-    <div className="h-screen bg-[#070707] text-[#e4e4e7] font-sans flex selection:bg-[#262626] overflow-hidden">
+    <div className="h-screen bg-[#070707] text-[#e4e4e7] font-sans flex selection:bg-[#262626] overflow-hidden relative">
+      {isElectronApp && (
+        <div className="fixed top-0 right-0 h-[38px] flex items-center z-[9999] [-webkit-app-region:no-drag]">
+          <button onClick={() => (window as any).electron?.minimize?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
+            <Icon icon="ph:minus" className="w-[14px] h-[14px]" />
+          </button>
+          <button onClick={() => (window as any).electron?.maximize?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
+            <Icon icon="ph:square" className="w-[12px] h-[12px]" />
+          </button>
+          <button onClick={() => (window as any).electron?.close?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-red-500 transition-colors cursor-pointer flex items-center justify-center">
+            <Icon icon="ph:x" className="w-[14px] h-[14px]" />
+          </button>
+        </div>
+      )}
       <input
         type="file"
         ref={fileInputRef}
@@ -4640,7 +4653,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
           {/* Right Header Navigation & Panel Controls */}
           {!isAssistantOpen && (
-            <div className="absolute right-2 bottom-[3px] z-20 flex items-center [-webkit-app-region:no-drag]">
+            <div className={`absolute bottom-[3px] z-20 flex items-center [-webkit-app-region:no-drag] ${isElectronApp ? "right-[145px]" : "right-2"}`}>
               <button
                 onClick={() => setIsAssistantOpen(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1a1a1a] border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#222222] hover:border-[#3f3f46] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98] whitespace-nowrap"

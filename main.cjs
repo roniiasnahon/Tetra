@@ -20,13 +20,8 @@ function createWindow() {
     width: 1200,
     height: 800,
     title: "Cosmiwise",
-    autoHideMenuBar: true,
+    frame: false,
     titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: '#070707',
-      symbolColor: '#a1a1aa',
-      height: 38
-    },
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -92,4 +87,18 @@ function handleDeepLink(urlStr) {
 // IPC listener to open URLs in external browser securely
 ipcMain.on('open-external', (event, url) => {
   shell.openExternal(url);
+});
+
+// Window controls IPC
+ipcMain.on('window-minimize', () => {
+  if (mainWindow) mainWindow.minimize();
+});
+ipcMain.on('window-maximize', () => {
+  if (mainWindow) {
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+  }
+});
+ipcMain.on('window-close', () => {
+  if (mainWindow) mainWindow.close();
 });
