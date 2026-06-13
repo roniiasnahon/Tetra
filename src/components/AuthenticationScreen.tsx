@@ -308,25 +308,26 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
 
     const isTauri = () => typeof window !== 'undefined' && ('___TAURI___' in window || (window as any).__TAURI__ !== undefined);
     
-    if (isElectron()) {
-      if ((window as any).electron?.openUrl) {
-        (window as any).electron.openUrl('https://cosmiwise.vercel.app/?google_callback=1');
-      } else if ((window as any).electron?.ipcRenderer?.send) {
-        (window as any).electron.ipcRenderer.send('open-url', 'https://cosmiwise.vercel.app/?google_callback=1');
-      } else if ((window as any).ipcRenderer?.send) {
-        (window as any).ipcRenderer.send('open-url', 'https://cosmiwise.vercel.app/?google_callback=1');
-      } else {
-        window.open('https://cosmiwise.vercel.app/?google_callback=1', '_blank');
+    // Use system browser breakout only if we are forced to (file:// or tauri://) 
+    // because Firebase Auth popup/redirect doesn't support custom protocols.
+    const needsSystemBrowserBreakout = isTauri() || (isElectron() && window.location.protocol === 'file:');
+
+    if (needsSystemBrowserBreakout) {
+      if (isElectron()) {
+        if ((window as any).electron?.openUrl) {
+          (window as any).electron.openUrl('https://cosmiwise.vercel.app/?google_callback=1');
+        } else {
+          window.open('https://cosmiwise.vercel.app/?google_callback=1', '_blank');
+        }
+      } else if (isTauri()) {
+        const { openUrl } = await import('@tauri-apps/plugin-opener');
+        await openUrl('https://cosmiwise.vercel.app/?google_callback=1');
       }
-      setTimeout(() => setIsLoading(false), 15000);
-    } else if (isTauri()) {
-      const { openUrl } = await import('@tauri-apps/plugin-opener');
-      await openUrl('https://cosmiwise.vercel.app/?google_callback=1');
       setTimeout(() => setIsLoading(false), 15000);
     } else {
       try {
-        const { signInWithRedirect } = await import('firebase/auth');
-        await signInWithRedirect(auth, googleProvider);
+        const { signInWithPopup } = await import('firebase/auth');
+        await signInWithPopup(auth, googleProvider);
       } catch (err: any) {
         console.error('Google Sign-In failed:', err);
         setErrorMessage(err.message || 'Failed to sign in with Google');

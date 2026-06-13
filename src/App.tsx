@@ -1197,10 +1197,17 @@ export default function App() {
             console.log("Electron received deep link:", urlStr);
             const url = new URL(urlStr);
             const token = url.searchParams.get('token');
+            const googleIdToken = url.searchParams.get('id_token') || url.searchParams.get('googleIdToken');
+            
             if (token) {
               const { signInWithCustomToken } = await import('firebase/auth');
               await signInWithCustomToken(auth, token);
               console.log("Electron authenticated successfully with custom token");
+            } else if (googleIdToken) {
+              const { GoogleAuthProvider, signInWithCredential } = await import('firebase/auth');
+              const credential = GoogleAuthProvider.credential(googleIdToken);
+              await signInWithCredential(auth, credential);
+              console.log("Electron authenticated successfully with Google ID token");
             }
           } catch (err) {
             console.error("Electron deep link authentication error:", err);
@@ -1890,24 +1897,23 @@ export default function App() {
     );
     const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-    if (isElectron()) {
+    const needsSystemBrowserBreakout = isTauri || (isElectron() && window.location.protocol === 'file:');
+
+    if (needsSystemBrowserBreakout) {
       const redirectUrl = "https://cosmiwise.vercel.app/?google_callback=1";
-      if ((window as any).electron?.openUrl) {
-        (window as any).electron.openUrl(redirectUrl);
-      } else if ((window as any).electron?.ipcRenderer?.send) {
-        (window as any).electron.ipcRenderer.send("open-url", redirectUrl);
-      } else if ((window as any).ipcRenderer?.send) {
-        (window as any).ipcRenderer.send("open-url", redirectUrl);
-      } else {
-        window.open(redirectUrl, "_blank");
-      }
-    } else if (isTauri) {
-      try {
-        // Breakout to system browser to handle authentication
-        const { openUrl } = await import("@tauri-apps/plugin-opener");
-        await openUrl("https://cosmiwise.vercel.app/?google_callback=1");
-      } catch (err) {
-        console.error("Tauri breakout failed:", err);
+      if (isElectron()) {
+        if ((window as any).electron?.openUrl) {
+          (window as any).electron.openUrl(redirectUrl);
+        } else {
+          window.open(redirectUrl, "_blank");
+        }
+      } else if (isTauri) {
+        try {
+          const { openUrl } = await import("@tauri-apps/plugin-opener");
+          await openUrl(redirectUrl);
+        } catch (err) {
+          console.error("Tauri breakout failed:", err);
+        }
       }
     } else {
       // Normal web behavior: use the popup
