@@ -1897,7 +1897,9 @@ export default function App() {
     );
     const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-    const needsSystemBrowserBreakout = isTauri || (isElectron() && window.location.protocol === 'file:');
+    // Use system browser breakout for Tauri and Electron environments
+    // because Firebase Auth popup/redirect doesn't support custom desktop protocols or wrappers securely.
+    const needsSystemBrowserBreakout = isTauri || isElectron();
 
     if (needsSystemBrowserBreakout) {
       const redirectUrl = "https://cosmiwise.vercel.app/?google_callback=1";

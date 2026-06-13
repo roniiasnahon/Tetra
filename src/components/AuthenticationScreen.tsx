@@ -308,9 +308,9 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
 
     const isTauri = () => typeof window !== 'undefined' && ('___TAURI___' in window || (window as any).__TAURI__ !== undefined);
     
-    // Use system browser breakout only if we are forced to (file:// or tauri://) 
-    // because Firebase Auth popup/redirect doesn't support custom protocols.
-    const needsSystemBrowserBreakout = isTauri() || (isElectron() && window.location.protocol === 'file:');
+    // Use system browser breakout for Tauri and Electron environments
+    // because Firebase Auth popup/redirect doesn't support custom desktop protocols or wrappers securely.
+    const needsSystemBrowserBreakout = isTauri() || isElectron();
 
     if (needsSystemBrowserBreakout) {
       if (isElectron()) {
