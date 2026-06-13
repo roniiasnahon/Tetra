@@ -1,5 +1,8 @@
-const { app, BrowserWindow, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, Menu } = require('electron');
 const path = require('path');
+
+// Disable standard application menu
+Menu.setApplicationMenu(null);
 
 let mainWindow = null;
 
@@ -34,6 +37,9 @@ function createWindow() {
   // Load the app - load the local server or custom URL depending on environment
   const startUrl = process.env.ELECTRON_DEV_URL || 'http://localhost:3000';
   mainWindow.loadURL(startUrl);
+
+  // Remove the default menu bar
+  mainWindow.setMenu(null);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
