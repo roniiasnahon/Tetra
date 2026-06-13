@@ -310,17 +310,17 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     
     if (isElectron()) {
       if ((window as any).electron?.openUrl) {
-        (window as any).electron.openUrl('https://cosmiwise.vercel.app/login-redirect');
+        (window as any).electron.openUrl('https://cosmiwise.vercel.app/?google_callback=1');
       } else if ((window as any).electron?.ipcRenderer?.send) {
-        (window as any).electron.ipcRenderer.send('open-url', 'https://cosmiwise.vercel.app/login-redirect');
+        (window as any).electron.ipcRenderer.send('open-url', 'https://cosmiwise.vercel.app/?google_callback=1');
       } else if ((window as any).ipcRenderer?.send) {
-        (window as any).ipcRenderer.send('open-url', 'https://cosmiwise.vercel.app/login-redirect');
+        (window as any).ipcRenderer.send('open-url', 'https://cosmiwise.vercel.app/?google_callback=1');
       } else {
-        window.open('https://cosmiwise.vercel.app/login-redirect', '_blank');
+        window.open('https://cosmiwise.vercel.app/?google_callback=1', '_blank');
       }
     } else if (isTauri()) {
       const { openUrl } = await import('@tauri-apps/plugin-opener');
-      await openUrl('https://cosmiwise.vercel.app/login-redirect');
+      await openUrl('https://cosmiwise.vercel.app/?google_callback=1');
     } else {
       try {
         const { signInWithRedirect } = await import('firebase/auth');

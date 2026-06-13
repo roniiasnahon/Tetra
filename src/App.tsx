@@ -1242,7 +1242,7 @@ export default function App() {
     };
   }, []);
 
-  // Handle desktop authentication redirection bypass
+  // Handle desktop authentication redirection bypass & system browser google callback flow
   useEffect(() => {
     const isElectron = () => typeof window !== 'undefined' && (
       (window as any).electron !== undefined || 
@@ -1258,12 +1258,40 @@ export default function App() {
     }
     
     const checkRedirect = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const isCallback = params.get('google_callback') === '1';
+
       try {
-        const { getRedirectResult } = await import('firebase/auth');
+        const { getRedirectResult, signInWithRedirect } = await import('firebase/auth');
         const result = await getRedirectResult(auth);
+        
         if (result?.user) {
-          // user is logged in 🔥
-          console.log('redirect login success', result.user);
+          console.log('Redirect login success', result.user);
+          if (isCallback) {
+            const idToken = await result.user.getIdToken();
+            const res = await fetch('/api/auth/custom-token', {
+              method: 'POST',
+              body: JSON.stringify({ idToken }),
+              headers: { 'Content-Type': 'application/json' }
+            });
+            const { customToken } = await res.json();
+            window.location.href = `cosmiwise://auth?token=${customToken}`;
+            return;
+          }
+        } else if (isCallback) {
+          if (!auth.currentUser) {
+            await signInWithRedirect(auth, googleProvider);
+          } else {
+            // Already logged in from dynamic session, directly retrieve token & deep link back
+            const idToken = await auth.currentUser.getIdToken();
+            const res = await fetch('/api/auth/custom-token', {
+              method: 'POST',
+              body: JSON.stringify({ idToken }),
+              headers: { 'Content-Type': 'application/json' }
+            });
+            const { customToken } = await res.json();
+            window.location.href = `cosmiwise://auth?token=${customToken}`;
+          }
         }
       } catch (err: any) {
         console.error('redirect result error:', err.code, err.message);
@@ -1849,7 +1877,7 @@ export default function App() {
     const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
     if (isElectron()) {
-      const redirectUrl = "https://cosmiwise.vercel.app/login-redirect";
+      const redirectUrl = "https://cosmiwise.vercel.app/?google_callback=1";
       if ((window as any).electron?.openUrl) {
         (window as any).electron.openUrl(redirectUrl);
       } else if ((window as any).electron?.ipcRenderer?.send) {
@@ -1863,7 +1891,7 @@ export default function App() {
       try {
         // Breakout to system browser to handle authentication
         const { openUrl } = await import("@tauri-apps/plugin-opener");
-        await openUrl("https://cosmiwise.vercel.app/login-redirect");
+        await openUrl("https://cosmiwise.vercel.app/?google_callback=1");
       } catch (err) {
         console.error("Tauri breakout failed:", err);
       }
