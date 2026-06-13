@@ -91,6 +91,13 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
         ))}
       </div>
 
+      {/* Giant backdrop background text inspired by Google Antigravity style (Antigravity -> Cosmi) */}
+      <div className="absolute inset-0 flex items-center justify-center select-none pointer-events-none z-0 overflow-hidden leading-none">
+        <span className="text-[18vw] md:text-[22vw] font-jakarta font-bold tracking-tighter text-[#121213] opacity-90 select-none leading-none">
+          Cosmi
+        </span>
+      </div>
+
       <div className="w-full max-w-3xl flex flex-col items-center text-center space-y-10 z-10">
         
         {/* Brand Lockup: Cosmi by General Language with logo */}
@@ -201,11 +208,17 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
         )}
       </div>
 
-      {/* Docs | Twitter Footer */}
-      <div className="absolute bottom-8 left-0 right-0 flex justify-center gap-4 text-xs font-normal text-zinc-500 z-10 select-none font-jakarta">
-        <a href="#docs" className="hover:text-zinc-300 transition-colors">Docs</a>
-        <span className="text-zinc-800">|</span>
-        <a href="#twitter" className="hover:text-zinc-300 transition-colors">Twitter</a>
+      {/* Brand Footer in the style of Google Antigravity (Google -> General Language) */}
+      <div className="absolute bottom-6 left-0 right-0 px-8 md:px-12 flex flex-col md:flex-row justify-between items-center gap-4 text-xs font-normal text-zinc-500 z-10 select-none font-jakarta">
+        <div className="text-zinc-400 font-medium tracking-tight">
+          General Language
+        </div>
+        <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-zinc-500 font-normal">
+          <a href="#about" className="hover:text-zinc-300 transition-colors">About General Language</a>
+          <a href="#products" className="hover:text-zinc-300 transition-colors">General Language Products</a>
+          <a href="#privacy" className="hover:text-zinc-300 transition-colors">Privacy</a>
+          <a href="#terms" className="hover:text-zinc-300 transition-colors">Terms</a>
+        </div>
       </div>
     </div>
   );
