@@ -24,6 +24,23 @@ const BACKGROUND_PARTICLES = Array.from({ length: 180 }).map((_, i) => {
   return { x, y, color, rotation, length, opacity };
 });
 
+// Typewriter component for the title
+const TypewriterText = ({ text }: { text: string }) => {
+  const [displayedText, setDisplayedText] = useState("");
+  
+  useEffect(() => {
+    let index = 0;
+    const interval = setInterval(() => {
+      setDisplayedText(text.substring(0, index + 1));
+      index++;
+      if (index >= text.length) clearInterval(interval);
+    }, 100);
+    return () => clearInterval(interval);
+  }, [text]);
+
+  return <span>{displayedText}<span className="inline-block w-[3px] h-[1em] bg-white translate-y-[2px] ml-1 animate-pulse"></span></span>;
+};
+
 export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
   const [status, setStatus] = useState<'idle' | 'auth_popup' | 'exchanging' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -91,13 +108,6 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
         ))}
       </div>
 
-      {/* Giant backdrop background text inspired by Google Antigravity style (Antigravity -> Cosmi) */}
-      <div className="absolute inset-0 flex items-center justify-center select-none pointer-events-none z-0 overflow-hidden leading-none overflow-y-hidden">
-        <span className="text-[18vw] md:text-[22vw] font-jakarta font-bold tracking-tighter text-[#121213] opacity-90 select-none leading-none">
-          Cosmi
-        </span>
-      </div>
-
       <div className="flex-1 flex flex-col items-center justify-center p-8 z-10 w-full mx-auto">
         <div className="w-full max-w-3xl flex flex-col items-center text-center space-y-10">
           
@@ -115,7 +125,7 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
           <div className="flex flex-col items-center w-full space-y-8 animate-fade-in font-jakarta">
             <div className="space-y-4 max-w-xl">
               <h1 className="text-3xl md:text-[52px] font-jakarta font-medium tracking-tight text-white leading-tight">
-                Authorize Cosmi
+                <TypewriterText text="Authorize Cosmi" />
               </h1>
               <p className="text-sm md:text-base text-zinc-400 max-w-md mx-auto leading-relaxed">
                 Link your Google account to authorize access for the Cosmi Desktop companion application.
