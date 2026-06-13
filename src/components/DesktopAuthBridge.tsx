@@ -72,15 +72,15 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
           </p>
         </div>
 
-        {/* Dynamic status card */}
-        <div className="w-full bg-[#09090a] border border-zinc-900 rounded-xl p-6 flex flex-col items-center justify-center min-h-[140px] text-center">
+        {/* Dynamic status container */}
+        <div className="w-full flex flex-col items-center justify-center min-h-[140px] text-center pt-2">
           {status === 'idle' && !currentUser && (
-            <div className="space-y-4 w-full">
-              <span className="text-xs text-zinc-500 font-mono block">READY TO AUTHENTICATE</span>
+            <div className="space-y-6 w-full">
+              <span className="text-xs text-zinc-500 font-mono tracking-widest block font-medium">READY TO AUTHENTICATE</span>
               <button
                 onClick={handleSignIn}
                 id="btn-desktop-signin"
-                className="w-full px-5 py-3 bg-white text-black hover:bg-neutral-100 transition-colors font-semibold rounded-lg text-sm flex items-center justify-center gap-3 cursor-pointer shadow-sm border-0"
+                className="w-full px-5 py-3.5 bg-white text-black hover:bg-neutral-100 transition-colors font-semibold rounded-xl text-sm flex items-center justify-center gap-3 cursor-pointer shadow-sm border-0"
               >
                 <div className="w-[18px] h-[18px] flex items-center justify-center shrink-0">
                   <svg viewBox="0 0 24 24" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
@@ -114,10 +114,10 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
                 <p className="text-xs text-zinc-500">Opening Cosmi Desktop automatically...</p>
               </div>
 
-              <div className="flex flex-col gap-2 w-full pt-2">
+              <div className="flex flex-col gap-2 w-full pt-4">
                 <button
                   onClick={() => triggerDeepLink(customToken)}
-                  className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white transition-colors border border-zinc-800 text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white transition-colors border border-zinc-800 text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   Relaunch Desktop client
@@ -146,12 +146,6 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
               </button>
             </div>
           )}
-        </div>
-
-        {/* Visual prompt/info footer */}
-        <div className="flex items-center gap-2 text-xs text-zinc-600 font-mono">
-          <Chrome className="w-3.5 h-3.5 text-zinc-700" />
-          <span>secure chrome system agent dispatch</span>
         </div>
       </div>
     </div>
