@@ -4537,8 +4537,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
       {/* Main Content (Editor Column) */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header Bar */}
-        <header className="relative h-[38px] flex items-end shrink-0 bg-[#070707] px-2">
-          <div className="flex items-center gap-3 h-full pb-1.5 pt-1.5 group z-20 bg-[#070707] pr-2">
+        <header className="relative h-[38px] flex items-end shrink-0 bg-[#070707] px-2 [-webkit-app-region:drag]">
+          <div className="flex items-center gap-3 h-full pb-1.5 pt-1.5 group z-20 bg-[#070707] pr-2 [-webkit-app-region:no-drag]">
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
               className={`transition-all duration-300 cursor-pointer p-1 rounded-md ${isSidebarOpen ? "opacity-0 group-hover:opacity-100 bg-[#1a1a1a] text-[#f4f4f5]" : "text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1a1a1a]"}`}
@@ -4550,7 +4550,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
           {/* Tabs Container */}
           <div
-            className="flex-1 flex items-end h-full ml-1 gap-[2px] overflow-x-auto custom-scrollbar-h min-w-0 pr-24"
+            className="flex-1 flex items-end h-full ml-1 gap-[2px] overflow-x-auto custom-scrollbar-h min-w-0 pr-24 [-webkit-app-region:no-drag]"
             style={{
               WebkitMaskImage: !isAssistantOpen
                 ? "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 90px), rgba(0,0,0,0) 100%)"
@@ -4634,7 +4634,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
           {/* Right Header Navigation & Panel Controls */}
           {!isAssistantOpen && (
-            <div className="absolute right-2 bottom-[3px] z-20 flex items-center">
+            <div className="absolute right-2 bottom-[3px] z-20 flex items-center [-webkit-app-region:no-drag]">
               <button
                 onClick={() => setIsAssistantOpen(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1a1a1a] border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#222222] hover:border-[#3f3f46] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98] whitespace-nowrap"

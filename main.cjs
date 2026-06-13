@@ -17,6 +17,13 @@ function createWindow() {
     width: 1200,
     height: 800,
     title: "Cosmiwise",
+    autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#070707',
+      symbolColor: '#a1a1aa',
+      height: 38
+    },
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

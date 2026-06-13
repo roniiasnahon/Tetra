@@ -52,8 +52,9 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#070707] text-[#e4e4e7] flex flex-col items-center justify-center p-6 font-sans">
-      <div className="w-full max-w-md bg-[#0f0f10] border border-zinc-800/80 rounded-2xl p-8 space-y-6 flex flex-col items-center">
+    <div className="min-h-screen bg-[#070707] text-[#e4e4e7] flex flex-col items-center justify-center p-6 font-sans relative">
+      <div className="absolute top-0 inset-x-0 h-8 z-[100] [-webkit-app-region:drag]" />
+      <div className="w-full max-w-md bg-[#0f0f10] border border-zinc-800/80 rounded-2xl p-8 space-y-6 flex flex-col items-center [-webkit-app-region:no-drag]">
         {/* Logo or Platform Status */}
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center">

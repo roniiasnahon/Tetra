@@ -406,6 +406,8 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0c0c0f] to-[#040405] text-[#e4e4e7] flex select-none selection:bg-zinc-800 selection:text-white overflow-hidden relative font-jakarta">
+      {/* Desktop Drag Area */}
+      <div className="absolute top-0 inset-x-0 h-8 z-[100] [-webkit-app-region:drag]" />
       
       {/* LEFT COLUMN: Clean Slate/Zinc background with interactive cartoon characters */}
       <div className="hidden md:flex md:w-[50%] lg:w-[54%] relative flex-col justify-between p-12 overflow-hidden">
