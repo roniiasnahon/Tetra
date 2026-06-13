@@ -14,54 +14,24 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
   const [copied, setCopied] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
-  // Check if already authenticated on mount
+  // Force sign out on mount so we can get the raw Google credential
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      if (user) {
-        setCurrentUser(user);
-        await initiateTokenExchange(user);
-      }
-    });
-    return () => unsubscribe();
+    auth.signOut();
   }, []);
-
-  const initiateTokenExchange = async (user: User) => {
-    setStatus('exchanging');
-    try {
-      const idToken = await user.getIdToken(true);
-      const res = await fetch('/api/auth/custom-token', {
-        method: 'POST',
-        body: JSON.stringify({ idToken }),
-        headers: { 'Content-Type': 'application/json' }
-      });
-      
-      if (!res.ok) {
-        throw new Error(`Server returned status ${res.status}`);
-      }
-      
-      const data = await res.json();
-      if (data.customToken) {
-        setCustomToken(data.customToken);
-        setStatus('success');
-        // Trigger deep link automatically
-        triggerDeepLink(data.customToken);
-      } else {
-        throw new Error('No custom token returned from the server.');
-      }
-    } catch (err: any) {
-      console.error('Token exchange error:', err);
-      setStatus('error');
-      setErrorMessage(err.message || 'Token exchange failed.');
-    }
-  };
 
   const handleSignIn = async () => {
     setStatus('auth_popup');
     try {
+      const { GoogleAuthProvider } = await import('firebase/auth');
       const result = await signInWithPopup(auth, googleProvider);
-      if (result.user) {
-        setCurrentUser(result.user);
-        await initiateTokenExchange(result.user);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      
+      if (credential && credential.idToken) {
+        setCustomToken(credential.idToken);
+        setStatus('success');
+        triggerDeepLink(credential.idToken);
+      } else {
+        throw new Error('Could not retrieve Google ID token from sign in result.');
       }
     } catch (err: any) {
       console.error('Google Sign-In failed:', err);
@@ -71,7 +41,7 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
   };
 
   const triggerDeepLink = (token: string) => {
-    const deepLinkUrl = `cosmiwise://auth?token=${encodeURIComponent(token)}`;
+    const deepLinkUrl = `cosmiwise://auth?googleIdToken=${encodeURIComponent(token)}`;
     window.location.href = deepLinkUrl;
   };
 
