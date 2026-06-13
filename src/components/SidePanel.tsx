@@ -1170,13 +1170,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             
             {/* Generate State or loading */}
             {quizData === null ? (
-              <div className="text-center py-8 px-4 flex flex-col items-center">
-                <img 
-                  src="/quiz.png" 
-                  alt="Quiz illustration" 
-                  className="w-48 h-48 object-contain mb-8 select-none" 
-                  referrerPolicy="no-referrer" 
-                />
+              <div className="text-center py-10 px-4 flex flex-col items-center select-none">
+                <FileQuestion className="w-10 h-10 text-zinc-500 mb-6" />
                 <p className="text-[11px] text-zinc-500 max-w-[260px] leading-relaxed mb-6">
                   Cosmi will read this document to decide if quizzes are applicable, then outline an interactive 10-question scholastic test.
                 </p>
