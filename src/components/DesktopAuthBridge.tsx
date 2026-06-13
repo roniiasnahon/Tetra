@@ -53,34 +53,34 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#070707] text-[#e4e4e7] flex flex-col items-center justify-center p-6 font-sans relative">
+    <div className="min-h-screen bg-[#070707] text-[#e4e4e7] flex flex-col items-center justify-center p-8 font-sans relative selection:bg-[#262626]">
       <div className="absolute top-0 inset-x-0 h-8 z-[100] [-webkit-app-region:drag]" />
-      <div className="w-full max-w-sm space-y-6 flex flex-col items-center [-webkit-app-region:no-drag]">
-        {/* Logo or Platform Status */}
+      
+      <div className="w-full max-w-2xl flex flex-col items-center text-center space-y-8 [-webkit-app-region:no-drag]">
+        {/* Brand Lockup */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 flex items-center justify-center p-1">
-            <img src="/cosmi.png" alt="Cosmi" className="w-full h-full object-contain" />
-          </div>
+          <img src="/cosmi.png" alt="Cosmi" className="w-[30px] h-[30px] object-contain select-none" />
           <div className="h-4 w-[1px] bg-zinc-800" />
-          <span className="text-xs font-mono tracking-wider text-zinc-500 uppercase">Authorize Cosmi</span>
+          <span className="text-[13px] font-medium tracking-wider text-zinc-500 uppercase font-mono">Authorize Cosmi</span>
         </div>
 
-        <div className="text-center space-y-2">
-          <h2 className="text-2.5xl font-sans font-medium tracking-tight text-white font-jakarta">Authorize Cosmi</h2>
-          <p className="text-xs text-zinc-400 max-w-xs mx-auto leading-relaxed">
-            Link your Google account to authorize access for the Cosmi Desktop companion application.
-          </p>
-        </div>
+        {/* Dynamic States directly on pure black space */}
+        {status === 'idle' && !currentUser && (
+          <div className="flex flex-col items-center w-full space-y-6">
+            <div className="space-y-3">
+              <h1 className="text-3xl md:text-[42px] font-sans font-medium tracking-tight text-white font-jakarta">
+                Authorize Cosmi
+              </h1>
+              <p className="text-sm text-zinc-400 max-w-sm mx-auto leading-relaxed">
+                Link your Google account to authorize access for the Cosmi Desktop companion application.
+              </p>
+            </div>
 
-        {/* Dynamic status container */}
-        <div className="w-full flex flex-col items-center justify-center min-h-[140px] text-center pt-2">
-          {status === 'idle' && !currentUser && (
-            <div className="space-y-6 w-full">
-              <span className="text-xs text-zinc-500 font-mono tracking-widest block font-medium">READY TO AUTHENTICATE</span>
+            <div className="w-full max-w-xs pt-4">
               <button
                 onClick={handleSignIn}
                 id="btn-desktop-signin"
-                className="w-full px-5 py-3.5 bg-white text-black hover:bg-neutral-100 transition-colors font-semibold rounded-xl text-sm flex items-center justify-center gap-3 cursor-pointer shadow-sm border-0"
+                className="w-full px-5 py-4 bg-white text-black hover:bg-neutral-100 transition-colors font-semibold rounded-xl text-sm flex items-center justify-center gap-3 cursor-pointer shadow-sm border-0 active:scale-[0.98]"
               >
                 <div className="w-[18px] h-[18px] flex items-center justify-center shrink-0">
                   <svg viewBox="0 0 24 24" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
@@ -93,60 +93,75 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
                 <span>Sign in with Google</span>
               </button>
             </div>
-          )}
+          </div>
+        )}
 
-          {(status === 'auth_popup' || status === 'exchanging') && (
-            <div className="space-y-4 flex flex-col items-center">
-              <div className="w-6 h-6 border-2 border-zinc-700 border-t-white rounded-full animate-spin" />
-              <p className="text-sm text-zinc-400">
-                {status === 'auth_popup' ? 'Waiting for Google authentication...' : 'Registering desktop credentials...'}
+        {(status === 'auth_popup' || status === 'exchanging') && (
+          <div className="flex flex-col items-center space-y-4 py-8">
+            <div className="w-8 h-8 border-2 border-zinc-755 border-t-white rounded-full animate-spin" />
+            <p className="text-sm text-zinc-400 font-medium">
+              {status === 'auth_popup' ? 'Waiting for Google authentication...' : 'Registering desktop credentials...'}
+            </p>
+          </div>
+        )}
+
+        {status === 'success' && (
+          <div className="flex flex-col items-center w-full space-y-6">
+            <div className="space-y-3">
+              <h1 className="text-3.5xl md:text-[44px] font-sans font-medium tracking-tight text-white leading-tight font-jakarta max-w-xl mx-auto">
+                You have successfully authenticated.
+              </h1>
+              <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed">
+                You should be redirected back to the product.{' '}
+                <button 
+                  onClick={() => triggerDeepLink(customToken)} 
+                  className="text-[#4285F4] hover:text-blue-400 underline cursor-pointer bg-transparent border-0 p-0 font-medium ml-0.5"
+                >
+                  Click here
+                </button>{' '}
+                if not working.
               </p>
             </div>
-          )}
 
-          {status === 'success' && (
-            <div className="space-y-4 flex flex-col items-center w-full">
-              <div className="w-10 h-10 rounded-full bg-emerald-950/40 border border-emerald-900/60 flex items-center justify-center text-emerald-400">
-                <CheckCircle2 className="w-5 h-5" />
-              </div>
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-emerald-400">Successfully Authorized</p>
-                <p className="text-xs text-zinc-500">Opening Cosmi Desktop automatically...</p>
-              </div>
-
-              <div className="flex flex-col gap-2 w-full pt-4">
-                <button
-                  onClick={() => triggerDeepLink(customToken)}
-                  className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white transition-colors border border-zinc-800 text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Relaunch Desktop client
-                </button>
-
-                <button
-                  onClick={handleCopyToken}
-                  className="w-full py-2 bg-transparent hover:bg-zinc-950 text-zinc-500 hover:text-zinc-400 transition-colors text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 cursor-pointer border-0"
-                >
-                  <Clipboard className="w-3.5 h-3.5" />
-                  {copied ? 'Copied Security Token!' : 'Copy Code (Fallback)'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {status === 'error' && (
-            <div className="space-y-4 flex flex-col items-center">
-              <p className="text-sm text-red-400 font-medium font-sans">Connection Failure</p>
-              <p className="text-xs text-zinc-500 max-w-xs">{errorMessage || 'An error occurred during verification.'}</p>
+            <div className="flex flex-col sm:flex-row gap-3 pt-6 justify-center w-full max-w-md">
               <button
-                onClick={handleSignIn}
-                className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:text-white rounded-lg text-xs font-medium transition-colors cursor-pointer"
+                onClick={() => triggerDeepLink(customToken)}
+                className="px-5 py-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white transition-colors border border-zinc-800 text-xs font-semibold rounded-xl flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
               >
-                Retry Authenticating
+                <ExternalLink className="w-4 h-4" />
+                Relaunch Desktop client
+              </button>
+
+              <button
+                onClick={handleCopyToken}
+                className="px-5 py-3 bg-transparent text-zinc-500 hover:text-zinc-400 transition-colors text-xs font-semibold rounded-xl flex items-center justify-center gap-2 cursor-pointer border-0 active:scale-[0.98]"
+              >
+                <Clipboard className="w-4 h-4" />
+                {copied ? 'Copied Security Token!' : 'Copy Code (Fallback)'}
               </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div className="flex flex-col items-center w-full space-y-6">
+            <div className="space-y-2">
+              <h1 className="text-3xl font-sans font-medium tracking-tight text-red-500 font-jakarta">
+                Connection Failure
+              </h1>
+              <p className="text-sm text-zinc-400 max-w-sm mx-auto">
+                {errorMessage || 'An error occurred during verification.'}
+              </p>
+            </div>
+            
+            <button
+              onClick={handleSignIn}
+              className="px-5 py-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-250 hover:text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer active:scale-[0.98]"
+            >
+              Retry Authenticating
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
