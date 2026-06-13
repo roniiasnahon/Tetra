@@ -20,6 +20,7 @@ import {
 import { StatisticsTools } from "./components/StatisticsTools";
 import { SidePanel } from "./components/SidePanel";
 import { AuthenticationScreen } from "./components/AuthenticationScreen";
+import { DesktopAuthBridge } from "./components/DesktopAuthBridge";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -1251,6 +1252,12 @@ export default function App() {
 
   // Handle desktop authentication redirection bypass & system browser google callback flow
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('google_callback') === '1') {
+      // Handled by DesktopAuthBridge component entirely, skip this effect
+      return;
+    }
+
     const isElectron = () => typeof window !== 'undefined' && (
       (window as any).electron !== undefined || 
       navigator.userAgent.toLowerCase().includes('electron') ||
@@ -3437,6 +3444,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
     return valA.localeCompare(valB) * orderMultiplier;
   });
 
+  const isCallback = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("google_callback") === "1";
+  if (isCallback) {
+    return <DesktopAuthBridge />;
+  }
 
   if (isAuthLoading) {
     return (
