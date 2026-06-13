@@ -299,9 +299,26 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     setIsLoading(true);
     setErrorMessage('');
     
+    const isElectron = () => typeof window !== 'undefined' && (
+      (window as any).electron !== undefined || 
+      navigator.userAgent.toLowerCase().includes('electron') ||
+      (window as any).ipcRenderer !== undefined ||
+      (window as any).process?.versions?.electron !== undefined
+    );
+
     const isTauri = () => typeof window !== 'undefined' && ('___TAURI___' in window || (window as any).__TAURI__ !== undefined);
     
-    if (isTauri()) {
+    if (isElectron()) {
+      if ((window as any).electron?.openUrl) {
+        (window as any).electron.openUrl('https://cosmiwise.vercel.app/login-redirect');
+      } else if ((window as any).electron?.ipcRenderer?.send) {
+        (window as any).electron.ipcRenderer.send('open-url', 'https://cosmiwise.vercel.app/login-redirect');
+      } else if ((window as any).ipcRenderer?.send) {
+        (window as any).ipcRenderer.send('open-url', 'https://cosmiwise.vercel.app/login-redirect');
+      } else {
+        window.open('https://cosmiwise.vercel.app/login-redirect', '_blank');
+      }
+    } else if (isTauri()) {
       const { openUrl } = await import('@tauri-apps/plugin-opener');
       await openUrl('https://cosmiwise.vercel.app/login-redirect');
     } else {

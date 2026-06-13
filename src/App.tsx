@@ -1182,12 +1182,78 @@ export default function App() {
     }
   });
 
-  // Handle Tauri authentication redirection
+  // Handle desktop deep linking callbacks (Electron & Tauri)
   useEffect(() => {
+    let unsubscribeDeepLink: (() => void) | undefined;
+
+    const setupDeepLinkListener = async () => {
+      const isElectron = typeof window !== 'undefined' && (window as any).electron !== undefined;
+      const isTauri = typeof window !== 'undefined' && ('___TAURI___' in window || (window as any).__TAURI__ !== undefined);
+
+      if (isElectron && (window as any).electron?.onDeepLink) {
+        console.log("Electron: Registering deep link listener");
+        unsubscribeDeepLink = (window as any).electron.onDeepLink(async (urlStr: string) => {
+          try {
+            console.log("Electron received deep link:", urlStr);
+            const url = new URL(urlStr);
+            const token = url.searchParams.get('token');
+            if (token) {
+              const { signInWithCustomToken } = await import('firebase/auth');
+              await signInWithCustomToken(auth, token);
+              console.log("Electron authenticated successfully with custom token");
+            }
+          } catch (err) {
+            console.error("Electron deep link authentication error:", err);
+          }
+        });
+      } else if (isTauri) {
+        try {
+          console.log("Tauri: Registering deep link listener");
+          const { onOpenUrl } = await import('@tauri-apps/plugin-deep-link');
+          const unlisten = await onOpenUrl(async (urls) => {
+            try {
+              console.log("Tauri received deep link:", urls[0]);
+              const url = new URL(urls[0]);
+              const token = url.searchParams.get('token');
+              if (token) {
+                const { signInWithCustomToken } = await import('firebase/auth');
+                await signInWithCustomToken(auth, token);
+                console.log("Tauri authenticated successfully with custom token");
+              }
+            } catch (err) {
+              console.error("Tauri custom token login fail:", err);
+            }
+          });
+          unsubscribeDeepLink = () => {
+            unlisten();
+          };
+        } catch (err) {
+          console.error("Tauri deep link initialization fail:", err);
+        }
+      }
+    };
+
+    setupDeepLinkListener();
+
+    return () => {
+      if (unsubscribeDeepLink) {
+        unsubscribeDeepLink();
+      }
+    };
+  }, []);
+
+  // Handle desktop authentication redirection bypass
+  useEffect(() => {
+    const isElectron = () => typeof window !== 'undefined' && (
+      (window as any).electron !== undefined || 
+      navigator.userAgent.toLowerCase().includes('electron') ||
+      (window as any).ipcRenderer !== undefined ||
+      (window as any).process?.versions?.electron !== undefined
+    );
     const isTauri = () => typeof window !== 'undefined' && ('___TAURI___' in window || (window as any).__TAURI__ !== undefined);
     
-    if (isTauri()) {
-      console.log("Tauri environment detected: Skipping third-party storage auth redirects.");
+    if (isElectron() || isTauri()) {
+      console.log("Desktop shell detected (Electron/Tauri): Skipping third-party storage auth redirects.");
       return;
     }
     
@@ -1773,11 +1839,27 @@ export default function App() {
   }, []);
 
   const handleGoogleLogin = async () => {
-    // Detect if we are inside Tauri
-    const isTauri =
-      typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+    // Detect if we are inside Electron or Tauri
+    const isElectron = () => typeof window !== "undefined" && (
+      (window as any).electron !== undefined || 
+      navigator.userAgent.toLowerCase().includes("electron") ||
+      (window as any).ipcRenderer !== undefined ||
+      (window as any).process?.versions?.electron !== undefined
+    );
+    const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-    if (isTauri) {
+    if (isElectron()) {
+      const redirectUrl = "https://cosmiwise.vercel.app/login-redirect";
+      if ((window as any).electron?.openUrl) {
+        (window as any).electron.openUrl(redirectUrl);
+      } else if ((window as any).electron?.ipcRenderer?.send) {
+        (window as any).electron.ipcRenderer.send("open-url", redirectUrl);
+      } else if ((window as any).ipcRenderer?.send) {
+        (window as any).ipcRenderer.send("open-url", redirectUrl);
+      } else {
+        window.open(redirectUrl, "_blank");
+      }
+    } else if (isTauri) {
       try {
         // Breakout to system browser to handle authentication
         const { openUrl } = await import("@tauri-apps/plugin-opener");

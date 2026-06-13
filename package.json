@@ -3,8 +3,10 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "main.cjs",
   "scripts": {
     "dev": "tsx server.ts",
+    "electron:dev": "electron .",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
@@ -55,6 +57,7 @@
     "@types/pdfkit": "^0.17.6",
     "@types/xml2js": "^0.4.14",
     "autoprefixer": "^10.4.21",
+    "electron": "^42.4.0",
     "esbuild": "^0.25.0",
     "eslint": "^10.4.1",
     "tailwindcss": "^4.1.14",
