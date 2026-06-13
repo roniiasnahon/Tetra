@@ -3486,17 +3486,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
   return (
     <div className="h-screen bg-[#070707] text-[#e4e4e7] font-sans flex selection:bg-[#262626] overflow-hidden relative">
       {isElectronApp && (
-        <div className="fixed top-0 right-0 h-[38px] flex items-center z-[9999] [-webkit-app-region:no-drag]">
-          <button onClick={() => (window as any).electron?.minimize?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
-            <Icon icon="ph:minus" className="w-[14px] h-[14px]" />
-          </button>
-          <button onClick={() => (window as any).electron?.maximize?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
-            <Icon icon="ph:square" className="w-[12px] h-[12px]" />
-          </button>
-          <button onClick={() => (window as any).electron?.close?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-red-500 transition-colors cursor-pointer flex items-center justify-center">
-            <Icon icon="ph:x" className="w-[14px] h-[14px]" />
-          </button>
-        </div>
+        <>
+          <div className="fixed top-0 left-0 right-0 h-[38px] z-[9998] [-webkit-app-region:drag] pointer-events-none" />
+          <div className="fixed top-0 right-0 h-[38px] flex items-center z-[9999] [-webkit-app-region:no-drag]">
+            <button onClick={() => (window as any).electron?.minimize?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
+              <Icon icon="ph:minus" className="w-[14px] h-[14px]" />
+            </button>
+            <button onClick={() => (window as any).electron?.maximize?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
+              <Icon icon="ph:square" className="w-[12px] h-[12px]" />
+            </button>
+            <button onClick={() => (window as any).electron?.close?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-red-500 transition-colors cursor-pointer flex items-center justify-center">
+              <Icon icon="ph:x" className="w-[14px] h-[14px]" />
+            </button>
+          </div>
+        </>
       )}
       <input
         type="file"
@@ -7677,10 +7680,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
       {/* Right Section - AI Assistant Window Panel */}
       {isAssistantOpen && (
-        <div className="p-[4px] flex h-full">
+        <div className={`p-[4px] flex h-full shrink-0 ${isElectronApp ? "pt-[38px]" : ""}`}>
           <div className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden animate-slide-in">
             {/* Assistant Header */}
-            <div className={`h-[52px] flex items-center justify-between pl-5 shrink-0 bg-[#121212] relative [-webkit-app-region:drag] ${isElectronApp ? "pr-[145px]" : "pr-5"}`}>
+            <div className={`h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212] relative ${isElectronApp ? "" : "[-webkit-app-region:drag]"}`}>
               <div className="relative flex-1 min-w-0 pr-4 [-webkit-app-region:no-drag]">
                 <button
                   onClick={() =>
