@@ -645,6 +645,12 @@ const formatAbstractText = (text: string) => {
 
 export default function App() {
   const isReadOnly = false;
+  const isElectronApp = typeof window !== 'undefined' && (
+    (window as any).electron !== undefined || 
+    navigator.userAgent.toLowerCase().includes('electron') ||
+    (window as any).ipcRenderer !== undefined ||
+    (window as any).process?.versions?.electron !== undefined
+  );
   const cleanTitleStr = (t?: string) =>
     t ? t.replace(/[*#]/g, "").trim() : "";
 
@@ -7661,8 +7667,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
         <div className="p-[4px] flex h-full">
           <div className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden animate-slide-in">
             {/* Assistant Header */}
-            <div className="h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212] relative">
-              <div className="relative flex-1 min-w-0 pr-4">
+            <div className={`h-[52px] flex items-center justify-between pl-5 shrink-0 bg-[#121212] relative [-webkit-app-region:drag] ${isElectronApp ? "pr-[145px]" : "pr-5"}`}>
+              <div className="relative flex-1 min-w-0 pr-4 [-webkit-app-region:no-drag]">
                 <button
                   onClick={() =>
                     setIsAssistantChatDropdownOpen(!isAssistantChatDropdownOpen)
@@ -7766,7 +7772,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
               </div>
               <button
                 onClick={() => setIsAssistantOpen(false)}
-                className="text-[#52525b] hover:text-[#e4e4e7] transition-colors p-[4px] rounded-md hover:bg-[#1c1c1e] cursor-pointer shrink-0"
+                className="text-[#52525b] hover:text-[#e4e4e7] transition-colors p-[4px] rounded-md hover:bg-[#1c1c1e] cursor-pointer shrink-0 [-webkit-app-region:no-drag]"
                 aria-label="Close Assistant"
                 title="Collapse Panel"
               >
