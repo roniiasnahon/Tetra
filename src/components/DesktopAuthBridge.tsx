@@ -70,7 +70,7 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#070707] text-[#e4e4e7] flex flex-col items-center justify-center p-8 font-jakarta relative selection:bg-zinc-800 overflow-hidden">
+    <div className="min-h-screen bg-[#070707] text-[#e4e4e7] flex flex-col font-jakarta selection:bg-zinc-800 relative overflow-x-hidden">
       
       {/* Subtle Starburst Particle Background to let elements through naturally */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden select-none z-0 hidden md:block">
@@ -92,15 +92,16 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
       </div>
 
       {/* Giant backdrop background text inspired by Google Antigravity style (Antigravity -> Cosmi) */}
-      <div className="absolute inset-0 flex items-center justify-center select-none pointer-events-none z-0 overflow-hidden leading-none">
+      <div className="absolute inset-0 flex items-center justify-center select-none pointer-events-none z-0 overflow-hidden leading-none overflow-y-hidden">
         <span className="text-[18vw] md:text-[22vw] font-jakarta font-bold tracking-tighter text-[#121213] opacity-90 select-none leading-none">
           Cosmi
         </span>
       </div>
 
-      <div className="w-full max-w-3xl flex flex-col items-center text-center space-y-10 z-10">
-        
-        {/* Brand Lockup: Cosmi by General Language with logo */}
+      <div className="flex-1 flex flex-col items-center justify-center p-8 z-10 w-full mx-auto">
+        <div className="w-full max-w-3xl flex flex-col items-center text-center space-y-10">
+          
+          {/* Brand Lockup: Cosmi by General Language with logo */}
         <div className="flex items-center gap-3 select-none">
           <img src="/cosmi.png" alt="Cosmi" className="w-[30px] h-[30px] object-contain shrink-0" />
           <div className="h-4 w-[1px] bg-zinc-800" />
@@ -206,10 +207,11 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
             </button>
           </div>
         )}
+        </div>
       </div>
 
       {/* Brand Footer in the style of Google Antigravity (Google -> General Language) */}
-      <div className="absolute bottom-6 left-0 right-0 px-8 md:px-12 flex flex-col md:flex-row justify-between items-center gap-4 text-xs font-normal text-zinc-500 z-10 select-none font-jakarta">
+      <div className="w-full px-8 md:px-12 py-6 flex flex-col md:flex-row justify-between items-center gap-4 text-xs font-normal text-zinc-500 z-10 select-none mt-auto">
         <div className="text-zinc-400 font-medium tracking-tight">
           General Language
         </div>
