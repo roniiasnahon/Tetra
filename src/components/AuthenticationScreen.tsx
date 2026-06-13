@@ -318,9 +318,11 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
       } else {
         window.open('https://cosmiwise.vercel.app/?google_callback=1', '_blank');
       }
+      setTimeout(() => setIsLoading(false), 15000);
     } else if (isTauri()) {
       const { openUrl } = await import('@tauri-apps/plugin-opener');
       await openUrl('https://cosmiwise.vercel.app/?google_callback=1');
+      setTimeout(() => setIsLoading(false), 15000);
     } else {
       try {
         const { signInWithRedirect } = await import('firebase/auth');
