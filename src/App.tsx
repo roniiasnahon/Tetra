@@ -1196,18 +1196,11 @@ export default function App() {
           try {
             console.log("Electron received deep link:", urlStr);
             const url = new URL(urlStr);
-            const customToken = url.searchParams.get('token');
-            const googleIdToken = url.searchParams.get('id_token');
-            
-            if (customToken) {
+            const token = url.searchParams.get('token');
+            if (token) {
               const { signInWithCustomToken } = await import('firebase/auth');
-              await signInWithCustomToken(auth, customToken);
+              await signInWithCustomToken(auth, token);
               console.log("Electron authenticated successfully with custom token");
-            } else if (googleIdToken) {
-              const { GoogleAuthProvider, signInWithCredential } = await import('firebase/auth');
-              const credential = GoogleAuthProvider.credential(googleIdToken);
-              await signInWithCredential(auth, credential);
-              console.log("Electron authenticated successfully with Google ID token");
             }
           } catch (err) {
             console.error("Electron deep link authentication error:", err);
@@ -1275,22 +1268,43 @@ export default function App() {
         if (result?.user) {
           console.log('Redirect login success', result.user);
           if (isCallback) {
-            const { GoogleAuthProvider } = await import('firebase/auth');
-            const credential = GoogleAuthProvider.credentialFromResult(result);
-            if (credential?.idToken) {
-              window.location.href = `cosmiwise://auth?id_token=${credential.idToken}`;
-            } else {
-               // Fallback just in case credential is missing
-               const idToken = await result.user.getIdToken();
-               window.location.href = `cosmiwise://auth?id_token=${idToken}`;
+            const idToken = await result.user.getIdToken();
+            try {
+              const res = await fetch('/api/auth/custom-token', {
+                method: 'POST',
+                body: JSON.stringify({ idToken }),
+                headers: { 'Content-Type': 'application/json' }
+              });
+              if (!res.ok) throw new Error("Failed to fetch custom token");
+              const { customToken } = await res.json();
+              if (customToken) {
+                window.location.href = `cosmiwise://auth?token=${customToken}`;
+              }
+            } catch (fetchErr) {
+              console.error("Custom token error:", fetchErr);
             }
             return;
           }
         } else if (isCallback) {
-          if (auth.currentUser) {
+          if (!auth.currentUser) {
+            const { signInWithRedirect } = await import('firebase/auth');
+            await signInWithRedirect(auth, googleProvider);
+          } else {
             // Already logged in from dynamic session, directly retrieve token & deep link back
             const idToken = await auth.currentUser.getIdToken();
-            window.location.href = `cosmiwise://auth?id_token=${idToken}`;
+            try {
+              const res = await fetch('/api/auth/custom-token', {
+                method: 'POST',
+                body: JSON.stringify({ idToken }),
+                headers: { 'Content-Type': 'application/json' }
+              });
+              if (res.ok) {
+                const { customToken } = await res.json();
+                window.location.href = `cosmiwise://auth?token=${customToken}`;
+              }
+            } catch (err) {
+              console.error("Custom token error on currentUser:", err);
+            }
           }
         }
       } catch (err: any) {
