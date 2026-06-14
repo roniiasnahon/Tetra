@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { StatisticsTools } from "./components/StatisticsTools";
 import { SidePanel } from "./components/SidePanel";
+import { Settings } from "./components/Settings";
 import { AuthenticationScreen } from "./components/AuthenticationScreen";
 import { DesktopAuthBridge } from "./components/DesktopAuthBridge";
 import { Document, Page, pdfjs } from "react-pdf";
@@ -77,7 +78,7 @@ interface PaperItem {
 
 export interface Tab {
   id: string;
-  type: "home" | "document" | "library" | "chat" | "tools";
+  type: "home" | "document" | "library" | "chat" | "tools" | "settings";
   title: string;
   originalTitle?: string;
   content?: string;
@@ -845,6 +846,7 @@ export default function App() {
   const [isFontDropdownOpen, setIsFontDropdownOpen] = useState(false);
   const [isMoreToolsOpen, setIsMoreToolsOpen] = useState(false);
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   // Link context menu and rename modal state
   const [linkContextMenu, setLinkContextMenu] = useState<{
@@ -1731,6 +1733,7 @@ export default function App() {
               email: user.email || "",
               displayName: user.displayName || "Researcher",
               lastActive: Date.now(),
+              createdAt: user.metadata?.creationTime ? new Date(user.metadata.creationTime).getTime() : Date.now(),
             },
             { merge: true },
           );
@@ -1906,9 +1909,8 @@ export default function App() {
       setCurrentUser(user);
       currentUserIdRef.current = user ? user.uid : null;
       
-      if (user) {
-        setupListeners(user);
-      }
+      setupListeners(user);
+
       setIsAuthLoading(false);
     });
 
@@ -2103,6 +2105,7 @@ export default function App() {
   const [chatInput, setChatInput] = useState("");
   const [selectedModel, setSelectedModel] = useState("auto");
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [callMe, setCallMe] = useState(() => localStorage.getItem("cosmi_settings_call_me") || "");
   const [assistantInput, setAssistantInput] = useState("");
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [researchStatus, setResearchStatus] = useState<
@@ -4533,6 +4536,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       <div className="w-6 h-6 rounded-full bg-[#27272a] flex-shrink-0 flex items-center justify-center overflow-hidden border border-[#3f3f46]">
                         <img
                           src={
+                            localStorage.getItem("cosmi_settings_avatar_url") ||
                             currentUser.photoURL ||
                             `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(currentUser.email || "Ron")}`
                           }
@@ -4574,8 +4578,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 {currentUser.email}
                               </p>
                             </div>
-                            <button className="w-full text-left px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7] transition-colors flex items-center gap-2">
-                              <Icon icon="ph:user" className="w-3.5 h-3.5" />
+                            <button 
+                              onClick={() => {
+                                setIsProfileDropdownOpen(false);
+                                setIsSettingsModalOpen(true);
+                              }}
+                              className="w-full text-left px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7] transition-colors flex items-center gap-2">
+                              <Icon icon="ph:gear" className="w-3.5 h-3.5" />
                               Settings
                             </button>
                             <button
@@ -4764,13 +4773,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     let timeGreeting = "Good evening";
                     if (hour < 12) timeGreeting = "Good morning";
                     else if (hour < 18) timeGreeting = "Good afternoon";
-                    const firstName = currentUser?.displayName
-                      ? currentUser.displayName.split(" ")[0]
-                      : "";
+                    const preferredName = callMe || (currentUser?.displayName ? currentUser.displayName.split(" ")[0] : "");
                     return (
                       <h1 className="text-3xl md:text-4xl text-[#f4f4f5] font-medium tracking-tight mb-8">
                         {timeGreeting}
-                        {firstName ? `, ${firstName}` : ""}.
+                        {preferredName ? `, ${preferredName}` : ""}.
                       </h1>
                     );
                   })()}
@@ -5950,508 +5957,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   </AnimatePresence>
                 </div>
 
-                {/* Zero-Glow Import Link Modal */}
-                {importModalOpen && (
-                  <div
-                    role="dialog"
-                    aria-modal="true"
-                    className="fixed inset-0 bg-black/75 z-40 flex items-center justify-center p-4"
-                  >
-                    <div className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-lg p-6 relative animate-scale-up text-zinc-300">
-                      <button
-                        onClick={() => {
-                          if (!isAnalyzingLink) {
-                            setImportModalOpen(false);
-                          }
-                        }}
-                        className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer disabled:opacity-50"
-                        disabled={isAnalyzingLink}
-                      >
-                        <Icon icon="ph:x" className="w-5 h-5" />
-                      </button>
-
-                      <div className="flex items-center gap-2 mb-1.5">
-                        {importType === "youtube" ? (
-                          <img
-                            src="https://www.gstatic.com/images/branding/product/1x/youtube_64dp.png"
-                            alt="YouTube"
-                            className="w-5 h-5 object-contain"
-                            referrerPolicy="no-referrer"
-                          />
-                        ) : importType === "gdoc" ? (
-                          <img
-                            src="https://www.gstatic.com/images/branding/product/1x/docs_2020q4_48dp.png"
-                            alt="Google Docs"
-                            className="w-5 h-5 object-contain"
-                            referrerPolicy="no-referrer"
-                          />
-                        ) : (
-                          <Icon
-                            icon="ph:link"
-                            className="w-5 h-5 text-zinc-400"
-                          />
-                        )}
-                        <h3 className="text-[#f4f4f5] text-lg font-medium">
-                          {importType === "youtube"
-                            ? "Import & Summarize YouTube Video"
-                            : importType === "gdoc"
-                              ? "Import & Summarize Google Doc"
-                              : "Import & Summarize Public URL"}
-                        </h3>
-                      </div>
-                      <p className="text-[#71717a] text-xs mb-5">
-                        {importType === "youtube"
-                          ? "Input any public video link. We will resolve its title, channel name, and use the Gemini Success Mentor model to produce an academic summary."
-                          : importType === "gdoc"
-                            ? 'Paste a public Google Doc link. Ensure link sharing is enabled as "Anyone with the link can view". We will download and structure the text content.'
-                            : "Paste any webpage, paper link, or blog article. We will crawl the clean document text and synthesize it into a library literature note."}
-                      </p>
-
-                      <form
-                        onSubmit={handleLinkImportSubmit}
-                        className="space-y-4 text-xs font-sans"
-                      >
-                        <div>
-                          <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-2">
-                            {importType === "youtube"
-                              ? "YouTube Video Link"
-                              : importType === "gdoc"
-                                ? "Google Doc URL"
-                                : "Public URL"}
-                          </label>
-                          <input
-                            type="url"
-                            required
-                            value={importUrl}
-                            onChange={(e) => setImportUrl(e.target.value)}
-                            disabled={isAnalyzingLink}
-                            placeholder={
-                              importType === "youtube"
-                                ? "https://www.youtube.com/watch?v=F3GCo2Y-A9o"
-                                : importType === "gdoc"
-                                  ? "https://docs.google.com/document/d/1BxiMVs0XRA5nFMdKvGdBAnlgY5iK1mJH/edit"
-                                  : "https://en.wikipedia.org/wiki/Neuroplasticity"
-                            }
-                            className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2.5 text-zinc-200 text-xs focus:border-zinc-500 focus:outline-none placeholder:text-zinc-600 transition-colors disabled:opacity-50"
-                          />
-                        </div>
-
-                        {linkAnalyzeError && (
-                          <div className="flex gap-2.5 items-start p-3.5 bg-red-950/20 border border-red-900/40 rounded-xl">
-                            <Icon
-                              icon="ph:warning-circle"
-                              className="w-4 h-4 text-red-500 shrink-0 mt-0.5"
-                            />
-                            <span className="text-red-400 text-xs leading-relaxed font-medium">
-                              {linkAnalyzeError}
-                            </span>
-                          </div>
-                        )}
-
-                        {isAnalyzingLink && (
-                          <div className="flex flex-col gap-2.5 items-center justify-center p-6 bg-[#18181b] border border-[#27272a] rounded-xl text-center">
-                            <div className="w-5 h-5 border-2 border-zinc-500 border-t-white rounded-full animate-spin" />
-                            <div className="text-zinc-300 font-medium text-xs">
-                              Analyzing and Synthesizing Link Source...
-                            </div>
-                            <div className="text-[10px] font-mono text-[#71717a] max-w-sm leading-relaxed">
-                              {linkAnalyzeStatus}
-                            </div>
-                          </div>
-                        )}
-
-                        {!isAnalyzingLink && (
-                          <div className="flex gap-3 pt-2">
-                            <button
-                              type="button"
-                              onClick={() => setImportModalOpen(false)}
-                              className="flex-1 py-2.5 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-zinc-400 hover:text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer text-center"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="submit"
-                              className="flex-1 py-2.5 bg-zinc-200 hover:bg-white text-zinc-950 rounded-xl text-xs font-semibold transition-colors cursor-pointer text-center"
-                            >
-                              Import & Summarize
-                            </button>
-                          </div>
-                        )}
-                      </form>
-                    </div>
-                  </div>
-                )}
-
-                {/* Zero-Glow Viewing Paper/Note Summary Modal */}
-                {activeViewingPaper && (
-                  <div
-                    role="dialog"
-                    aria-modal="true"
-                    className="fixed inset-0 bg-black/75 z-40 flex items-center justify-center p-4"
-                  >
-                    <div className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-2xl p-6 relative animate-scale-up text-zinc-300">
-                      <button
-                        onClick={() => setActiveViewingPaper(null)}
-                        className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer"
-                      >
-                        <Icon icon="ph:x" className="w-5 h-5" />
-                      </button>
-
-                      <h3 className="text-[#f4f4f5] text-xl font-medium leading-snug mb-1">
-                        {activeViewingPaper.title}
-                      </h3>
-
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-[#71717a] border-b border-[#27272a] pb-4 mb-4">
-                        {activeViewingPaper.author && (
-                          <div className="flex items-center gap-1">
-                            <Icon
-                              icon="ph:user"
-                              className="w-3.5 h-3.5 text-zinc-500"
-                            />
-                            <span>{activeViewingPaper.author}</span>
-                          </div>
-                        )}
-                        <div className="flex items-center gap-1">
-                          <Icon
-                            icon="ph:calendar"
-                            className="w-3.5 h-3.5 text-zinc-500"
-                          />
-                          <span>
-                            Added: {activeViewingPaper.added || "Today"}
-                          </span>
-                        </div>
-                        {activeViewingPaper.url && (
-                          <a
-                            href={activeViewingPaper.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            referrerPolicy="no-referrer"
-                            className="flex items-center gap-1 text-[#0070f3] hover:underline"
-                          >
-                            <Icon icon="ph:link" className="w-3.5 h-3.5" />
-                            <span className="truncate max-w-xs">
-                              {activeViewingPaper.url}
-                            </span>
-                          </a>
-                        )}
-                      </div>
-
-                      <div className="space-y-4 text-sm leading-relaxed max-h-[350px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-zinc-800">
-                        {activeViewingPaper.summary ? (
-                          <div className="markdown-body prose prose-invert max-w-none text-sm text-[#d4d4d8] font-sans">
-                            <ReactMarkdown>
-                              {formatAbstractText(
-                                activeViewingPaper.summary,
-                              ).replace(/\\n/g, "\n")}
-                            </ReactMarkdown>
-                          </div>
-                        ) : (
-                          <p className="text-[#d4d4d8] font-sans whitespace-pre-wrap">
-                            {activeViewingPaper.description
-                              ? formatAbstractText(
-                                  activeViewingPaper.description,
-                                ).replace(/\\n/g, "\n")
-                              : ""}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="flex justify-between items-center gap-4 mt-6 pt-4 border-t border-[#27272a]">
-                        <button
-                          onClick={() => {
-                            const summaryText =
-                              activeViewingPaper.summary ||
-                              activeViewingPaper.description;
-                            navigator.clipboard.writeText(summaryText);
-                          }}
-                          className="flex items-center gap-2 px-4 py-2 border border-[#27272a] hover:bg-[#1a1a1a] rounded-xl text-xs font-semibold text-zinc-300 hover:text-white transition-colors cursor-pointer"
-                        >
-                          <Icon icon="ph:copy" className="w-3.5 h-3.5" />
-                          <span>Copy Summary</span>
-                        </button>
-
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => setActiveViewingPaper(null)}
-                            className="px-5 py-2.5 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-zinc-400 hover:text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-                          >
-                            Dismiss
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Buy Me a Coffee Support Modal */}
-                {showBuyCoffeeModal && (
-                  <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4">
-                    <div className="bg-[#121212] border border-[#2d2d30] rounded-2xl w-full max-w-[420px] p-6 relative flex flex-col overflow-hidden select-none animate-scale-up">
-                      <button
-                        onClick={() => {
-                          setShowBuyCoffeeModal(false);
-                          setSupportAmountPaid(null);
-                        }}
-                        className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer p-1 rounded-md hover:bg-[#1a1a1c] transition-colors"
-                        title="Close dialog"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-
-                      {supportAmountPaid ? (
-                        <div className="flex flex-col items-center text-center space-y-4 py-4 animate-fade-in">
-                          <div className="w-14 h-14 rounded-full bg-emerald-950/30 border border-emerald-800/40 flex items-center justify-center text-emerald-400">
-                            <Coffee className="w-7 h-7" />
-                          </div>
-
-                          <div className="space-y-1">
-                            <h3 className="text-base font-bold text-zinc-100 font-jakarta">
-                              Support Succeeded!
-                            </h3>
-                            <span className="text-[10px] uppercase tracking-wider font-mono text-emerald-500 font-bold">
-                              Official Workspace Patron
-                            </span>
-                          </div>
-
-                          <p className="text-xs text-zinc-400 leading-relaxed px-1">
-                            Thank you deep down for your virtual donation of{" "}
-                            <span className="text-emerald-400 font-bold">
-                              {supportAmountPaid}
-                            </span>
-                            ! This supports daily Gemini token requests, web
-                            parser microservices, and general app development.
-                          </p>
-
-                          <button
-                            onClick={() => {
-                              setShowBuyCoffeeModal(false);
-                              setSupportAmountPaid(null);
-                            }}
-                            className="w-full py-2 bg-zinc-200 hover:bg-white text-zinc-950 rounded-xl font-bold text-xs transition-colors cursor-pointer mt-2"
-                          >
-                            Conclude & Return
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col items-center text-center space-y-4 pt-1">
-                          {/* Coffee cup box */}
-                          <div className="w-14 h-14 rounded-2xl bg-[#221714] border border-[#44312a] flex items-center justify-center text-[#e3a088]">
-                            <Coffee className="w-7 h-7" />
-                          </div>
-
-                          <div className="space-y-1">
-                            <h3 className="text-sm font-bold text-zinc-100 font-jakarta">
-                              Support AI Research Workspace
-                            </h3>
-                            <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">
-                              Keep the model intelligence active ☕
-                            </p>
-                          </div>
-
-                          <p className="text-xs text-zinc-400 leading-relaxed px-1">
-                            If our draft optimizer, citation indexers, automatic
-                            web synthesis, or new interactive study panels have
-                            saved you time, consider buying us a coffee!
-                          </p>
-
-                          {/* Coffee visual selectors */}
-                          <div className="w-full flex gap-2.5 pt-2">
-                            {[
-                              {
-                                count: 1,
-                                label: "1 Coffee",
-                                price: "$5",
-                                desc: "Warm Thanks!",
-                              },
-                              {
-                                count: 3,
-                                label: "3 Coffees",
-                                price: "$15",
-                                desc: "Keep it up!",
-                              },
-                              {
-                                count: 5,
-                                label: "5 Coffees",
-                                price: "$25",
-                                desc: "Pro sponsor!",
-                              },
-                            ].map((item) => (
-                              <button
-                                key={item.count}
-                                onClick={() => setSupportAmountPaid(item.price)}
-                                className="flex-1 bg-[#161618] border border-[#242426] hover:border-zinc-500 p-3 rounded-xl transition-all cursor-pointer flex flex-col items-center gap-1 group"
-                              >
-                                <span className="text-xs font-bold text-zinc-300 group-hover:text-white">
-                                  {item.label}
-                                </span>
-                                <span className="text-[10px] font-mono text-zinc-500">
-                                  {item.price}
-                                </span>
-                                <span className="text-[9.5px] text-zinc-600 font-semibold">
-                                  {item.desc}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-
-                          {/* Direct exterior Support links */}
-                          <div className="w-full space-y-2 pt-2">
-                            <a
-                              href="https://buymeacoffee.com"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="w-full py-2.5 rounded-xl bg-zinc-200 hover:bg-white text-[#121212] font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                            >
-                              <Coffee className="w-3.5 h-3.5" />
-                              <span>Support on BuyMeACoffee.com</span>
-                              <ExternalLink className="w-3 h-3 ml-0.5" />
-                            </a>
-
-                            <button
-                              onClick={() => {
-                                setShowBuyCoffeeModal(false);
-                              }}
-                              className="w-full py-2 text-[10.5px] text-zinc-500 hover:text-zinc-300 font-medium transition-colors cursor-pointer"
-                            >
-                              Maybe next time, thanks!
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
 
                 {/* Zero-Glow Add Item Table Modal */}
-                {addModalOpen && (
-                  <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
-                    <div className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-lg p-6 relative animate-scale-up">
-                      <button
-                        onClick={() => setAddModalOpen(false)}
-                        className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer"
-                      >
-                        <Icon icon="ph:x" className="w-5 h-5" />
-                      </button>
-
-                      <h3 className="text-[#f4f4f5] text-lg font-medium mb-1">
-                        Add Library Entry
-                      </h3>
-                      <p className="text-[#71717a] text-xs mb-5">
-                        Manually record a dissertation reference summary or raw
-                        project findings
-                      </p>
-
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          if (!newPaperTitle.trim()) return;
-
-                          const newlyCreated: PaperItem = {
-                            title: newPaperTitle,
-                            author: newPaperAuthors.trim() || "",
-                            fileType: newPaperType,
-                            description:
-                              newPaperDescription.trim() ||
-                              "Manually inserted student draft documentation.",
-                            added: "Today",
-                            fullTextStatus: "Available",
-                            viewed: "Just now",
-                            summary: "",
-                          };
-
-                          dbSetPaper(newlyCreated);
-
-                          // Create and switch to a new document tab with the content
-                          const newTabId = `manual-${Date.now()}`;
-                          setTabs((prev) => [
-                            ...prev,
-                            {
-                              id: newTabId,
-                              type: "document",
-                              title: newPaperTitle,
-                              content: `<p>${newlyCreated.description}</p>`,
-                            },
-                          ]);
-                          setActiveTabId(newTabId);
-
-                          setAddModalOpen(false);
-                        }}
-                        className="space-y-4 text-xs"
-                      >
-                        <div>
-                          <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-1.5">
-                            File type
-                          </label>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setNewPaperType("Document")}
-                              className={`flex-1 py-2 text-center rounded-xl border font-medium cursor-pointer ${newPaperType === "Document" ? "bg-[#27272a] border-[#52525b] text-white" : "bg-[#18181b] border-[#27272a] text-zinc-400 hover:text-zinc-200"}`}
-                            >
-                              Document
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setNewPaperType("Note")}
-                              className={`flex-1 py-2 text-center rounded-xl border font-medium cursor-pointer ${newPaperType === "Note" ? "bg-[#27272a] border-[#52525b] text-white" : "bg-[#18181b] border-[#27272a] text-zinc-400 hover:text-zinc-200"}`}
-                            >
-                              Note
-                            </button>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-1.5">
-                            Title
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={newPaperTitle}
-                            onChange={(e) => setNewPaperTitle(e.target.value)}
-                            placeholder="e.g. Cognitive Rehabilitation Post Stroke"
-                            className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none transition-colors"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-1.5">
-                            Authors (optional)
-                          </label>
-                          <input
-                            type="text"
-                            value={newPaperAuthors}
-                            onChange={(e) => setNewPaperAuthors(e.target.value)}
-                            placeholder="e.g. Graybiel, et al."
-                            className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none transition-colors"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-1.5">
-                            Abstract / Description (optional)
-                          </label>
-                          <textarea
-                            rows={2.5}
-                            value={newPaperDescription}
-                            onChange={(e) =>
-                              setNewPaperDescription(e.target.value)
-                            }
-                            placeholder="Provide details about findings, hypotheses or methodology parameters..."
-                            className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none transition-colors resize-none"
-                          ></textarea>
-                        </div>
-
-                        <button
-                          type="submit"
-                          className="w-full py-2.5 bg-zinc-200 hover:bg-white text-zinc-950 font-semibold rounded-xl transition-colors cursor-pointer mt-2"
-                        >
-                          Confirm and Add to Grid Structure
-                        </button>
-                      </form>
-                    </div>
-                  </div>
-                )}
               </div>
             ) : activeTab.type === "tools" ? (
               <div className="flex-1 overflow-hidden focus:outline-none bg-[#121212] flex flex-col pt-8 w-full h-full min-h-0">
@@ -6749,7 +6256,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                           setTimeout(highlightPDFSpans, 100);
                         }}
-                        className="w-full py-1.5 bg-[#fb7185] hover:bg-[#fda4af] font-bold text-black text-[11px] rounded-lg transition-colors cursor-pointer text-center select-none"
+                        className="w-full py-1.5 bg-zinc-700 hover:bg-zinc-600 font-bold text-white text-[11px] rounded-lg transition-colors cursor-pointer text-center select-none"
                       >
                         Save Annotation
                       </button>
@@ -8486,9 +7993,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <div className="flex items-center justify-between py-1 px-1 rounded-lg">
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center shrink-0 border border-[#27272a] overflow-hidden text-[#e4e4e7]">
-                      {currentUser?.photoURL ? (
+                      {localStorage.getItem("cosmi_settings_avatar_url") || currentUser?.photoURL ? (
                         <img
-                          src={currentUser.photoURL}
+                          src={localStorage.getItem("cosmi_settings_avatar_url") || currentUser?.photoURL || ""}
                           alt="You"
                           className="w-full h-full object-cover"
                           referrerPolicy="no-referrer"
@@ -8533,6 +8040,560 @@ Once you have content, I can help you draft sections, summarize findings, or for
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {isSettingsModalOpen && (
+          <Settings 
+            currentUser={currentUser} 
+            onClose={() => setIsSettingsModalOpen(false)} 
+            webSearchEnabled={webSearchEnabled}
+            setWebSearchEnabled={setWebSearchEnabled}
+            editorFont={editorFont}
+            setEditorFont={setEditorFont}
+            editorFontSize={editorFontSize}
+            setEditorFontSize={setEditorFontSize}
+            callMe={callMe}
+            setCallMe={setCallMe}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {importModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            role="dialog"
+            aria-modal="true"
+            className="fixed inset-0 bg-black/75 z-[110] flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-lg p-6 relative text-zinc-300"
+            >
+              <button
+                onClick={() => {
+                  if (!isAnalyzingLink) {
+                    setImportModalOpen(false);
+                  }
+                }}
+                className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer disabled:opacity-50"
+                disabled={isAnalyzingLink}
+              >
+                <Icon icon="ph:x" className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-2 mb-1.5">
+                {importType === "youtube" ? (
+                  <img
+                    src="https://www.gstatic.com/images/branding/product/1x/youtube_64dp.png"
+                    alt="YouTube"
+                    className="w-5 h-5 object-contain"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : importType === "gdoc" ? (
+                  <img
+                    src="https://www.gstatic.com/images/branding/product/1x/docs_2020q4_48dp.png"
+                    alt="Google Docs"
+                    className="w-5 h-5 object-contain"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <Icon
+                    icon="ph:link"
+                    className="w-5 h-5 text-zinc-400"
+                  />
+                )}
+                <h3 className="text-[#f4f4f5] text-lg font-medium">
+                  {importType === "youtube"
+                    ? "Import & Summarize YouTube Video"
+                    : importType === "gdoc"
+                      ? "Import & Summarize Google Doc"
+                      : "Import & Summarize Public URL"}
+                </h3>
+              </div>
+              <p className="text-[#71717a] text-xs mb-5">
+                {importType === "youtube"
+                  ? "Input any public video link. We will resolve its title, channel name, and use the Gemini Success Mentor model to produce an academic summary."
+                  : importType === "gdoc"
+                    ? 'Paste a public Google Doc link. Ensure link sharing is enabled as "Anyone with the link can view". We will download and structure the text content.'
+                    : "Paste any webpage, paper link, or blog article. We will crawl the clean document text and synthesize it into a library literature note."}
+              </p>
+
+              <form
+                onSubmit={handleLinkImportSubmit}
+                className="space-y-4 text-xs font-sans"
+              >
+                <div>
+                  <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-2">
+                    {importType === "youtube"
+                      ? "YouTube Video Link"
+                      : importType === "gdoc"
+                        ? "Google Doc URL"
+                        : "Public URL"}
+                  </label>
+                  <input
+                    type="url"
+                    required
+                    value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    disabled={isAnalyzingLink}
+                    placeholder={
+                      importType === "youtube"
+                        ? "https://www.youtube.com/watch?v=F3GCo2Y-A9o"
+                        : importType === "gdoc"
+                          ? "https://docs.google.com/document/d/1BxiMVs0XRA5nFMdKvGdBAnlgY5iK1mJH/edit"
+                          : "https://en.wikipedia.org/wiki/Neuroplasticity"
+                    }
+                    className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2.5 text-zinc-200 text-xs focus:border-zinc-500 focus:outline-none placeholder:text-zinc-600 transition-colors disabled:opacity-50"
+                  />
+                </div>
+
+                {linkAnalyzeError && (
+                  <div className="flex gap-2.5 items-start p-3.5 bg-red-950/20 border border-red-900/40 rounded-xl">
+                    <Icon
+                      icon="ph:warning-circle"
+                      className="w-4 h-4 text-red-500 shrink-0 mt-0.5"
+                    />
+                    <span className="text-red-400 text-xs leading-relaxed font-medium">
+                      {linkAnalyzeError}
+                    </span>
+                  </div>
+                )}
+
+                {isAnalyzingLink && (
+                  <div className="flex flex-col gap-2.5 items-center justify-center p-6 bg-[#18181b] border border-[#27272a] rounded-xl text-center">
+                    <div className="w-5 h-5 border-2 border-zinc-500 border-t-white rounded-full animate-spin" />
+                    <div className="text-zinc-300 font-medium text-xs">
+                      Analyzing and Synthesizing Link Source...
+                    </div>
+                    <div className="text-[10px] font-mono text-[#71717a] max-w-sm leading-relaxed">
+                      {linkAnalyzeStatus}
+                    </div>
+                  </div>
+                )}
+
+                {!isAnalyzingLink && (
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setImportModalOpen(false)}
+                      className="flex-1 py-2.5 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-zinc-400 hover:text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer text-center"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 py-2.5 bg-zinc-200 hover:bg-white text-zinc-950 rounded-xl text-xs font-semibold transition-colors cursor-pointer text-center"
+                    >
+                      Import & Summarize
+                    </button>
+                  </div>
+                )}
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {activeViewingPaper && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            role="dialog"
+            aria-modal="true"
+            className="fixed inset-0 bg-black/75 z-[105] flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-2xl p-6 relative text-zinc-300"
+            >
+              <button
+                onClick={() => setActiveViewingPaper(null)}
+                className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer"
+              >
+                <Icon icon="ph:x" className="w-5 h-5" />
+              </button>
+
+              <h3 className="text-[#f4f4f5] text-xl font-medium leading-snug mb-1">
+                {activeViewingPaper.title}
+              </h3>
+
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-[#71717a] border-b border-[#27272a] pb-4 mb-4">
+                {activeViewingPaper.author && (
+                  <div className="flex items-center gap-1">
+                    <Icon
+                      icon="ph:user"
+                      className="w-3.5 h-3.5 text-zinc-500"
+                    />
+                    <span>{activeViewingPaper.author}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-1">
+                  <Icon
+                    icon="ph:calendar"
+                    className="w-3.5 h-3.5 text-zinc-500"
+                  />
+                  <span>
+                    Added: {activeViewingPaper.added || "Today"}
+                  </span>
+                </div>
+                {activeViewingPaper.url && (
+                  <a
+                    href={activeViewingPaper.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    referrerPolicy="no-referrer"
+                    className="flex items-center gap-1 text-[#0070f3] hover:underline"
+                  >
+                    <Icon icon="ph:link" className="w-3.5 h-3.5" />
+                    <span className="truncate max-w-xs">
+                      {activeViewingPaper.url}
+                    </span>
+                  </a>
+                )}
+              </div>
+
+              <div className="space-y-4 text-sm leading-relaxed max-h-[350px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-zinc-800">
+                {activeViewingPaper.summary ? (
+                  <div className="markdown-body prose prose-invert max-w-none text-sm text-[#d4d4d8] font-sans">
+                    <ReactMarkdown>
+                      {formatAbstractText(
+                        activeViewingPaper.summary,
+                      ).replace(/\\n/g, "\n")}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="text-[#d4d4d8] font-sans whitespace-pre-wrap">
+                    {activeViewingPaper.description
+                      ? formatAbstractText(
+                          activeViewingPaper.description,
+                        ).replace(/\\n/g, "\n")
+                      : ""}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex justify-between items-center gap-4 mt-6 pt-4 border-t border-[#27272a]">
+                <button
+                  onClick={() => {
+                    const summaryText =
+                      activeViewingPaper.summary ||
+                      activeViewingPaper.description;
+                    navigator.clipboard.writeText(summaryText);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 border border-[#27272a] hover:bg-[#1a1a1a] rounded-xl text-xs font-semibold text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                >
+                  <Icon icon="ph:copy" className="w-3.5 h-3.5" />
+                  <span>Copy Summary</span>
+                </button>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setActiveViewingPaper(null)}
+                    className="px-5 py-2.5 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] text-zinc-400 hover:text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {addModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/75 z-[105] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#121212] border border-[#27272a] rounded-2xl w-full max-w-lg p-6 relative"
+            >
+              <button
+                onClick={() => setAddModalOpen(false)}
+                className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer"
+              >
+                <Icon icon="ph:x" className="w-5 h-5" />
+              </button>
+
+              <h3 className="text-[#f4f4f5] text-lg font-medium mb-1">
+                Add Library Entry
+              </h3>
+              <p className="text-[#71717a] text-xs mb-5">
+                Manually record a dissertation reference summary or raw
+                project findings
+              </p>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!newPaperTitle.trim()) return;
+
+                  const newlyCreated: PaperItem = {
+                    title: newPaperTitle,
+                    author: newPaperAuthors.trim() || "",
+                    fileType: newPaperType,
+                    description:
+                      newPaperDescription.trim() ||
+                      "Manually inserted student draft documentation.",
+                    added: "Today",
+                    fullTextStatus: "Available",
+                    viewed: "Just now",
+                    summary: "",
+                  };
+
+                  dbSetPaper(newlyCreated);
+
+                  // Create and switch to a new document tab with the content
+                  const newTabId = `manual-${Date.now()}`;
+                  setTabs((prev) => [
+                    ...prev,
+                    {
+                      id: newTabId,
+                      type: "document",
+                      title: newPaperTitle,
+                      content: `<p>${newlyCreated.description}</p>`,
+                    },
+                  ]);
+                  setActiveTabId(newTabId);
+
+                  setAddModalOpen(false);
+                }}
+                className="space-y-4 text-xs"
+              >
+                <div>
+                  <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-1.5">
+                    File type
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewPaperType("Document")}
+                      className={`flex-1 py-2 text-center rounded-xl border font-medium cursor-pointer ${newPaperType === "Document" ? "bg-[#27272a] border-[#52525b] text-white" : "bg-[#18181b] border-[#27272a] text-zinc-400 hover:text-zinc-200"}`}
+                    >
+                      Document
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewPaperType("Note")}
+                      className={`flex-1 py-2 text-center rounded-xl border font-medium cursor-pointer ${newPaperType === "Note" ? "bg-[#27272a] border-[#52525b] text-white" : "bg-[#18181b] border-[#27272a] text-zinc-400 hover:text-zinc-200"}`}
+                    >
+                      Note
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-1.5">
+                    Title
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newPaperTitle}
+                    onChange={(e) => setNewPaperTitle(e.target.value)}
+                    placeholder="e.g. Cognitive Rehabilitation Post Stroke"
+                    className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-1.5">
+                    Authors (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={newPaperAuthors}
+                    onChange={(e) => setNewPaperAuthors(e.target.value)}
+                    placeholder="e.g. Graybiel, et al."
+                    className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-500 mb-1.5">
+                    Abstract / Description (optional)
+                  </label>
+                  <textarea
+                    rows={2.5}
+                    value={newPaperDescription}
+                    onChange={(e) =>
+                      setNewPaperDescription(e.target.value)
+                    }
+                    placeholder="Provide details about findings, hypotheses or methodology parameters..."
+                    className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none transition-colors resize-none"
+                  ></textarea>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-2.5 bg-zinc-200 hover:bg-white text-zinc-950 font-semibold rounded-xl transition-colors cursor-pointer mt-2"
+                >
+                  Confirm and Add to Grid Structure
+                </button>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {showBuyCoffeeModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#121212] border border-[#2d2d30] rounded-2xl w-full max-w-[420px] p-6 relative flex flex-col overflow-hidden select-none"
+            >
+              <button
+                onClick={() => {
+                  setShowBuyCoffeeModal(false);
+                  setSupportAmountPaid(null);
+                }}
+                className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer p-1 rounded-md hover:bg-[#1a1a1c] transition-colors"
+                title="Close dialog"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              {supportAmountPaid ? (
+                <div className="flex flex-col items-center text-center space-y-4 py-4">
+                  <div className="w-14 h-14 rounded-full bg-emerald-950/30 border border-emerald-800/40 flex items-center justify-center text-emerald-400">
+                    <Coffee className="w-7 h-7" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <h3 className="text-base font-bold text-zinc-100 font-jakarta">
+                      Support Succeeded!
+                    </h3>
+                    <span className="text-[10px] uppercase tracking-wider font-mono text-emerald-500 font-bold">
+                      Official Workspace Patron
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-zinc-400 leading-relaxed px-1">
+                    Thank you deep down for your virtual donation of{" "}
+                    <span className="text-emerald-400 font-bold">
+                      {supportAmountPaid}
+                    </span>
+                    ! This supports daily Gemini token requests, web
+                    parser microservices, and general app development.
+                  </p>
+
+                  <button
+                    onClick={() => {
+                      setShowBuyCoffeeModal(false);
+                      setSupportAmountPaid(null);
+                    }}
+                    className="w-full py-2 bg-zinc-200 hover:bg-white text-zinc-950 rounded-xl font-bold text-xs transition-colors cursor-pointer mt-2"
+                  >
+                    Conclude & Return
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center text-center space-y-4 pt-1">
+                  {/* Coffee cup box */}
+                  <div className="w-14 h-14 rounded-2xl bg-[#221714] border border-[#44312a] flex items-center justify-center text-[#e3a088]">
+                    <Coffee className="w-7 h-7" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-bold text-zinc-100 font-jakarta">
+                      Support AI Research Workspace
+                    </h3>
+                    <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">
+                      Keep the model intelligence active ☕
+                    </p>
+                  </div>
+
+                  <p className="text-xs text-zinc-400 leading-relaxed px-1">
+                    If our draft optimizer, citation indexers, automatic
+                    web synthesis, or new interactive study panels have
+                    saved you time, consider buying us a coffee!
+                  </p>
+
+                  {/* Coffee visual selectors */}
+                  <div className="w-full flex gap-2.5 pt-2">
+                    {[
+                      {
+                        count: 1,
+                        label: "1 Coffee",
+                        price: "$5",
+                        desc: "Warm Thanks!",
+                      },
+                      {
+                        count: 3,
+                        label: "3 Coffees",
+                        price: "$15",
+                        desc: "Keep it up!",
+                      },
+                      {
+                        count: 5,
+                        label: "5 Coffees",
+                        price: "$25",
+                        desc: "Pro sponsor!",
+                      },
+                    ].map((item) => (
+                      <button
+                        key={item.count}
+                        onClick={() => setSupportAmountPaid(item.price)}
+                        className="flex-1 bg-[#161618] border border-[#242426] hover:border-zinc-500 p-3 rounded-xl transition-all cursor-pointer flex flex-col items-center gap-1 group"
+                      >
+                        <span className="text-xs font-bold text-zinc-300 group-hover:text-white">
+                          {item.label}
+                        </span>
+                        <span className="text-[10px] font-mono text-zinc-500">
+                          {item.price}
+                        </span>
+                        <span className="text-[9.5px] text-zinc-600 font-semibold">
+                          {item.desc}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Direct exterior Support links */}
+                  <div className="w-full space-y-2 pt-2">
+                    <a
+                      href="https://buymeacoffee.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-2.5 rounded-xl bg-zinc-200 hover:bg-white text-[#121212] font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Coffee className="w-3.5 h-3.5" />
+                      <span>Support on BuyMeACoffee.com</span>
+                      <ExternalLink className="w-3 h-3 ml-0.5" />
+                    </a>
+
+                    <button
+                      onClick={() => {
+                        setShowBuyCoffeeModal(false);
+                      }}
+                      className="w-full py-2 text-[10.5px] text-zinc-500 hover:text-zinc-300 font-medium transition-colors cursor-pointer"
+                    >
+                      Maybe next time, thanks!
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <ToastContainer />
     </div>
