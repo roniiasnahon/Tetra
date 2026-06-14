@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import ReactMarkdown from 'react-markdown';
 import { Icon } from '@iconify/react';
@@ -15,7 +15,21 @@ interface MainChatProps {
   researchStatus: 'fetching' | 'downloading' | 'polishing' | null;
   currentUser: any;
   isOnline?: boolean;
+  selectedModel: string;
+  setSelectedModel: (val: string) => void;
+  webSearchEnabled: boolean;
+  setWebSearchEnabled: (val: boolean) => void;
+  attachedFile: { fileId: string; fileName: string; mimetype: string; url: string } | null;
+  setAttachedFile: (val: { fileId: string; fileName: string; mimetype: string; url: string } | null) => void;
+  handlePaperclipClick: () => void;
 }
+
+const modelsList = [
+  { id: 'auto', label: 'Auto (Gemini)' },
+  { id: 'mistral-large-latest', label: 'Mistral Large' },
+  { id: 'ministral-8b-latest', label: 'Ministral 8B Edge' },
+  { id: 'codestral-latest', label: 'Codestral Code' },
+];
 
 const renderLinkifiedText = (text: string) => {
   if (!text) return "";
@@ -40,9 +54,19 @@ export const MainChat: React.FC<MainChatProps> = ({
   handleSendMessage, 
   researchStatus,
   currentUser,
-  isOnline = true
+  isOnline = true,
+  selectedModel,
+  setSelectedModel,
+  webSearchEnabled,
+  webSearchEnabled: _webSearchEnabled, // backup binding
+  webSearchEnabled: webSearchVal,
+  setWebSearchEnabled,
+  attachedFile,
+  setAttachedFile,
+  handlePaperclipClick
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -51,6 +75,11 @@ export const MainChat: React.FC<MainChatProps> = ({
   const onSend = () => {
     if (!chatInput.trim() || isAiTyping) return;
     handleSendMessage();
+  };
+
+  const getSelectedModelLabel = () => {
+    const found = modelsList.find(m => m.id === selectedModel);
+    return found ? found.label : 'Auto (Gemini)';
   };
 
   return (
@@ -91,6 +120,31 @@ export const MainChat: React.FC<MainChatProps> = ({
                         </details>
                       </div>
                     )}
+
+                    {m.role === 'user' && m.attachment && (
+                      <div className="mb-3.5 p-2 bg-[#222222] rounded-xl border border-zinc-800 flex items-center gap-3">
+                        {m.attachment.mimetype?.startsWith("image/") ? (
+                          <img 
+                            src={m.attachment.url} 
+                            alt={m.attachment.fileName} 
+                            className="w-16 h-16 object-cover rounded border border-zinc-700 cursor-pointer hover:border-zinc-500 transition-all"
+                            onClick={() => window.open(m.attachment!.url, "_blank")}
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-lg bg-zinc-800 border border-zinc-705 flex items-center justify-center text-zinc-400 shrink-0 border-zinc-700">
+                            <Icon icon="ph:file-text" className="w-5 h-5" />
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-semibold text-zinc-200 truncate pr-2">{m.attachment.fileName}</p>
+                          <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-wide">
+                            {m.attachment.mimetype?.startsWith("image/") ? "IMAGE PHOTO" : "DOCUMENT REFERENCE"}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
                     <div className={`select-text break-words ${m.role === 'user' ? 'whitespace-pre-wrap' : 'markdown-body text-[#d4d4d8]'}`}>
                       {m.role === 'user' ? (
                         renderLinkifiedText(m.content)
@@ -122,6 +176,38 @@ export const MainChat: React.FC<MainChatProps> = ({
 
         <div className="shrink-0 p-6 flex flex-col items-center gap-4">
           <div className="w-full max-w-3xl bg-[#1a1a1a] border border-[#2d2d30] rounded-[28px] p-1.5 flex flex-col transition-all focus-within:border-zinc-700">
+            {attachedFile && (
+              <div className="mx-3 mt-3 p-2 bg-[#222222] border border-[#2d2d30] rounded-2xl flex items-center justify-between gap-3 animate-fade-in">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {attachedFile.mimetype?.startsWith("image/") ? (
+                    <img 
+                      src={attachedFile.url} 
+                      alt={attachedFile.fileName} 
+                      className="w-10 h-10 object-cover rounded-lg border border-zinc-700 shrink-0"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0">
+                      <Icon icon="ph:file-text" className="w-5 h-5" />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-zinc-200 truncate pr-2">{attachedFile.fileName}</p>
+                    <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
+                      {attachedFile.mimetype?.startsWith("image/") ? "IMAGE PHOTO" : "DOCUMENT REFERENCE"}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setAttachedFile(null)}
+                  className="text-zinc-500 hover:text-zinc-300 transition-colors p-1 hover:bg-zinc-800 rounded-md shrink-0 cursor-pointer"
+                  title="Remove attachment"
+                >
+                  <Icon icon="ph:x" className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
             <TextareaAutosize 
               key={`main-chat-input-${tab.id}`}
               id={`main-chat-input-${tab.id}`}
@@ -142,11 +228,28 @@ export const MainChat: React.FC<MainChatProps> = ({
               className="w-full bg-transparent text-[15px] text-[#e4e4e7] placeholder-[#52525b] py-3 px-4 resize-none focus:outline-none min-h-[52px] max-h-[300px] leading-relaxed"
             />
             
-            <div className="flex items-center justify-between px-2 pb-2 pt-1">
-              <div className="flex items-center gap-1">
-                <button className="flex items-center gap-1 px-2.5 py-1.5 hover:bg-[#222222] rounded-xl transition-colors text-[13px] text-[#71717a] hover:text-[#e4e4e7] cursor-pointer">
-                  <span className="font-medium">Auto</span>
-                  <Icon icon="ph:caret-down" className="w-3 h-3" />
+            <div className="flex items-center justify-between px-2 pb-2 pt-1 relative">
+              <div className="flex items-center gap-2">
+                {/* Attachment / Upload Trigger */}
+                <button 
+                  onClick={handlePaperclipClick}
+                  className="flex items-center justify-center w-8 h-8 rounded-full border border-[#27272a] text-[#71717a] hover:text-[#e4e4e7] bg-transparent hover:bg-[#222222] transition-colors cursor-pointer shrink-0"
+                  title="Upload File or Photo"
+                >
+                  <Icon icon="ph:plus-bold" className="w-[16px] h-[16px]" />
+                </button>
+
+                {/* Web Search Grounding Toggle */}
+                <button 
+                  onClick={() => setWebSearchEnabled(!webSearchVal)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-colors text-xs font-semibold cursor-pointer border ${
+                    webSearchVal 
+                      ? 'bg-zinc-800 border-zinc-600 text-white' 
+                      : 'border-[#27272a] text-[#71717a] hover:text-[#e4e4e7] bg-transparent hover:bg-[#222222]'
+                  }`}
+                >
+                  <Icon icon={webSearchVal ? "ph:globe-hemisphere-east-fill" : "ph:globe"} className="w-3.5 h-3.5" />
+                  <span>Web</span>
                 </button>
               </div>
               

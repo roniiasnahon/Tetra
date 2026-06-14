@@ -1042,6 +1042,293 @@ async function startServer() {
 
   app.use(express.json({ limit: "15mb" }));
 
+  // Dynamic public metadata resolver for rich inline link-previews
+  app.get("/api/link-preview", async (req, res) => {
+    const { url } = req.query;
+    if (!url || typeof url !== "string") {
+      return res.status(400).json({ error: "URL query parameter is required" });
+    }
+
+    try {
+      const parsedUrl = new URL(url);
+      
+      // 1. YouTube specialized scraper/oembed
+      if (parsedUrl.hostname.includes("youtube.com") || parsedUrl.hostname.includes("youtu.be")) {
+        let videoId = "";
+        const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+        const match = url.match(regExp);
+        if (match && match[2] && match[2].length === 11) {
+          videoId = match[2];
+        }
+
+        if (videoId) {
+          try {
+            const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+            const oembedResponse = await axios.get(oembedUrl, { timeout: 3500 });
+            if (oembedResponse.status === 200) {
+              const data = oembedResponse.data;
+              return res.json({
+                title: data.title || "YouTube Video Reference",
+                description: `YouTube video from creator channel: ${data.author_name || "YouTube Creator"}. Click to watch.`,
+                image: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+                siteName: "YouTube",
+                isVideo: true
+              });
+            }
+          } catch (e: any) {
+            console.warn("[PREVIEW] YouTube oembed lookup failed, fallback to direct thumbnail", e.message);
+          }
+          
+          return res.json({
+            title: "YouTube Video Reference",
+            description: "Watch this video presentation directly on YouTube.",
+            image: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+            siteName: "YouTube",
+            isVideo: true
+          });
+        }
+      }
+
+      // 2. Regular website scraper - with Native Fetch, You.com API, and Search Fallback
+      let html = "";
+      let fetchSuccess = false;
+      let title = parsedUrl.hostname;
+      let description = `Browse research and articles directly on ${parsedUrl.hostname}.`;
+      let image = "";
+      let resolved = false;
+
+      const urlLower = url.toLowerCase();
+      const shouldSkipDirectScrape = 
+        urlLower.includes("reddit.com") || 
+        urlLower.includes("yahoo.com") || 
+        urlLower.includes("twitter.com") || 
+        urlLower.includes("x.com") || 
+        urlLower.includes("bloomberg.com") || 
+        urlLower.includes("nytimes.com") || 
+        urlLower.includes("medium.com") ||
+        urlLower.includes("quora.com") ||
+        urlLower.includes("facebook.com") ||
+        urlLower.includes("instagram.com") ||
+        urlLower.includes("linkedin.com") ||
+        urlLower.includes("sciencedirect.com") ||
+        urlLower.includes("springer.com") ||
+        urlLower.includes("nature.com") ||
+        urlLower.includes("wsj.com") ||
+        urlLower.includes("wired.com") ||
+        urlLower.includes("ft.com") ||
+        urlLower.includes("cnbc.com");
+
+      // 2a. You.com fallback - Extremely fast and bypasses direct anti-scraping blocks
+      const youApiKey = process.env.YOU_API_KEY;
+      if (youApiKey && youApiKey.trim() !== "") {
+        try {
+          console.log("[PREVIEW] Resolving preview with You.com api for:", url);
+          const trimmedKey = youApiKey.trim();
+          const youUrl = `https://api.ydc-index.io/search?query=${encodeURIComponent(url)}`;
+          const response = await axios.get(youUrl, {
+            headers: {
+              "X-API-KEY": trimmedKey,
+              "Accept": "application/json"
+            },
+            timeout: 3000
+          });
+          
+          if (response.status === 200 && response.data && response.data.hits) {
+            const hits = response.data.hits;
+            if (hits.length > 0) {
+              const bestHit = hits[0];
+              title = bestHit.title || title;
+              description = bestHit.snippet || bestHit.description || description;
+              image = bestHit.thumbnail?.original || image;
+              resolved = true;
+              console.log("[PREVIEW] Successfully resolved from You.com API hits:", url);
+            }
+          }
+        } catch (youErr: any) {
+          // Silent fallback
+        }
+      }
+
+      // 2b. Direct scrape only if the domain is benign
+      if (!resolved && !shouldSkipDirectScrape) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3500);
+          
+          const fetchRes = await fetch(url, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'Cache-Control': 'no-cache',
+            },
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId);
+          
+          if (fetchRes.ok) {
+            html = await fetchRes.text();
+            fetchSuccess = true;
+          }
+        } catch (fetchErr: any) {
+          // Silent fallback
+        }
+
+        // If native fetch failed, attempt a backup direct get with axios
+        if (!fetchSuccess) {
+          try {
+            const response = await axios.get(url, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+              },
+              timeout: 2500
+            });
+            html = response.data;
+            fetchSuccess = true;
+          } catch (axiosErr: any) {
+            // Silent fallback
+          }
+        }
+      }
+
+      // 2c. If direct attempts fail/skipped, query DDG search as a super high-quality fallback
+      if (!resolved && (!fetchSuccess || shouldSkipDirectScrape)) {
+        try {
+          const ddgSearchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(url)}`;
+          const ddgResponse = await axios.get(ddgSearchUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
+            timeout: 3500
+          });
+          const ddgHtml = ddgResponse.data;
+          
+          // Match result titles and direct links
+          const resultARegex = /<a class="result__a" href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+          const snippetRegex = /<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+          
+          let matchA;
+          const titlesAndLinks: Array<{ href: string; title: string }> = [];
+          while ((matchA = resultARegex.exec(ddgHtml)) !== null) {
+            let href = matchA[1];
+            if (href.includes('uddg=')) {
+              const parts = href.split('uddg=');
+              if (parts[1]) {
+                href = decodeURIComponent(parts[1].split('&')[0]);
+              }
+            }
+            const titleVal = matchA[2].replace(/<[^>]*>/g, '').trim();
+            titlesAndLinks.push({ href, title: titleVal });
+          }
+          
+          let matchSnippet;
+          const snippets: string[] = [];
+          while ((matchSnippet = snippetRegex.exec(ddgHtml)) !== null) {
+            const snippet = matchSnippet[1].replace(/<[^>]*>/g, '').trim();
+            snippets.push(snippet);
+          }
+          
+          if (titlesAndLinks.length > 0) {
+            let bestIndex = 0;
+            const targetHostname = parsedUrl.hostname.toLowerCase().replace(/^www\./, "");
+            for (let i = 0; i < titlesAndLinks.length; i++) {
+              if (titlesAndLinks[i].href.toLowerCase().includes(targetHostname)) {
+                bestIndex = i;
+                break;
+              }
+            }
+            
+            const bestResult = titlesAndLinks[bestIndex];
+            const bestSnippet = snippets[bestIndex] || "";
+            const siteName = parsedUrl.hostname.replace(/^www\./, "");
+            
+            return res.json({
+              title: bestResult.title,
+              description: bestSnippet || `Resolved reference link from ${parsedUrl.hostname}.`,
+              image: "",
+              siteName
+            });
+          }
+        } catch (ddgErr: any) {
+          // Silent fallback
+        }
+      }
+
+      const decodeHtmlEntities = (str: string) => {
+        return str
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&rsquo;/g, "'")
+          .replace(/&lsquo;/g, "'")
+          .replace(/&ldquo;/g, '"')
+          .replace(/&rdquo;/g, '"')
+          .replace(/&ndash;/g, "–")
+          .replace(/&mdash;/g, "—");
+      };
+
+      if (!resolved) {
+        title = parsedUrl.hostname;
+        description = `Browse research and articles directly on ${parsedUrl.hostname}.`;
+        image = "";
+      }
+
+      if (fetchSuccess && html) {
+        const titleMatch = html.match(/<meta\s+property=["']og:title["']\s+content=["']([\s\S]*?)["']/i) ||
+                           html.match(/<meta\s+name=["']twitter:title["']\s+content=["']([\s\S]*?)["']/i) ||
+                           html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+
+        const descMatch = html.match(/<meta\s+property=["']og:description["']\s+content=["']([\s\S]*?)["']/i) ||
+                          html.match(/<meta\s+name=["']description["']\s+content=["']([\s\S]*?)["']/i) ||
+                          html.match(/<meta\s+name=["']twitter:description["']\s+content=["']([\s\S]*?)["']/i);
+
+        const imageMatch = html.match(/<meta\s+property=["']og:image["']\s+content=["']([\s\S]*?)["']/i) ||
+                           html.match(/<meta\s+name=["']twitter:image["']\s+content=["']([\s\S]*?)["']/i);
+
+        if (titleMatch && titleMatch[1]) {
+          title = decodeHtmlEntities(titleMatch[1].replace(/<[^>]*>/g, '').trim());
+        }
+
+        if (descMatch && descMatch[1]) {
+          description = decodeHtmlEntities(descMatch[1].replace(/<[^>]*>/g, '').trim());
+        }
+
+        if (imageMatch && imageMatch[1]) {
+          image = imageMatch[1].trim();
+        }
+      }
+
+      const siteName = parsedUrl.hostname.replace(/^www\./, "");
+
+      return res.json({
+        title,
+        description,
+        image,
+        siteName
+      });
+
+    } catch (err: any) {
+      console.warn("[PREVIEW] Link preview scrape failed", err.message);
+      let siteName = "External Reference";
+      try {
+        siteName = new URL(url).hostname.replace(/^www\./, "");
+      } catch {}
+
+      return res.json({
+        title: siteName,
+        description: `Reference link to ${siteName}. Click to open the web resource.`,
+        image: "",
+        siteName
+      });
+    }
+  });
+
   const upload = multer({ 
     storage: multer.memoryStorage(),
     limits: { fileSize: 15 * 1024 * 1024 } // 15MB limit
@@ -1868,11 +2155,199 @@ CRITICAL RULES:
   // Helper for delays
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+  // Helper for web scraping search results
+  async function searchWeb(query: string): Promise<string> {
+    const youApiKey = process.env.YOU_API_KEY;
+    let youErrorNotice = "";
+
+    if (youApiKey && youApiKey.trim() !== "") {
+      const trimmedKey = youApiKey.trim();
+      
+      const attempts = [
+        {
+          url: `https://api.ydc-index.io/search?query=${encodeURIComponent(query)}`,
+          method: "GET" as const,
+          data: null
+        },
+        {
+          url: `https://ydc-index.io/search?query=${encodeURIComponent(query)}`,
+          method: "GET" as const,
+          data: null
+        },
+        {
+          url: `https://api.ydc-index.io/v1/contents?query=${encodeURIComponent(query)}`,
+          method: "GET" as const,
+          data: null
+        },
+        {
+          url: `https://ydc-index.io/v1/contents?query=${encodeURIComponent(query)}`,
+          method: "GET" as const,
+          data: null
+        },
+        {
+          url: `https://api.ydc-index.io/v1/contents`,
+          method: "POST" as const,
+          data: { query: query, crawl_timeout: 10 }
+        },
+        {
+          url: `https://ydc-index.io/v1/contents`,
+          method: "POST" as const,
+          data: { query: query, crawl_timeout: 10 }
+        }
+      ];
+
+      let lastErrorStatus = "";
+      let foundSuccess = false;
+      let finalResultsStr = "";
+
+      for (const attempt of attempts) {
+        try {
+          console.log(`[YOU.COM SEARCH TRY] Method: ${attempt.method} on ${attempt.url}`);
+          const headers: Record<string, string> = {
+            "X-API-KEY": trimmedKey,
+            "Accept": "application/json"
+          };
+          
+          let response;
+          if (attempt.method === "POST") {
+            headers["Content-Type"] = "application/json";
+            response = await axios.post(attempt.url, attempt.data, { headers, timeout: 8000 });
+          } else {
+            response = await axios.get(attempt.url, { headers, timeout: 8000 });
+          }
+
+          const hits = response.data?.hits || response.data?.results || [];
+          const results: Array<{ title: string; link: string; snippet: string }> = [];
+
+          if (Array.isArray(hits)) {
+            for (const hit of hits) {
+              const title = hit.title || hit.name || "Untitled Result";
+              const link = hit.url || hit.link || "";
+              
+              let snippet = "";
+              if (Array.isArray(hit.snippets) && hit.snippets.length > 0) {
+                snippet = hit.snippets.join(" ");
+              } else if (hit.description) {
+                snippet = hit.description;
+              } else if (hit.snippet) {
+                snippet = hit.snippet;
+              }
+
+              if (link) {
+                results.push({ title, link, snippet });
+              }
+            }
+          }
+
+          if (results.length > 0) {
+            console.log(`[YOU.COM SEARCH SUCCESS] Found ${results.length} results via ${attempt.url}`);
+            foundSuccess = true;
+            finalResultsStr = results.map((r, i) => `[Web Result ${i+1}] Title: ${r.title}\nURL: ${r.link}\nSnippet: ${r.snippet}`).join("\n\n");
+            break;
+          }
+        } catch (err: any) {
+          console.warn(`[YOU.COM SEARCH TRY FAILED] ${attempt.url} failed:`, err.message || err);
+          if (err.response) {
+            console.warn(`[YOU.COM SEARCH ERROR DETAIL] Status: ${err.response.status}, Data:`, JSON.stringify(err.response.data || {}).substring(0, 500));
+            lastErrorStatus = err.response.status.toString();
+          }
+        }
+      }
+
+      if (foundSuccess) {
+        return finalResultsStr;
+      }
+
+      // If we got here, all attempts failed or returned no results. Show advisory.
+      if (lastErrorStatus === "403") {
+        youErrorNotice = "\n\n[SYSTEM ADVISORY: The You.com search API endpoints returned 403 Forbidden. This indicates your YOU_API_KEY in the Secrets panel under Settings is either invalid, expired, or doesn't have permissions for search index retrieval. Fulfilling query via DuckDuckGo fallback.]";
+      } else if (lastErrorStatus) {
+        youErrorNotice = `\n\n[SYSTEM ADVISORY: You.com search API failed with status ${lastErrorStatus}. Fulfilling query via DuckDuckGo fallback.]`;
+      } else {
+        youErrorNotice = "\n\n[SYSTEM ADVISORY: You.com search returned empty. Fulfilling query via DuckDuckGo fallback.]";
+      }
+    } else {
+      console.log(`[YOU.COM SEARCH] YOU_API_KEY not configured or empty; defaulting to DuckDuckGo...`);
+      youErrorNotice = "\n\n[SYSTEM ADVISORY: YOU_API_KEY is not configured in the Secrets panel under Settings. Defaulting gracefully to DuckDuckGo. You can configure YOU_API_KEY in the application Secrets to use the premium You.com Index API.]";
+    }
+
+    try {
+      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const response = await axios.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        timeout: 8000
+      });
+      const html = response.data;
+      
+      const results: Array<{ title: string; link: string; snippet: string }> = [];
+      
+      // Match result titles and direct links
+      const resultARegex = /<a class="result__a" href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+      const snippetRegex = /<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+      
+      let matchA;
+      const titlesAndLinks: Array<{ href: string; title: string }> = [];
+      while ((matchA = resultARegex.exec(html)) !== null) {
+        let href = matchA[1];
+        if (href.includes('uddg=')) {
+          const parts = href.split('uddg=');
+          if (parts[1]) {
+            href = decodeURIComponent(parts[1].split('&')[0]);
+          }
+        }
+        const title = matchA[2].replace(/<[^>]*>/g, '').trim();
+        titlesAndLinks.push({ href, title });
+      }
+      
+      let matchSnippet;
+      const snippets: string[] = [];
+      while ((matchSnippet = snippetRegex.exec(html)) !== null) {
+        const snippet = matchSnippet[1].replace(/<[^>]*>/g, '').trim();
+        snippets.push(snippet);
+      }
+      
+      const maxResults = Math.min(titlesAndLinks.length, snippets.length, 5);
+      for (let i = 0; i < maxResults; i++) {
+        results.push({
+          title: titlesAndLinks[i].title,
+          link: titlesAndLinks[i].href,
+          snippet: snippets[i]
+        });
+      }
+      
+      if (results.length === 0) {
+        try {
+          const ddgJson = await axios.get(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json`, { timeout: 4000 });
+          if (ddgJson.data?.AbstractText) {
+            results.push({
+              title: ddgJson.data.Heading || "Instant Answer",
+              link: ddgJson.data.AbstractURL || "",
+              snippet: ddgJson.data.AbstractText
+            });
+          }
+        } catch (err) {
+          console.warn("JSON DDG fallback failed:", err);
+        }
+      }
+      
+      if (results.length > 0) {
+        return results.map((r, i) => `[Web Result ${i+1}] Title: ${r.title}\nURL: ${r.link}\nSnippet: ${r.snippet}`).join("\n\n") + youErrorNotice;
+      }
+      return "No web search results matches for your query." + youErrorNotice;
+    } catch (err: any) {
+      console.error("Web search query failed:", err.message || err);
+      return `No real-time web results found. (${err.message || err})` + youErrorNotice;
+    }
+  }
+
 
   // Research Chat & Academic Draft Optimizer Route
   app.post("/api/research/chat", async (req, res) => {
     try {
-      const { messages, context } = req.body;
+      const { messages, context, model, webSearch, attachment } = req.body;
 
       if (!messages || !Array.isArray(messages)) {
         res.status(400).json({ error: "Invalid request payload. Messages are required." });
@@ -1881,9 +2356,27 @@ CRITICAL RULES:
 
       const lastMessage = messages[messages.length - 1]?.content || "";
       const isSearchRequest = false;
+      const requestedModel = model || "auto";
+      const webSearchEnabled = !!webSearch;
 
       let researchContext = "";
-      if (isSearchRequest) {
+      if (attachment && !attachment.mimetype?.startsWith("image/")) {
+        researchContext += `\n[SPECIAL FOCUS ATTACHMENT]: The user has attached the workspace document "${attachment.fileName}" (ID: ${attachment.fileId}) specifically to prompt this reply. Give absolute highest priority to files/data/claims contained within this file in your response.\n`;
+      }
+
+      if (webSearchEnabled) {
+        console.log(`[REAL-TIME SEARCH] Fetching web results for query: "${lastMessage}"`);
+        const searchResults = await searchWeb(lastMessage);
+        researchContext = `
+--- GOOGLE / DUCKDUCKGO WEB SEARCH GROUNDING RESULTS ---
+We retrieved these current live web results for "${lastMessage}":
+
+${searchResults}
+
+INSTRUCTION: Synthesize and ground your response on these web results, and make sure to list the source URLs as clickable links.
+--------------------------------------------------------
+`;
+      } else if (isSearchRequest) {
         console.log("Detecting search request, fetching papers...");
         let papers: any[] = [];
         
@@ -2142,10 +2635,15 @@ ${researchContext}
 
       console.log(`[LLM] Preparing completion request with ${openaiMessages.length + 1} messages.`);
       
+      let activeSystemInstruction = systemInstruction;
+      if (webSearchEnabled) {
+        activeSystemInstruction += "\n\nCRITICAL REAL-TIME GROUNDING INLINE CITATIONS INSTRUCTIONS:\nWhen answering using the DuckDuckGo / You.com / Internet Web Grounding Results context, you MUST use inline markdown links for citations, formatted exactly as `[[1] Source Title](URL)`. DO NOT output a '### References' section at the end. Place these inline citation links right next to the facts inside your text to anchor your assertions firmly (e.g. `apples are red [[1] Apple Wiki](https://example.com/apple)`).";
+      }
+
       const messagesPayload = [
         {
           role: "system",
-          content: systemInstruction,
+          content: activeSystemInstruction,
         },
         ...openaiMessages
       ];
@@ -2155,44 +2653,51 @@ ${researchContext}
       res.setHeader('Connection', 'keep-alive');
 
       let completionStream;
-      let usedGeminiFallback = false;
+      let usedGeminiFallback = !!(attachment && attachment.mimetype?.startsWith("image/"));
+      const tryMistralFirst = !usedGeminiFallback;
 
-      try {
-        console.log("[LLM] Streaming chat with Mistral...");
-        const client = getMistralClient();
-        completionStream = await client.chat.completions.create({
-          model: "ministral-8b-latest",
-          messages: messagesPayload,
-          temperature: 0.7,
-          stream: true
-        });
-      } catch (err: any) {
-        console.warn("[LLM] Mistral streaming failed, falling back to Baseten:", err.message || err);
+      if (tryMistralFirst) {
         try {
-          const client = getBasetenClient();
+          console.log(`[LLM] Streaming chat with Mistral (mistral-large-latest)...`);
+          const client = getMistralClient();
           completionStream = await client.chat.completions.create({
-            model: process.env.BASETEN_MODEL || "meta-llama/Meta-Llama-3.1-70B-Instruct",
+            model: "mistral-large-latest",
             messages: messagesPayload,
             temperature: 0.7,
             stream: true
           });
-        } catch (err2: any) {
-          console.warn("[LLM] Baseten streaming fallback failed too, falling back to Gemini:", err2.message || err2);
-          usedGeminiFallback = true;
+        } catch (err: any) {
+          console.warn(`[LLM] Mistral large streaming failed, trying with default ministral-8b-latest:`, err.message || err);
+          try {
+            const client = getMistralClient();
+            completionStream = await client.chat.completions.create({
+              model: "ministral-8b-latest",
+              messages: messagesPayload,
+              temperature: 0.7,
+              stream: true
+            });
+          } catch (err2: any) {
+            console.warn("[LLM] Mistral streaming fallback failed too, falling back to Gemini:", err2.message || err2);
+            usedGeminiFallback = true;
+          }
         }
       }
 
-      if (usedGeminiFallback) {
-        // Ultimate fallback to Gemini-3.5-flash so the chat ALWAYS works!
-        console.log("[LLM] Falling back to Gemini as ultimate backup safety...");
+      if (!tryMistralFirst || usedGeminiFallback) {
+        console.log(`[LLM] Streaming chat with Gemini...`);
         
         // Convert messages list to Gemini alternated format
-        const geminiContents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
+        const geminiContents: Array<{ role: "user" | "model"; parts: Array<any> }> = [];
         for (const msg of openaiMessages) {
           const role = msg.role === "assistant" || msg.role === "model" ? "model" : "user";
           const text = msg.content || "";
           if (geminiContents.length > 0 && geminiContents[geminiContents.length - 1].role === role) {
-            geminiContents[geminiContents.length - 1].parts[0].text += "\n\n" + text;
+            const firstPart = geminiContents[geminiContents.length - 1].parts[0];
+            if (firstPart && 'text' in firstPart) {
+              firstPart.text += "\n\n" + text;
+            } else {
+              geminiContents[geminiContents.length - 1].parts.push({ text: text });
+            }
           } else {
             geminiContents.push({
               role: role,
@@ -2201,13 +2706,59 @@ ${researchContext}
           }
         }
 
+        if (attachment && attachment.mimetype?.startsWith("image/")) {
+          try {
+            const fileData = await getFile(attachment.fileId);
+            if (fileData) {
+              const base64Data = fileData.buffer.toString("base64");
+              // Find the last user message in geminiContents to attach the image part
+              let addedToLast = false;
+              for (let i = geminiContents.length - 1; i >= 0; i--) {
+                if (geminiContents[i].role === "user") {
+                  geminiContents[i].parts.push({
+                    inlineData: {
+                      mimeType: fileData.mimetype,
+                      data: base64Data
+                    }
+                  });
+                  addedToLast = true;
+                  break;
+                }
+              }
+              if (!addedToLast) {
+                geminiContents.push({
+                  role: "user",
+                  parts: [
+                    { text: "[Attached Photo]" },
+                    {
+                      inlineData: {
+                        mimeType: fileData.mimetype,
+                        data: base64Data
+                      }
+                    }
+                  ]
+                });
+              }
+              console.log(`[GEMINI MULTIMODAL] Successfully attached image ${attachment.fileName} size ${fileData.buffer.length} to conversational payload.`);
+            }
+          } catch (err: any) {
+            console.error("[GEMINI MULTIMODAL] Error loading attachment for image integration:", err.message || err);
+          }
+        }
+
+        const geminiConfig: any = {
+          systemInstruction: activeSystemInstruction,
+          temperature: 0.7,
+        };
+
+        if (webSearchEnabled) {
+          geminiConfig.tools = [{ googleSearch: {} }];
+        }
+
         const responseStream = await ai.models.generateContentStream({
           model: "gemini-3.5-flash",
           contents: geminiContents,
-          config: {
-            systemInstruction: systemInstruction,
-            temperature: 0.7,
-          }
+          config: geminiConfig
         });
 
         for await (const chunk of responseStream) {

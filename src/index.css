@@ -173,6 +173,16 @@ body {
   text-decoration: underline;
 }
 
+.markdown-body a.citation-card-link {
+  color: #e0cfb8 !important;
+  text-decoration: none !important;
+}
+
+.markdown-body a.citation-card-link:hover {
+  color: #ffffff !important;
+  text-decoration: none !important;
+}
+
 /* Academic Table Styles */
 .markdown-body table {
   width: 100%;

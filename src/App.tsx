@@ -95,6 +95,12 @@ export interface ChatMessage {
   thought?: string;
   timestamp: number;
   isHidden?: boolean;
+  attachment?: {
+    fileId: string;
+    fileName: string;
+    mimetype: string;
+    url: string;
+  };
 }
 
 const linkifyHtml = (html: string): string => {
@@ -946,6 +952,7 @@ export default function App() {
   const [pdfNumPages, setPdfNumPages] = useState<number | null>(null);
   const [currentPdfPage, setCurrentPdfPage] = useState<number>(1);
   const [pdfScale, setPdfScale] = useState<number>(1);
+  const [pdfViewMode, setPdfViewMode] = useState<Record<string, "pdf" | "overview">>({});
   const [isSharingLoading, setIsSharingLoading] = useState(false);
   const [generatedLink, setGeneratedLink] = useState("");
   const [generatedLinkType, setGeneratedLinkType] = useState<
@@ -2094,6 +2101,8 @@ export default function App() {
     }
   });
   const [chatInput, setChatInput] = useState("");
+  const [selectedModel, setSelectedModel] = useState("auto");
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [assistantInput, setAssistantInput] = useState("");
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [researchStatus, setResearchStatus] = useState<
@@ -2105,6 +2114,12 @@ export default function App() {
   const [selectedFileLabel, setSelectedFileLabel] = useState<string | null>(
     null,
   );
+  const [attachedFile, setAttachedFile] = useState<{
+    fileId: string;
+    fileName: string;
+    mimetype: string;
+    url: string;
+  } | null>(null);
 
   const saveDraftToLibrary = async (tab: Tab) => {
     if (tab.type !== "document") return;
@@ -2803,6 +2818,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
       content: textToSend,
       timestamp: Date.now(),
       isHidden: options.isHidden ?? false,
+      attachment: attachedFile ? { ...attachedFile } : undefined,
     };
 
     updateChatMessages((prev) => [...prev, userMessage], false);
@@ -2865,6 +2881,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
     try {
       // Try hitting our real server-side Gemini research chat endpoint!
+      const currentAttachment = attachedFile ? {
+        fileId: attachedFile.fileId,
+        fileName: attachedFile.fileName,
+        mimetype: attachedFile.mimetype,
+        url: attachedFile.url
+      } : null;
+
       const response = await fetch("/api/research/chat", {
         method: "POST",
         headers: {
@@ -2873,7 +2896,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
         body: JSON.stringify({
           messages: [...messages, userMessage]
             .slice(-20)
-            .map((m) => ({ role: m.role, content: m.content })),
+            .map((m) => ({ 
+              role: m.role, 
+              content: m.content,
+              attachment: m.attachment ? { fileId: m.attachment.fileId, fileName: m.attachment.fileName, mimetype: m.attachment.mimetype } : undefined
+            })),
+          model: selectedModel,
+          webSearch: webSearchEnabled,
+          attachment: currentAttachment,
           context: {
             notes: [
               `Document Title: ${documentTitle}`,
@@ -2905,6 +2935,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
         }),
         signal: controller.signal,
       });
+
+      // Clear the uploader uis instantly after starting request
+      setAttachedFile(null);
 
       if (!response.ok) {
         throw new Error("API server returned status " + response.status);
@@ -3050,20 +3083,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                             // Auto-trigger messages for each found paper depending on if file downloaded successfully
                             newPapers.forEach((p) => {
-                              if (p.fileId) {
-                                setTimeout(() => {
-                                  const assistantMsg: ChatMessage = {
-                                    id: String(Date.now() + Math.random()),
-                                    role: "assistant",
-                                    content: `### 📄 New Research Mapped: ${p.title}\n\n**Overview:**\n\n${formatAbstractText(p.summary || "I have successfully indexed this paper. You can now ask me questions about its methodology or findings.")}`,
-                                    timestamp: Date.now(),
-                                  };
-                                  updateChatMessages(
-                                    (prev) => [...prev, assistantMsg],
-                                    false,
-                                  );
-                                }, 1000);
-                              } else {
+                              if (!p.fileId) {
                                 setTimeout(() => {
                                   const assistantMsg: ChatMessage = {
                                     id: String(Date.now() + Math.random()),
@@ -3081,7 +3101,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                             const newTabs = newPapers
                               .filter((p: any) => p.fileId)
-                              .map((p: any) => {
+                              .flatMap((p: any) => {
                                 let html = "";
                                 if (p.extractedText) {
                                   const pages = p.extractedText.split(
@@ -3128,16 +3148,27 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                   html += `</div>`;
                                 }
 
-                                return {
-                                  id: `view-${p.fileId}`,
-                                  type: "document" as const,
-                                  title: p.title,
-                                  content: html,
-                                  fileId: p.fileId,
-                                  mimetype: "application/pdf",
-                                  folderId:
-                                    selectedFolderId || folders[0]?.id || "f1",
-                                };
+                                const overviewHtml = markdownToHtml(`## ${p.title}\n\n**Overview:**\n\n${formatAbstractText(p.summary || "I have successfully indexed this paper.")}`);
+
+                                return [
+                                  {
+                                    id: `overview-${p.fileId}`,
+                                    type: "document" as const,
+                                    title: `Overview: ${p.title}`,
+                                    content: overviewHtml,
+                                    folderId: selectedFolderId || folders[0]?.id || "f1",
+                                  },
+                                  {
+                                    id: `view-${p.fileId}`,
+                                    type: "document" as const,
+                                    title: p.title,
+                                    content: html,
+                                    fileId: p.fileId,
+                                    mimetype: "application/pdf",
+                                    folderId:
+                                      selectedFolderId || folders[0]?.id || "f1",
+                                  }
+                                ];
                               });
 
                             if (newTabs.length > 0) {
@@ -3519,7 +3550,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
         type="file"
         ref={fileInputRef}
         className="hidden"
-        accept=".pdf,.doc,.docx"
+        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.html,.csv,.json"
         onChange={async (e) => {
           const uploaderId = currentUserIdRef.current;
           const file = e.target.files?.[0];
@@ -3579,6 +3610,25 @@ Once you have content, I can help you draft sections, summarize findings, or for
               if (data.success) {
                 const fileLabel = data.fileName;
                 const titlePlaceholder = fileLabel.replace(/\.[^/.]+$/, "");
+                const isImage = data.mimetype?.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp"].includes(fileLabel.toLowerCase().split('.').pop() || "");
+
+                if (isImage) {
+                  setAttachedFile({
+                    fileId: data.fileId,
+                    fileName: data.fileName,
+                    mimetype: data.mimetype,
+                    url: `/api/files/${data.fileId}`
+                  });
+                  showToast(`"${file.name}" attached successfully to chat.`, "success", 4000, toastId);
+                  return;
+                } else {
+                  setAttachedFile({
+                    fileId: data.fileId,
+                    fileName: data.fileName,
+                    mimetype: data.mimetype,
+                    url: `/api/files/${data.fileId}`
+                  });
+                }
 
                 let extractedText = "";
                 let summaryInfo = `This academic resource was uploaded and incorporated into your workspace. Select 'Ask Assistant' to summarize patterns or find citations.`;
@@ -5104,6 +5154,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   researchStatus={researchStatus}
                   currentUser={currentUser}
                   isOnline={isOnline}
+                  selectedModel={selectedModel}
+                  setSelectedModel={setSelectedModel}
+                  webSearchEnabled={webSearchEnabled}
+                  setWebSearchEnabled={setWebSearchEnabled}
+                  attachedFile={attachedFile}
+                  setAttachedFile={setAttachedFile}
+                  handlePaperclipClick={handlePaperclipClick}
                 />
               </div>
             ) : activeTab.type === "library" ? (
@@ -6437,67 +6494,67 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                   <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-4">
                     <div className="flex items-center text-sm font-medium text-zinc-400 select-none">
-                      <span className="text-zinc-200 min-w-[20px] text-center">
-                        {currentPdfPage}
-                      </span>
-                      <span className="mx-1.5 text-zinc-600">/</span>
-                      <span>{pdfNumPages || "-"}</span>
-                    </div>
-                    <div className="flex items-center box-border border border-[#27272a] rounded overflow-hidden">
-                      <button
-                        onClick={() =>
-                          setPdfScale(Math.max(0.25, pdfScale - 0.25))
-                        }
-                        disabled={pdfScale <= 0.25}
-                        className="w-7 h-7 flex items-center justify-center bg-[#1e1e1e] hover:bg-[#27272a] hover:text-white text-zinc-400 disabled:opacity-30 disabled:hover:bg-[#1e1e1e] disabled:hover:text-zinc-400 transition-colors"
-                        title="Zoom out"
-                      >
-                        <Icon icon="ph:minus" className="w-4 h-4" />
-                      </button>
-                      <div className="w-[1px] h-4 bg-[#27272a]" />
-                      <div className="w-[50px] text-center text-xs font-medium text-zinc-200">
-                        {Math.round(pdfScale * 100)}%
+                        <span className="text-zinc-200 min-w-[20px] text-center">
+                          {currentPdfPage}
+                        </span>
+                        <span className="mx-1.5 text-zinc-600">/</span>
+                        <span>{pdfNumPages || "-"}</span>
                       </div>
-                      <div className="w-[1px] h-4 bg-[#27272a]" />
-                      <button
-                        onClick={() =>
-                          setPdfScale(Math.min(5, pdfScale + 0.25))
-                        }
-                        disabled={pdfScale >= 5}
-                        className="w-7 h-7 flex items-center justify-center bg-[#1e1e1e] hover:bg-[#27272a] hover:text-white text-zinc-400 disabled:opacity-30 disabled:hover:bg-[#1e1e1e] disabled:hover:text-zinc-400 transition-colors"
-                        title="Zoom in"
-                      >
-                        <Icon icon="ph:plus" className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center box-border border border-[#27272a] rounded overflow-hidden">
+                        <button
+                          onClick={() =>
+                            setPdfScale(Math.max(0.25, pdfScale - 0.25))
+                          }
+                          disabled={pdfScale <= 0.25}
+                          className="w-7 h-7 flex items-center justify-center bg-[#1e1e1e] hover:bg-[#27272a] hover:text-white text-zinc-400 disabled:opacity-30 disabled:hover:bg-[#1e1e1e] disabled:hover:text-zinc-400 transition-colors"
+                          title="Zoom out"
+                        >
+                          <Icon icon="ph:minus" className="w-4 h-4" />
+                        </button>
+                        <div className="w-[1px] h-4 bg-[#27272a]" />
+                        <div className="w-[50px] text-center text-xs font-medium text-zinc-200">
+                          {Math.round(pdfScale * 100)}%
+                        </div>
+                        <div className="w-[1px] h-4 bg-[#27272a]" />
+                        <button
+                          onClick={() =>
+                            setPdfScale(Math.min(5, pdfScale + 0.25))
+                          }
+                          disabled={pdfScale >= 5}
+                          className="w-7 h-7 flex items-center justify-center bg-[#1e1e1e] hover:bg-[#27272a] hover:text-white text-zinc-400 disabled:opacity-30 disabled:hover:bg-[#1e1e1e] disabled:hover:text-zinc-400 transition-colors"
+                          title="Zoom in"
+                        >
+                          <Icon icon="ph:plus" className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="flex items-center box-border border border-[#27272a] rounded overflow-hidden">
+                        <button
+                          onClick={() => {
+                            const page = document.getElementById(
+                              `pdf-page-${Math.max(1, currentPdfPage - 1)}`,
+                            );
+                            if (page) page.scrollIntoView({ behavior: "smooth" });
+                          }}
+                          disabled={currentPdfPage <= 1}
+                          className="w-7 h-7 flex items-center justify-center bg-[#1e1e1e] hover:bg-[#27272a] hover:text-white text-zinc-400 disabled:opacity-30 disabled:hover:bg-[#1e1e1e] disabled:hover:text-zinc-400 transition-colors"
+                        >
+                          <Icon icon="ph:caret-up" className="w-4 h-4" />
+                        </button>
+                        <div className="w-[1px] h-4 bg-[#27272a]" />
+                        <button
+                          onClick={() => {
+                            const page = document.getElementById(
+                              `pdf-page-${Math.min(pdfNumPages || 1, currentPdfPage + 1)}`,
+                            );
+                            if (page) page.scrollIntoView({ behavior: "smooth" });
+                          }}
+                          disabled={currentPdfPage >= (pdfNumPages || 1)}
+                          className="w-7 h-7 flex items-center justify-center bg-[#1e1e1e] hover:bg-[#27272a] hover:text-white text-zinc-400 disabled:opacity-30 disabled:hover:bg-[#1e1e1e] disabled:hover:text-zinc-400 transition-colors"
+                        >
+                          <Icon icon="ph:caret-down" className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center box-border border border-[#27272a] rounded overflow-hidden">
-                      <button
-                        onClick={() => {
-                          const page = document.getElementById(
-                            `pdf-page-${Math.max(1, currentPdfPage - 1)}`,
-                          );
-                          if (page) page.scrollIntoView({ behavior: "smooth" });
-                        }}
-                        disabled={currentPdfPage <= 1}
-                        className="w-7 h-7 flex items-center justify-center bg-[#1e1e1e] hover:bg-[#27272a] hover:text-white text-zinc-400 disabled:opacity-30 disabled:hover:bg-[#1e1e1e] disabled:hover:text-zinc-400 transition-colors"
-                      >
-                        <Icon icon="ph:caret-up" className="w-4 h-4" />
-                      </button>
-                      <div className="w-[1px] h-4 bg-[#27272a]" />
-                      <button
-                        onClick={() => {
-                          const page = document.getElementById(
-                            `pdf-page-${Math.min(pdfNumPages || 1, currentPdfPage + 1)}`,
-                          );
-                          if (page) page.scrollIntoView({ behavior: "smooth" });
-                        }}
-                        disabled={currentPdfPage >= (pdfNumPages || 1)}
-                        className="w-7 h-7 flex items-center justify-center bg-[#1e1e1e] hover:bg-[#27272a] hover:text-white text-zinc-400 disabled:opacity-30 disabled:hover:bg-[#1e1e1e] disabled:hover:text-zinc-400 transition-colors"
-                      >
-                        <Icon icon="ph:caret-down" className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
                   <div className="flex items-center gap-3">
                     {!isSidePanelOpen && (
                       <button
@@ -7871,6 +7928,29 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         </div>
                       )}
                       {/* Text message */}
+                      {m.role === "user" && m.attachment && (
+                        <div className="mb-2 p-1.5 bg-[#18181b] rounded-lg border border-zinc-800 flex items-center gap-2 max-w-full">
+                          {m.attachment.mimetype?.startsWith("image/") ? (
+                            <img 
+                              src={m.attachment.url} 
+                              alt={m.attachment.fileName} 
+                              className="w-[52px] h-[52px] object-cover rounded border border-zinc-700 pointer-events-auto cursor-zoom-in"
+                              onClick={() => window.open(m.attachment!.url, "_blank")}
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded bg-zinc-805 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0">
+                              <Icon icon="ph:file-text" className="w-[18px] h-[18px]" />
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-semibold text-zinc-300 truncate pr-2">{m.attachment.fileName}</p>
+                            <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-wide">
+                              {m.attachment.mimetype?.startsWith("image/") ? "IMAGE PHOTO" : "DOCUMENT REFERENCE"}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                       <div
                         className={`select-text break-words ${m.role === "user" ? "whitespace-pre-wrap" : "markdown-body text-[#d4d4d8]"}`}
                       >
@@ -7913,14 +7993,32 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
             {/* Workspace Assistant Prompt Input Bar (Fixed at layout bottom) */}
             <div className="p-3.5 shrink-0 bg-[#121212]">
-              {selectedFileLabel && (
-                <div className="bg-[#18181b] border border-[#27272a] rounded px-2.5 py-1.5 text-xs text-[#a1a1aa] mb-2 flex items-center justify-between animate-fade-in">
-                  <span className="truncate">
-                    Attaching: {selectedFileLabel}
-                  </span>
+              {attachedFile && (
+                <div className="bg-[#18181b] border border-[#27272a] rounded px-2.5 py-1.5 text-xs text-[#a1a1aa] mb-2 flex items-center justify-between animate-fade-in gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {attachedFile.mimetype?.startsWith("image/") ? (
+                      <img 
+                        src={attachedFile.url} 
+                        alt={attachedFile.fileName} 
+                        className="w-10 h-10 object-cover rounded border border-zinc-700 shrink-0"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0">
+                        <Icon icon="ph:file-text" className="w-5 h-5" />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-semibold text-zinc-200 truncate pr-2">{attachedFile.fileName}</p>
+                      <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-wide">
+                        {attachedFile.mimetype?.startsWith("image/") ? "IMAGE PHOTO" : "DOCUMENT REFERENCE"}
+                      </p>
+                    </div>
+                  </div>
                   <button
-                    onClick={() => setSelectedFileLabel(null)}
-                    className="text-red-400 hover:text-red-300"
+                    onClick={() => setAttachedFile(null)}
+                    className="text-zinc-500 hover:text-zinc-350 cursor-pointer p-1 rounded hover:bg-[#222222]"
+                    title="Remove attachment"
                   >
                     <Icon icon="ph:x" className="w-3.5 h-3.5" />
                   </button>
@@ -7947,13 +8045,27 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                 {/* Actions and Paper attachment triggers inside input frame */}
                 <div className="flex justify-between items-center px-2 pb-2">
-                  <button
-                    onClick={handlePaperclipClick}
-                    className="text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#2d2d30] transition-colors p-[6px] rounded-md cursor-pointer"
-                    title="Upload Academic Reference PDF / Text Note"
-                  >
-                    <Icon icon="ph:paperclip" className="w-[18px] h-[18px]" />
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={handlePaperclipClick}
+                      className="text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#2d2d30] transition-colors p-[6px] rounded-md cursor-pointer flex items-center justify-center w-8 h-8 shrink-0 border border-transparent"
+                      title="Upload File or Photo"
+                    >
+                      <Icon icon="ph:plus-bold" className="w-[16px] h-[16px]" />
+                    </button>
+                    <button
+                      onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded-[6px] transition-colors text-[11px] font-semibold cursor-pointer border ${
+                        webSearchEnabled
+                          ? "bg-zinc-800 border-zinc-700 text-white"
+                          : "border-transparent text-[#71717a] hover:text-[#e4e4e7] bg-transparent hover:bg-[#2d2d30]"
+                      }`}
+                      title={webSearchEnabled ? "Disable web search grounding" : "Enable web search grounding"}
+                    >
+                      <Icon icon={webSearchEnabled ? "ph:globe-hemisphere-east-fill" : "ph:globe"} className="w-3.5 h-3.5 shrink-0" />
+                      <span>Web</span>
+                    </button>
+                  </div>
 
                   {isAiTyping ? (
                     <button
