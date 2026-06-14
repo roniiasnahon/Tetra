@@ -655,6 +655,20 @@ export default function App() {
     t ? t.replace(/[*#]/g, "").trim() : "";
 
   const [isAssistantOpen, setIsAssistantOpen] = useState(true);
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== "undefined" ? navigator.onLine : true);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
   const [showBuyCoffeeModal, setShowBuyCoffeeModal] = useState(false);
   const [supportAmountPaid, setSupportAmountPaid] = useState<string | null>(
     null,
@@ -3818,7 +3832,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   active: sidebarView === "library",
                 },
                 {
-                  icon: "ph:calculator",
+                  icon: "ph:squares-four",
                   label: "Tools",
                   onClick: () => {
                     let toolsTab = tabs.find((t) => t.type === "tools");
@@ -4621,7 +4635,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 ) : tab.type === "chat" ? (
                   <Icon icon="ph:chat-circle" className="w-3.5 h-3.5" />
                 ) : tab.type === "tools" ? (
-                  <Icon icon="ph:calculator" className="w-3.5 h-3.5" />
+                  <Icon icon="ph:squares-four" className="w-3.5 h-3.5" />
                 ) : (
                   <Icon icon="ph:pencil-line" className="w-3.5 h-3.5" />
                 )}
@@ -5089,6 +5103,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   }}
                   researchStatus={researchStatus}
                   currentUser={currentUser}
+                  isOnline={isOnline}
                 />
               </div>
             ) : activeTab.type === "library" ? (
@@ -7697,7 +7712,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
       {/* Right Section - AI Assistant Window Panel */}
       {isAssistantOpen && (
         <div className={`p-[4px] flex h-full shrink-0 ${isElectronApp ? "pt-[38px]" : ""}`}>
-          <div className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden animate-slide-in">
+          <div className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden animate-slide-in relative">
+            <div className={`flex flex-col h-full w-full transition-all duration-300 ${!isOnline ? "blur-[6px] select-none pointer-events-none" : ""}`}>
             {/* Assistant Header */}
             <div className={`h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212] relative ${isElectronApp ? "" : "[-webkit-app-region:drag]"}`}>
               <div className="relative flex-1 min-w-0 pr-4 [-webkit-app-region:no-drag]">
@@ -7979,6 +7995,26 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 </div>
               </div>
             </div>
+
+            </div>
+
+            {!isOnline && (
+              <div className="absolute inset-0 bg-transparent z-[99] flex flex-col items-center justify-center p-6 text-center animate-fade-in pointer-events-auto">
+                <div className="bg-[#1a1a1a]/95 border border-zinc-800 rounded-2xl p-6 max-w-xs flex flex-col items-center gap-3.5 shadow-xl select-none">
+                  <div className="w-11 h-11 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400">
+                    <Icon icon="ph:wifi-slash" className="w-[20px] h-[20px]" />
+                  </div>
+                  <div>
+                    <h3 className="text-white font-medium text-[13.5px] tracking-tight mb-1">
+                      You are currently offline
+                    </h3>
+                    <p className="text-zinc-500 text-[11px] leading-relaxed">
+                      Connect your account to the network to chat with the AI research assistant. Local notebook features, document drafting, and data analyses remain fully available.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
