@@ -594,7 +594,7 @@ export const Settings = ({
                     </div>
 
                     {/* Font Size adjustments */}
-                    <div className="flex items-center justify-between border-b border-[#3f3f3f]/60 pb-6">
+                    <div className="flex items-center justify-between pb-6">
                       <span className="text-[13px] font-medium text-[#e1e1e0]">Font size</span>
                       <div className="flex items-center gap-3">
                         <button 

@@ -4737,14 +4737,25 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
           {/* Tabs Container */}
           <div
-            className="flex-1 flex items-end h-full ml-1 gap-[2px] overflow-x-auto custom-scrollbar-h min-w-0 pr-24 [-webkit-app-region:no-drag]"
+            className="flex-1 flex items-end h-full ml-1 gap-[2px] overflow-x-auto custom-scrollbar-h min-w-0 [-webkit-app-region:no-drag]"
             style={{
+              paddingRight: isElectronApp 
+                ? (isAssistantOpen ? "150px" : "235px") 
+                : (isAssistantOpen ? "16px" : "96px"),
               WebkitMaskImage: !isAssistantOpen
-                ? "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 90px), rgba(0,0,0,0) 100%)"
-                : "none",
+                ? (isElectronApp
+                    ? "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 230px), rgba(0,0,0,0) calc(100% - 140px))"
+                    : "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 90px), rgba(0,0,0,0) 100%)")
+                : (isElectronApp
+                    ? "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 145px), rgba(0,0,0,0) 100%)"
+                    : "none"),
               maskImage: !isAssistantOpen
-                ? "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 90px), rgba(0,0,0,0) 100%)"
-                : "none",
+                ? (isElectronApp
+                    ? "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 230px), rgba(0,0,0,0) calc(100% - 140px))"
+                    : "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 90px), rgba(0,0,0,0) 100%)")
+                : (isElectronApp
+                    ? "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 145px), rgba(0,0,0,0) 100%)"
+                    : "none"),
             }}
           >
             {tabs.map((tab) => (
