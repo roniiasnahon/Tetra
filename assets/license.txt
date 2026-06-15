@@ -1,0 +1,15 @@
+COSMWISE END-USER LICENSE AGREEMENT (EULA)
+
+Please read the following terms and conditions carefully before installing or using the Cosmiwise application.
+
+1. LICENSE GRANT
+Cosmiwise grants you a personal, non-exclusive, non-transferable, limited license to download, install and use the Software solely for your personal or internal business purposes.
+
+2. RESTRICTIONS
+You agree not to modify, reverse engineer, decompile, or disassemble the Software, or attempt to derive the source code of the Software.
+
+3. DISCLAIMER OF WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
+
+4. LIMITATION OF LIABILITY
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE.

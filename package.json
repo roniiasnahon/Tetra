@@ -64,5 +64,58 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
+  },
+  "build": {
+    "appId": "com.cosmiwise.app",
+    "productName": "Cosmiwise",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "cosmi.png",
+      "cosmi.ico",
+      "dist/**/*"
+    ],
+    "win": {
+      "icon": "cosmi.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "icon": "cosmi.png",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "linux": {
+      "icon": "cosmi.png",
+      "target": [
+        "AppImage",
+        "deb",
+        "zip"
+      ],
+      "maintainer": "Jam <jam@cosmiwise.app>",
+      "category": "Utility"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Cosmiwise",
+      "installerIcon": "cosmi.ico",
+      "uninstallerIcon": "cosmi.ico",
+      "installerHeader": "assets/installerHeader.bmp",
+      "installerSidebar": "assets/installerSidebar.bmp",
+      "uninstallerSidebar": "assets/uninstallerSidebar.bmp",
+      "license": "assets/license.txt",
+      "runAfterFinish": true
+    }
   }
 }
