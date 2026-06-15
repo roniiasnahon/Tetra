@@ -5,7 +5,21 @@ import { Icon } from '@iconify/react';
 
 const previewCache = new Map<string, any>();
 
-const CitationLink = ({ num, text, href, hostname }: { num: string; text: string; href: string; hostname: string }) => {
+const CitationLink = ({ 
+  num, 
+  text, 
+  href, 
+  hostname, 
+  isStandardLink, 
+  children 
+}: { 
+  num?: string; 
+  text?: string; 
+  href: string; 
+  hostname: string; 
+  isStandardLink?: boolean; 
+  children?: React.ReactNode 
+}) => {
   const [isHovered, setIsHovered] = useState(false);
   const [previewData, setPreviewData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -159,31 +173,43 @@ const CitationLink = ({ num, text, href, hostname }: { num: string; text: string
   return (
     <span 
       ref={triggerRef}
-      className="relative inline-block align-middle select-none mx-0.5"
+      className={isStandardLink ? "relative inline select-text" : "relative inline-block align-middle select-none mx-0.5"}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      <a 
-        href={href} 
-        target="_blank" 
-        rel="noopener noreferrer" 
-        className="citation-card-link inline-flex items-center gap-1.5 bg-[#27272a] hover:bg-[#323235] px-2.5 py-1 rounded-full text-[12px] font-normal border border-zinc-700/30 transition-all align-middle select-none" 
-        title={text ? `${text} (${href})` : href}
-      >
-        {hostname && (
-          <img 
-            src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`} 
-            alt="" 
-            className="w-3.5 h-3.5 rounded-[3px] opacity-90 group-hover:opacity-100 transition-opacity shrink-0 object-contain select-none" 
-            onError={(e) => {
-              (e.target as HTMLElement).style.display = 'none';
-            }}
-          />
-        )}
-        <span className="truncate max-w-[200px] leading-tight shrink-0 font-medium tracking-tight">
-          {text || hostname || 'Source'}
-        </span>
-      </a>
+      {isStandardLink ? (
+        <a 
+          href={href} 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="underline text-inherit cursor-pointer hover:text-[#f4f4f5] transition-colors inline" 
+          title={text ? `${text} (${href})` : href}
+        >
+          {children || text || href}
+        </a>
+      ) : (
+        <a 
+          href={href} 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="citation-card-link inline-flex items-center gap-1.5 bg-[#27272a] hover:bg-[#323235] px-2.5 py-1 rounded-full text-[12px] font-normal border border-zinc-700/30 transition-all align-middle select-none" 
+          title={text ? `${text} (${href})` : href}
+        >
+          {hostname && (
+            <img 
+              src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`} 
+              alt="" 
+              className="w-3.5 h-3.5 rounded-[3px] opacity-90 group-hover:opacity-100 transition-opacity shrink-0 object-contain select-none" 
+              onError={(e) => {
+                (e.target as HTMLElement).style.display = 'none';
+              }}
+            />
+          )}
+          <span className="truncate max-w-[200px] leading-tight shrink-0 font-medium tracking-tight">
+            {text || hostname || 'Source'}
+          </span>
+        </a>
+      )}
 
       {/* Floating Hover Card */}
       {isHovered && (
@@ -368,7 +394,33 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
         );
       }
 
-      return <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 hover:underline underline-offset-2 transition-colors inline-block align-baseline" {...props}>{children}</a>;
+      if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+        let hostname = '';
+        try {
+          hostname = new URL(href).hostname;
+        } catch {}
+        return (
+          <CitationLink 
+            href={href} 
+            hostname={hostname} 
+            isStandardLink={true}
+          >
+            {children}
+          </CitationLink>
+        );
+      }
+
+      return (
+        <a 
+          href={href} 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="underline text-inherit cursor-pointer hover:text-[#f4f4f5] transition-colors inline" 
+          {...props}
+        >
+          {children}
+        </a>
+      );
     },
     strong: ({children}: any) => <strong className="font-semibold text-white">{children}</strong>,
     table: ({ children }: any) => (

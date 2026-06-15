@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Icon } from '@iconify/react';
-import { Eye, EyeOff, Check, AlertCircle, ArrowLeft, Database, Sparkles } from 'lucide-react';
+import { MaterialIcon } from './MaterialIcon';
 import { auth, googleProvider, signInWithPopup } from '../firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 
@@ -635,7 +635,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
             }}
             className="absolute top-8 left-8 flex items-center gap-2 text-zinc-400 hover:text-white text-xs font-semibold cursor-pointer transition-colors"
           >
-            <ArrowLeft className="w-3.5 h-3.5" />
+            <MaterialIcon name="arrow_back" className="text-[14px]" />
             <span>Back to Login</span>
           </button>
         )}
@@ -670,7 +670,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
           {/* Error messages banner with zero glow borders */}
           {errorMessage && (
             <div className="mb-6 p-3 rounded-xl bg-red-950/20 border border-red-900/30 text-red-400 text-[12px] flex items-start gap-2.5 text-left leading-relaxed">
-              <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+              <MaterialIcon name="error" fill={true} className="text-[16px] text-red-500 shrink-0 mt-0.5" />
               <span>{errorMessage}</span>
             </div>
           )}
@@ -678,7 +678,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
           {/* Success messages banner */}
           {successMessage && (
             <div className="mb-6 p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/30 text-emerald-400 text-[12px] flex items-start gap-2.5 text-left leading-relaxed">
-              <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+              <MaterialIcon name="check" className="text-[16px] text-emerald-500 shrink-0 mt-0.5" />
               <span>{successMessage}</span>
             </div>
           )}
@@ -742,10 +742,10 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-3.5 text-zinc-550 hover:text-zinc-200 transition-colors cursor-pointer select-none"
+                  className="absolute right-3.5 top-3.5 text-zinc-550 hover:text-zinc-200 transition-colors cursor-pointer select-none flex items-center justify-center pt-0.5"
                   title={showPassword ? 'Hide password' : 'Show password'}
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword ? <MaterialIcon name="visibility_off" className="text-[18px]" /> : <MaterialIcon name="visibility" className="text-[18px]" />}
                 </button>
               </div>
             )}
@@ -779,10 +779,10 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3.5 top-3.5 text-zinc-550 hover:text-zinc-200 transition-colors cursor-pointer select-none"
+                  className="absolute right-3.5 top-3.5 text-zinc-550 hover:text-zinc-200 transition-colors cursor-pointer select-none flex items-center justify-center pt-0.5"
                   title={showConfirmPassword ? 'Hide password' : 'Show password'}
                 >
-                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showConfirmPassword ? <MaterialIcon name="visibility_off" className="text-[18px]" /> : <MaterialIcon name="visibility" className="text-[18px]" />}
                 </button>
               </div>
             )}
@@ -879,10 +879,10 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
         {/* --- PROFESSIONAL FOOTER --- */}
         <div className="mt-auto w-full max-w-[420px] pb-8 pt-12 flex flex-col items-center">
           <div className="flex items-center gap-6 mb-4">
-            <button className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold">Privacy</button>
-            <button className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold">Terms</button>
-            <button className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold">Support</button>
-            <button className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold">Status</button>
+            <a href="https://genlang.vercel.app/#privacy" className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold no-underline">Privacy</a>
+            <a href="https://genlang.vercel.app/#terms" className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold no-underline">Terms</a>
+            <a href="https://genlang.vercel.app/#why-students" className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold no-underline">Why This?</a>
+            <a href="https://genlang.vercel.app/#blog" className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold no-underline">Blog</a>
           </div>
           <div className="text-[10px] text-zinc-600 font-medium tracking-wide flex items-center gap-1.5 uppercase">
             <span>© 2026 Cosmi</span>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle2, AlertCircle, AlertTriangle, Info, X, Loader2 } from 'lucide-react';
+import { MaterialIcon } from './MaterialIcon';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning' | 'loading';
 
@@ -84,16 +84,16 @@ export function ToastContainer() {
   const getIcon = (type: ToastType) => {
     switch (type) {
       case 'success':
-        return <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />;
+        return <MaterialIcon name="check_circle" fill={true} className="text-emerald-400 text-[18px] shrink-0" />;
       case 'error':
-        return <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />;
+        return <MaterialIcon name="error" fill={true} className="text-rose-400 text-[18px] shrink-0" />;
       case 'warning':
-        return <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />;
+        return <MaterialIcon name="warning" fill={true} className="text-amber-400 text-[18px] shrink-0" />;
       case 'loading':
-        return <Loader2 className="w-4 h-4 text-emerald-400 animate-spin shrink-0" />;
+        return <MaterialIcon name="progress_activity" className="text-emerald-400 text-[18px] animate-spin shrink-0" />;
       case 'info':
       default:
-        return <Info className="w-4 h-4 text-blue-400 shrink-0" />;
+        return <MaterialIcon name="info" fill={true} className="text-blue-400 text-[18px] shrink-0" />;
     }
   };
 
@@ -110,9 +110,9 @@ export function ToastContainer() {
             initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.95, transition: { duration: 0.15 } }}
-            className="flex items-start gap-3 p-3.5 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl pointer-events-auto select-none"
+            className="flex items-center gap-3 p-3.5 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl pointer-events-auto select-none"
           >
-            <div className="mt-0.5 shrink-0">
+            <div className="shrink-0 flex items-center justify-center">
               {getIcon(toast.type)}
             </div>
             <div className="flex-1 min-w-0">
@@ -122,9 +122,9 @@ export function ToastContainer() {
             </div>
             <button
               onClick={() => removeToast(toast.id)}
-              className="p-0.5 text-zinc-500 hover:text-zinc-300 transition-colors rounded-lg bg-transparent border-0 cursor-pointer"
+              className="p-0.5 text-zinc-500 hover:text-zinc-300 transition-colors rounded-lg bg-transparent border-0 cursor-pointer flex items-center justify-center"
             >
-              <X className="w-3.5 h-3.5" />
+              <MaterialIcon name="close" className="text-[16px]" />
             </button>
           </motion.div>
         ))}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { auth, googleProvider } from '../firebase';
 import { signInWithPopup, User } from 'firebase/auth';
-import { CheckCircle2, Clipboard, ExternalLink } from 'lucide-react';
+import { MaterialIcon } from './MaterialIcon';
 
 interface DesktopAuthBridgeProps {
   onSuccess?: () => void;
@@ -183,7 +183,7 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
                 onClick={() => triggerDeepLink(customToken)}
                 className="px-5 py-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white transition-all text-xs font-semibold rounded-full flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] border border-zinc-800"
               >
-                <ExternalLink className="w-4 h-4" />
+                <MaterialIcon name="open_in_new" className="text-[16px]" />
                 Relaunch Desktop client
               </button>
 
@@ -191,7 +191,7 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
                 onClick={handleCopyToken}
                 className="px-5 py-3 bg-transparent text-zinc-500 hover:text-zinc-400 transition-colors text-xs font-semibold rounded-full flex items-center justify-center gap-2 cursor-pointer border-0 active:scale-[0.98]"
               >
-                <Clipboard className="w-4 h-4" />
+                <MaterialIcon name="content_copy" className="text-[16px]" />
                 {copied ? 'Copied Security Token!' : 'Copy Code (Fallback)'}
               </button>
             </div>
@@ -226,10 +226,10 @@ export const DesktopAuthBridge: React.FC<DesktopAuthBridgeProps> = () => {
           General Language
         </div>
         <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-zinc-500 font-normal">
-          <a href="#about" className="hover:text-zinc-300 transition-colors">About General Language</a>
-          <a href="#products" className="hover:text-zinc-300 transition-colors">General Language Products</a>
-          <a href="#privacy" className="hover:text-zinc-300 transition-colors">Privacy</a>
-          <a href="#terms" className="hover:text-zinc-300 transition-colors">Terms</a>
+          <a href="https://genlang.vercel.app/#about" className="hover:text-zinc-300 transition-colors">About General Language</a>
+          <a href="https://genlang.vercel.app/#home" className="hover:text-zinc-300 transition-colors">General Language Products</a>
+          <a href="https://genlang.vercel.app/#privacy" className="hover:text-zinc-300 transition-colors">Privacy</a>
+          <a href="https://genlang.vercel.app/#terms" className="hover:text-zinc-300 transition-colors">Terms</a>
         </div>
       </div>
     </div>

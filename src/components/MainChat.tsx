@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import { Icon } from '@iconify/react';
 import { Tab, ChatMessage } from '../App';
 import { TypewriterMarkdown } from './TypewriterMarkdown';
+import { DynamicShimmer } from './DynamicShimmer';
 
 interface MainChatProps {
   tab: Tab;
@@ -12,6 +13,7 @@ interface MainChatProps {
   setChatInput: (val: string) => void;
   isAiTyping: boolean;
   handleSendMessage: (customText?: string, options?: { isHidden?: boolean; fromSidePanel?: boolean }) => Promise<void>;
+  handleStopGeneration: () => void;
   researchStatus: 'fetching' | 'downloading' | 'polishing' | null;
   currentUser: any;
   isOnline?: boolean;
@@ -63,7 +65,8 @@ export const MainChat: React.FC<MainChatProps> = ({
   setWebSearchEnabled,
   attachedFile,
   setAttachedFile,
-  handlePaperclipClick
+  handlePaperclipClick,
+  handleStopGeneration
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
@@ -101,72 +104,78 @@ export const MainChat: React.FC<MainChatProps> = ({
                       : 'items-start'
                   } w-full`}
                 >
-                  <div className={`max-w-[85%] ${
-                    m.role === 'user' 
-                      ? 'bg-[#1a1a1a] text-white rounded-2xl px-5 py-3.5 border border-[#27272a]' 
-                      : 'w-full text-[#d4d4d8] py-2'
-                  } text-[15px] leading-[1.6]`}>
-                    {m.role === 'assistant' && m.thought && (
-                      <div className="mb-4">
-                        <details className="group [&_summary::-webkit-details-marker]:hidden">
-                          <summary className="flex items-center gap-2 cursor-pointer text-xs font-medium text-zinc-500 hover:text-zinc-400 transition-colors select-none w-fit">
-                            <Icon icon="ph:brain" className="w-4 h-4" />
-                            <span>Thought Process</span>
-                            <Icon icon="ph:caret-right" className="w-3 h-3 group-open:rotate-90 transition-transform" />
-                          </summary>
-                          <div className="mt-2 pl-3.5 border-l border-zinc-800 text-[13px] text-zinc-400 font-sans leading-relaxed markdown-body">
-                            <ReactMarkdown>{m.thought}</ReactMarkdown>
-                          </div>
-                        </details>
-                      </div>
-                    )}
-
-                    {m.role === 'user' && m.attachment && (
-                      <div className="mb-3.5 p-2 bg-[#222222] rounded-xl border border-zinc-800 flex items-center gap-3">
-                        {m.attachment.mimetype?.startsWith("image/") ? (
-                          <img 
-                            src={m.attachment.url} 
-                            alt={m.attachment.fileName} 
-                            className="w-16 h-16 object-cover rounded border border-zinc-700 cursor-pointer hover:border-zinc-500 transition-all"
-                            onClick={() => window.open(m.attachment!.url, "_blank")}
-                            referrerPolicy="no-referrer"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 rounded-lg bg-zinc-800 border border-zinc-705 flex items-center justify-center text-zinc-400 shrink-0 border-zinc-700">
+                  {/* Separate Attachment Bubble */}
+                  {m.role === 'user' && m.attachment && (
+                    <div className="mb-2 w-fit self-end">
+                      {m.attachment.mimetype?.startsWith("image/") ? (
+                        <img 
+                          src={m.attachment.url} 
+                          alt="attachment" 
+                          className="w-48 h-auto max-h-64 object-cover rounded-xl border border-zinc-800 cursor-zoom-in hover:border-zinc-500 transition-all pointer-events-auto"
+                          onClick={() => window.open(m.attachment!.url, "_blank")}
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="max-w-[85%] bg-[#1a1a1a] rounded-2xl p-2.5 border border-[#27272a] flex items-center gap-3 w-fit">
+                          <div className="w-10 h-10 rounded-lg bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0">
                             <Icon icon="ph:file-text" className="w-5 h-5" />
                           </div>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-semibold text-zinc-200 truncate pr-2">{m.attachment.fileName}</p>
-                          <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-wide">
-                            {m.attachment.mimetype?.startsWith("image/") ? "IMAGE PHOTO" : "DOCUMENT REFERENCE"}
-                          </p>
+                          <div className="min-w-0 flex-1 pr-2">
+                            <p className="text-xs font-semibold text-zinc-200 truncate pr-2 max-w-[150px]">{m.attachment.fileName}</p>
+                            <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-wide mt-0.5">
+                              DOCUMENT FILE
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    )}
-
-                    <div className={`select-text break-words ${m.role === 'user' ? 'whitespace-pre-wrap' : 'markdown-body text-[#d4d4d8]'}`}>
-                      {m.role === 'user' ? (
-                        renderLinkifiedText(m.content)
-                      ) : (
-                        <TypewriterMarkdown 
-                          content={m.content} 
-                          timestamp={m.timestamp} 
-                          isStreaming={isAiTyping && m.id === messages[messages.length - 1]?.id} 
-                        />
                       )}
                     </div>
-                  </div>
+                  )}
+
+                  {/* Message bubble */}
+                  {(!m.attachment || (m.content && m.content.trim().length > 0) || m.role !== 'user') && (
+                    <div className={`max-w-[85%] ${
+                      m.role === 'user' 
+                        ? 'bg-[#1a1a1a] text-white rounded-2xl px-5 py-3.5 border border-[#27272a]' 
+                        : 'w-full text-[#d4d4d8] py-2'
+                    } text-[15px] leading-[1.6]`}>
+                      {m.role === 'assistant' && m.thought && (
+                        <div className="mb-4">
+                          <details className="group [&_summary::-webkit-details-marker]:hidden">
+                            <summary className="flex items-center gap-2 cursor-pointer text-xs font-medium text-zinc-500 hover:text-zinc-400 transition-colors select-none w-fit">
+                              <Icon icon="ph:brain" className="w-4 h-4" />
+                              <span>Thought Process</span>
+                              <Icon icon="ph:caret-right" className="w-3 h-3 group-open:rotate-90 transition-transform" />
+                            </summary>
+                            <div className="mt-2 pl-3.5 border-l border-zinc-800 text-[13px] text-zinc-400 font-sans leading-relaxed markdown-body">
+                              <ReactMarkdown>{m.thought}</ReactMarkdown>
+                            </div>
+                          </details>
+                        </div>
+                      )}
+
+                      <div className={`select-text break-words ${m.role === 'user' ? 'whitespace-pre-wrap' : 'markdown-body text-[#d4d4d8]'}`}>
+                        {m.role === 'user' ? (
+                          renderLinkifiedText(m.content)
+                        ) : (
+                          <TypewriterMarkdown 
+                            content={m.content} 
+                            timestamp={m.timestamp} 
+                            isStreaming={isAiTyping && m.id === messages[messages.length - 1]?.id} 
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
-              {(isAiTyping || researchStatus) && (
-                <div className="self-start py-2 max-w-full text-[14px] leading-relaxed select-none">
-                  <span className="shimmer-text font-medium text-zinc-500">
-                    {researchStatus === 'fetching' ? 'Fetching...' : 
-                     researchStatus === 'downloading' ? 'Downloading...' :
-                     researchStatus === 'polishing' ? 'Polishing...' : 
-                     'Processing input...'}
-                  </span>
+              {(isAiTyping || researchStatus) && !(messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content?.trim() && !researchStatus) && (
+                <div className="self-start py-2 max-w-full text-[14px] leading-relaxed select-none text-zinc-500">
+                  <DynamicShimmer
+                    isAiTyping={isAiTyping}
+                    researchStatus={researchStatus}
+                    messages={messages}
+                    webSearchEnabled={webSearchEnabled}
+                  />
                 </div>
               )}
               <div ref={messagesEndRef} />
@@ -177,34 +186,45 @@ export const MainChat: React.FC<MainChatProps> = ({
         <div className="shrink-0 p-6 flex flex-col items-center gap-4">
           <div className="w-full max-w-3xl bg-[#1a1a1a] border border-[#2d2d30] rounded-[28px] p-1.5 flex flex-col transition-all focus-within:border-zinc-700">
             {attachedFile && (
-              <div className="mx-3 mt-3 p-2 bg-[#222222] border border-[#2d2d30] rounded-2xl flex items-center justify-between gap-3 animate-fade-in">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  {attachedFile.mimetype?.startsWith("image/") ? (
+              <div className="mx-3 mt-3 animate-fade-in w-fit">
+                {attachedFile.mimetype?.startsWith("image/") ? (
+                  <div className="relative group w-fit">
                     <img 
                       src={attachedFile.url} 
-                      alt={attachedFile.fileName} 
-                      className="w-10 h-10 object-cover rounded-lg border border-zinc-700 shrink-0"
+                      alt="attachment preview" 
+                      className="w-16 h-16 object-cover rounded-xl border border-zinc-700"
                       referrerPolicy="no-referrer"
                     />
-                  ) : (
-                    <div className="w-10 h-10 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0">
-                      <Icon icon="ph:file-text" className="w-5 h-5" />
-                    </div>
-                  )}
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-zinc-200 truncate pr-2">{attachedFile.fileName}</p>
-                    <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
-                      {attachedFile.mimetype?.startsWith("image/") ? "IMAGE PHOTO" : "DOCUMENT REFERENCE"}
-                    </p>
+                    <button
+                      onClick={() => setAttachedFile(null)}
+                      className="absolute -top-2 -right-2 bg-zinc-800 border border-zinc-700 text-zinc-300 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-md hover:bg-zinc-700 cursor-pointer"
+                      title="Remove image"
+                    >
+                      <Icon icon="ph:x" className="w-3 h-3" />
+                    </button>
                   </div>
-                </div>
-                <button 
-                  onClick={() => setAttachedFile(null)}
-                  className="text-zinc-500 hover:text-zinc-300 transition-colors p-1 hover:bg-zinc-800 rounded-md shrink-0 cursor-pointer"
-                  title="Remove attachment"
-                >
-                  <Icon icon="ph:x" className="w-4 h-4" />
-                </button>
+                ) : (
+                  <div className="bg-[#1a1a1c] border border-[#2d2d30] rounded-2xl px-3 py-2 flex items-center justify-between gap-3 shadow-sm max-w-sm">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0 shadow-inner">
+                        <Icon icon="ph:file-text" className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0 pr-2">
+                        <p className="text-[13px] font-semibold text-zinc-200 truncate pr-2">{attachedFile.fileName}</p>
+                        <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider mt-0.5">
+                          DOCUMENT FILE
+                        </p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => setAttachedFile(null)}
+                      className="text-zinc-500 hover:text-zinc-300 transition-colors p-1.5 hover:bg-zinc-800 rounded-lg shrink-0 cursor-pointer border border-transparent hover:border-zinc-700"
+                      title="Remove attachment"
+                    >
+                      <Icon icon="ph:x" className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -254,17 +274,27 @@ export const MainChat: React.FC<MainChatProps> = ({
               </div>
               
               <div className="flex items-center gap-2">
-                <button 
-                  onClick={onSend}
-                  disabled={!chatInput.trim() || isAiTyping}
-                  className={`p-2 bg-white text-zinc-950 rounded-full transition-all flex items-center justify-center w-9 h-9 ${
-                    chatInput.trim() && !isAiTyping
-                      ? 'opacity-100 hover:bg-zinc-200 cursor-pointer' 
-                      : 'opacity-40 cursor-not-allowed'
-                  }`}
-                >
-                  <Icon icon="ph:arrow-up-bold" className="w-5 h-5" />
-                </button>
+                {isAiTyping ? (
+                  <button 
+                    onClick={handleStopGeneration}
+                    className="bg-red-500/20 text-red-500 hover:bg-red-500/30 rounded-full transition-all flex items-center justify-center w-9 h-9 cursor-pointer relative ease-out duration-150"
+                  >
+                    <Icon icon="ph:spinner-gap" className="w-6 h-6 animate-spin absolute" />
+                    <Icon icon="ph:stop-fill" className="w-3 h-3" />
+                  </button>
+                ) : (
+                  <button 
+                    onClick={onSend}
+                    disabled={!chatInput.trim()}
+                    className={`p-2 bg-white text-zinc-950 rounded-full transition-all flex items-center justify-center w-9 h-9 ${
+                      chatInput.trim()
+                        ? 'opacity-100 hover:bg-zinc-200 cursor-pointer' 
+                        : 'opacity-40 cursor-not-allowed'
+                    }`}
+                  >
+                    <Icon icon="ph:arrow-up-bold" className="w-5 h-5" />
+                  </button>
+                )}
               </div>
             </div>
           </div>

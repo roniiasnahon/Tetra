@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import WaveSurfer from 'wavesurfer.js';
-import { Play, Pause } from 'lucide-react';
+import { MaterialIcon } from './MaterialIcon';
 
 interface AudioVisualizerPlayerProps {
   src: string;
@@ -80,9 +80,9 @@ export const AudioVisualizerPlayer: React.FC<AudioVisualizerPlayerProps> = ({ sr
           title={isPlaying ? 'Pause' : 'Play'}
         >
           {isPlaying ? (
-            <Pause className="w-3.5 h-3.5 fill-current text-zinc-100" />
+            <MaterialIcon name="pause" fill={true} className="text-[14px]" />
           ) : (
-            <Play className="w-3.5 h-3.5 fill-current text-zinc-100 ml-0.5" />
+            <MaterialIcon name="play_arrow" fill={true} className="text-[14px]" />
           )}
         </button>
 

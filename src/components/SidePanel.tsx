@@ -4,35 +4,67 @@ import remarkGfm from 'remark-gfm';
 import { showToast } from './Toast';
 import { AudioVisualizerPlayer } from './AudioVisualizerPlayer';
 import { Icon } from '@iconify/react';
-import { 
-  X, 
-  FileText, 
-  Clock, 
-  Globe, 
-  Calendar, 
-  Plus, 
-  Trash2, 
-  Copy, 
-  Check, 
-  RotateCcw, 
-  AlertCircle,
-  ExternalLink,
-  BookOpen,
-  HelpCircle,
-  CheckCircle2,
-  BrainCircuit,
-  FileQuestion,
-  User,
-  Info,
-  ChevronDown,
-  Music,
-  Image as ImageIcon,
-  Paperclip,
-  File,
-  Download,
-  Edit2,
-  Eye
-} from 'lucide-react';
+import { MaterialIcon } from './MaterialIcon';
+
+interface ShimProps extends React.HTMLAttributes<HTMLSpanElement> {
+  className?: string;
+  fill?: boolean;
+}
+
+const mapLucideToMaterialSize = (className: string = '') => {
+  let sizeClass = 'text-[18px]'; // default size replacing w-4 h-4
+  if (className.includes('w-3.5') || className.includes('h-3.5')) {
+    sizeClass = 'text-[15px]';
+  } else if (className.includes('w-3') || className.includes('h-3')) {
+    sizeClass = 'text-[13px]';
+  } else if (className.includes('w-5') || className.includes('h-5')) {
+    sizeClass = 'text-[20px]';
+  } else if (className.includes('w-6') || className.includes('h-6')) {
+    sizeClass = 'text-[24px]';
+  } else if (className.includes('w-8') || className.includes('h-8')) {
+    sizeClass = 'text-[32px]';
+  }
+  return `${sizeClass} ${className}`;
+};
+
+const makeIcon = (name: string, fillDefault = false) => {
+  return ({ className = '', fill = fillDefault, ...props }: ShimProps) => (
+    <MaterialIcon
+      name={name}
+      fill={fill}
+      className={mapLucideToMaterialSize(className)}
+      {...props}
+    />
+  );
+};
+
+const X = makeIcon('close');
+const FileText = makeIcon('description');
+const Clock = makeIcon('schedule');
+const Globe = makeIcon('language');
+const Calendar = makeIcon('calendar_today');
+const Plus = makeIcon('add');
+const Trash2 = makeIcon('delete');
+const Copy = makeIcon('content_copy');
+const Check = makeIcon('check');
+const RotateCcw = makeIcon('history');
+const AlertCircle = makeIcon('error', true);
+const ExternalLink = makeIcon('open_in_new');
+const BookOpen = makeIcon('menu_book');
+const HelpCircle = makeIcon('help');
+const CheckCircle2 = makeIcon('check_circle', true);
+const BrainCircuit = makeIcon('psychology');
+const FileQuestion = makeIcon('quiz');
+const User = makeIcon('person');
+const Info = makeIcon('info', true);
+const ChevronDown = makeIcon('expand_more');
+const Music = makeIcon('music_note');
+const ImageIcon = makeIcon('image');
+const Paperclip = makeIcon('attach_file');
+const File = makeIcon('drafts');
+const Download = makeIcon('download');
+const Edit2 = makeIcon('edit');
+const Eye = makeIcon('visibility');
 
 interface SidePanelProps {
   isOpen: boolean;

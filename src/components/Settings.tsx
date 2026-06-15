@@ -23,6 +23,8 @@ interface SettingsProps {
   setEditorFontSize: (val: number) => void;
   callMe: string;
   setCallMe: (val: string) => void;
+  storageMode: "local" | "database";
+  setStorageMode: (val: "local" | "database") => void;
 }
 
 type TabType = "general" | "account" | "privacy" | "capabilities" | "connectors" | "desktop";
@@ -37,15 +39,25 @@ export const Settings = ({
   editorFontSize,
   setEditorFontSize,
   callMe,
-  setCallMe
+  setCallMe,
+  storageMode,
+  setStorageMode
 }: SettingsProps) => {
   // Navigation & Search State
-  const [activeTab, setActiveTab] = useState<TabType>("general");
+  const [activeTab, setActiveTab ] = useState<TabType>("general");
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Storage Persistence Mode selection state
+  const [localStorageMode, setLocalStorageMode] = useState<"local" | "database">(() => {
+    return (localStorage.getItem("cosmi_settings_storage_mode") as "local" | "database") || storageMode || "local";
+  });
+  const [isStorageModeDropdownOpen, setIsStorageModeDropdownOpen] = useState(false);
 
   // Input States (with LocalStorage persistence)
   const [fullName, setFullName] = useState(() => {
-    return localStorage.getItem("cosmi_settings_full_name") || currentUser?.displayName || "";
+    const uid = currentUser?.uid || "guest";
+    // Prefer the Firebase display name if available, otherwise fallback to local storage
+    return currentUser?.displayName || localStorage.getItem(`cosmi_settings_full_name_${uid}`) || "";
   });
   const [workType, setWorkType] = useState(() => {
     return localStorage.getItem("cosmi_settings_work_desc") || "Other";
@@ -145,6 +157,9 @@ export const Settings = ({
   const handleSaveAllChanges = async () => {
     setIsSavingAll(true);
     try {
+      const uid = currentUser?.uid || "guest";
+      localStorage.setItem(`cosmi_settings_full_name_${uid}`, fullName);
+      localStorage.setItem(`cosmi_settings_call_me_${uid}`, callMe);
       localStorage.setItem("cosmi_settings_full_name", fullName);
       localStorage.setItem("cosmi_settings_call_me", callMe);
       localStorage.setItem("cosmi_settings_work_desc", workType);
@@ -160,6 +175,8 @@ export const Settings = ({
       localStorage.setItem("cosmi_desktop_pdf_engine", pdfEngine);
       localStorage.setItem("cosmi_desktop_download_dest", downloadDestination);
       localStorage.setItem("cosmi_desktop_window_theme", windowTheme);
+      localStorage.setItem("cosmi_settings_storage_mode", localStorageMode);
+      setStorageMode(localStorageMode);
 
       if (customAvatar) {
         localStorage.setItem("cosmi_settings_avatar_url", customAvatar);
@@ -194,7 +211,6 @@ export const Settings = ({
       case "font-sans": return "Inter (Sans)";
       case "font-mono": return "JetBrains Mono";
       case "font-jakarta": return "Plus Jakarta";
-      case "font-serif": return "Anthropic Serif";
       default: return "Plus Jakarta";
     }
   })();
@@ -291,10 +307,10 @@ export const Settings = ({
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-[1200px] max-w-full h-[820px] max-h-[95vh] bg-[#262626] text-white flex rounded-xl overflow-hidden shadow-2xl border border-[#3f3f3f]"
+        className="w-[1200px] max-w-full h-[820px] max-h-[95vh] bg-[#070707] text-white flex rounded-xl overflow-hidden shadow-2xl border border-[#27272a]"
       >
         {/* Sidebar */}
-        <div className="w-[260px] shrink-0 border-r border-[#3f3f3f] flex flex-col bg-[#1e1e1e]">
+        <div className="w-[260px] shrink-0 border-r border-[#27272a] flex flex-col bg-[#070707]">
           <div className="p-4">
             <div className="bg-[#2a2a2a] rounded-lg flex items-center px-3 py-1.5 border border-[#3f3f3f]">
               <Icon icon="ph:magnifying-glass" className="w-[16px] h-[16px] text-zinc-400 mr-2" />
@@ -340,7 +356,7 @@ export const Settings = ({
         </div>
         
         {/* Content Area */}
-        <div className="flex-1 flex flex-col bg-[#262626] rounded-l-md relative overflow-hidden h-full">
+        <div className="flex-1 flex flex-col bg-[#070707] rounded-l-md relative overflow-hidden h-full">
           {/* Close button with NO glows */}
           <button 
             onClick={onClose}
@@ -552,7 +568,6 @@ export const Settings = ({
                                 className="absolute right-0 top-full mt-1 w-[180px] bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1.5 flex flex-col gap-0.5 shadow-xl"
                               >
                                 {[
-                                  { label: "Anthropic Serif", value: "font-serif" },
                                   { label: "Inter (Sans)", value: "font-sans" },
                                   { label: "JetBrains Mono", value: "font-mono" },
                                   { label: "Plus Jakarta", value: "font-jakarta" }
@@ -1231,42 +1246,98 @@ export const Settings = ({
                       </AnimatePresence>
                     </div>
                   </div>
+
+                  {/* Dropdown 4: Storage Persistence Mode */}
+                  <div className="flex items-center justify-between border-b border-[#3f3f3f]/60 pb-6 relative">
+                    <div>
+                      <p className="text-[13px] font-medium text-[#e1e1e0]">Storage Persistence Mode</p>
+                      <p className="text-[12px] text-zinc-400 mt-1 leading-[1.4]">
+                        Configure where your researcher library and workspace states are saved. Default is <span className="font-mono text-[11px] text-[#e1e1e0] bg-zinc-800 px-1 py-0.5 rounded">Local</span> for fast reads.
+                      </p>
+                    </div>
+                    <div className="relative">
+                      <button 
+                        onClick={() => setIsStorageModeDropdownOpen(!isStorageModeDropdownOpen)}
+                        className="flex items-center gap-2 bg-[#3a3a3a] border border-[#4a4a4a] rounded-lg px-3 py-2 text-[13px] text-[#e1e1e0] focus:outline-none hover:border-[#666663] transition-colors shadow-sm min-w-[210px] justify-between cursor-pointer"
+                      >
+                        <span>{localStorageMode === "local" ? "Local (Fast Reads)" : "Database (Cloud Sync)"}</span>
+                        <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 transition-transform duration-200 ${isStorageModeDropdownOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      
+                      <AnimatePresence>
+                        {isStorageModeDropdownOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setIsStorageModeDropdownOpen(false)} />
+                            <motion.div 
+                              initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                              transition={{ duration: 0.12 }}
+                              className="absolute right-0 top-full mt-1 w-[220px] bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1.5 flex flex-col gap-0.5 shadow-xl"
+                            >
+                              {[
+                                { value: "local", label: "Local (Fast Reads)", description: "Instant local disk reads/writes" },
+                                { value: "database", label: "Database (Cloud Sync)", description: "Realtime Firebase backing model" }
+                              ].map((option) => (
+                                <button
+                                  key={option.value}
+                                  onClick={() => {
+                                    setLocalStorageMode(option.value as "local" | "database");
+                                    setIsStorageModeDropdownOpen(false);
+                                  }}
+                                  className={`w-full flex flex-col items-start px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
+                                    localStorageMode === option.value ? "bg-[#27272a] text-white" : "text-zinc-300 hover:text-white hover:bg-[#222222]"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between w-full">
+                                    <span className="text-[13px] font-medium">{option.label}</span>
+                                    {localStorageMode === option.value && <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100" />}
+                                  </div>
+                                  <span className="text-[10px] text-zinc-500 mt-0.5 leading-none">{option.description}</span>
+                                </button>
+                              ))}
+                            </motion.div>
+                          </>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
                 </div>
               </section>
             )}
 
             </div> {/* max-w-[700px] */}
-          </div> {/* scroll container */}
 
-          {/* STICKY BOTTOM FOOTER BAR */}
-          <div className="shrink-0 border-t border-[#3f3f3f] px-6 py-4 bg-[#1e1e1e] flex items-center justify-end z-10 select-none">
-            <div className="flex items-center gap-3">
-              <button 
-                onClick={onClose}
-                className="px-4 py-2 bg-transparent hover:bg-zinc-800 text-zinc-300 hover:text-white rounded-lg text-[13px] font-semibold transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={handleSaveAllChanges}
-                disabled={isSavingAll}
-                className="px-5 py-2 bg-zinc-200 hover:bg-white text-black font-bold rounded-lg text-[13px] transition-colors disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
-              >
-                {isSavingAll ? (
-                  <>
-                    <Icon icon="ph:spinner" className="w-4 h-4 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Icon icon="ph:floppy-disk" className="w-4 h-4" />
-                    Save Changes
-                  </>
-                )}
-              </button>
+            {/* NON-STICKY BOTTOM FOOTER BAR */}
+            <div className="mt-8 pt-6 border-t border-[#27272a] flex items-center justify-end select-none">
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={onClose}
+                  className="px-4 py-2 bg-transparent hover:bg-zinc-800 text-zinc-300 hover:text-white rounded-lg text-[13px] font-semibold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSaveAllChanges}
+                  disabled={isSavingAll}
+                  className="px-5 py-2 bg-zinc-200 hover:bg-white text-black font-bold rounded-lg text-[13px] transition-colors disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                >
+                  {isSavingAll ? (
+                    <>
+                      <Icon icon="ph:spinner" className="w-4 h-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Icon icon="ph:floppy-disk" className="w-4 h-4" />
+                      Save Changes
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
-          </div>
 
+          </div> {/* scroll container */}
         </div>
       </motion.div>
     </motion.div>

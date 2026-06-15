@@ -6,17 +6,54 @@ import remarkGfm from "remark-gfm";
 import { marked } from "marked";
 import { MainChat } from "./components/MainChat";
 import { TypewriterMarkdown } from "./components/TypewriterMarkdown";
+import { DynamicShimmer } from "./components/DynamicShimmer";
 import { motion, AnimatePresence } from "motion/react";
 import { Icon } from "@iconify/react";
-import {
-  Edit2,
-  ExternalLink,
-  Unlink,
-  Link as LinkIcon,
-  PanelRight,
-  Coffee,
-  X,
-} from "lucide-react";
+import { MaterialIcon } from "./components/MaterialIcon";
+
+interface ShimProps extends React.HTMLAttributes<HTMLSpanElement> {
+  className?: string;
+  fill?: boolean;
+  size?: number;
+}
+
+const mapLucideToMaterialSize = (className: string = '', size?: number) => {
+  if (size !== undefined) {
+    return `text-[${size}px] ${className}`;
+  }
+  let sizeClass = 'text-[18px]'; // default size replacing w-4 h-4
+  if (className.includes('w-3.5') || className.includes('h-3.5')) {
+    sizeClass = 'text-[15px]';
+  } else if (className.includes('w-3') || className.includes('h-3')) {
+    sizeClass = 'text-[13px]';
+  } else if (className.includes('w-5') || className.includes('h-5')) {
+    sizeClass = 'text-[20px]';
+  } else if (className.includes('w-6') || className.includes('h-6')) {
+    sizeClass = 'text-[24px]';
+  } else if (className.includes('w-8') || className.includes('h-8')) {
+    sizeClass = 'text-[32px]';
+  }
+  return `${sizeClass} ${className}`;
+};
+
+const makeIcon = (name: string, fillDefault = false) => {
+  return ({ className = '', fill = fillDefault, size, ...props }: ShimProps) => (
+    <MaterialIcon
+      name={name}
+      fill={fill}
+      className={mapLucideToMaterialSize(className, size)}
+      {...props}
+    />
+  );
+};
+
+const Edit2 = makeIcon('edit');
+const ExternalLink = makeIcon('open_in_new');
+const Unlink = makeIcon('link_off');
+const LinkIcon = makeIcon('link');
+const PanelRight = makeIcon('view_sidebar');
+const Coffee = makeIcon('coffee');
+const X = makeIcon('close');
 import { StatisticsTools } from "./components/StatisticsTools";
 import { SidePanel } from "./components/SidePanel";
 import { Settings } from "./components/Settings";
@@ -937,7 +974,7 @@ export default function App() {
 
     showToast(`Closed "${closedTitle}"`, "info");
 
-    if (currentUser) {
+    if (currentUser && storageMode === "database") {
       const path = `users/${currentUser.uid}/chats/${id}`;
       try {
         await deleteDoc(doc(db, "users", currentUser.uid, "chats", id));
@@ -1361,6 +1398,9 @@ export default function App() {
     currentUser ? currentUser.uid : null,
   );
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [storageMode, setStorageMode] = useState<"local" | "database">(() => {
+    return (localStorage.getItem("cosmi_settings_storage_mode") as "local" | "database") || "local";
+  });
 
   const lastLocalEditTimeRef = useRef<number>(0);
   const lastSyncTimeRef = useRef<number>(0);
@@ -1464,7 +1504,7 @@ export default function App() {
   // Database helper wrappers to sync automatically to Firestore or guest local state
   const dbSetFolder = async (folder: FolderItem) => {
     const isRename = folders.some((f) => f.id === folder.id);
-    if (currentUser) {
+    if (currentUser && storageMode === "database") {
       try {
         await setDoc(doc(db, "users", currentUser.uid, "folders", folder.id), {
           id: folder.id,
@@ -1537,7 +1577,7 @@ export default function App() {
       });
     }
 
-    if (currentUser) {
+    if (currentUser && storageMode === "database") {
       try {
         await deleteDoc(doc(db, "users", currentUser.uid, "folders", folderId));
         for (const p of papersToDelete) {
@@ -1576,7 +1616,7 @@ export default function App() {
       (p) => p.title === paper.title && p.folderId !== paper.folderId,
     );
 
-    if (currentUser) {
+    if (currentUser && storageMode === "database") {
       try {
         await setDoc(doc(db, "users", currentUser.uid, "papers", paperId), {
           author: paper.author || "",
@@ -1688,7 +1728,7 @@ export default function App() {
       return updated;
     });
 
-    if (currentUser) {
+    if (currentUser && storageMode === "database") {
       try {
         await deleteDoc(doc(db, "users", currentUser.uid, "papers", paperId));
         showToast(`Document "${paperTitle}" deleted successfully`, "success");
@@ -1722,7 +1762,7 @@ export default function App() {
       unsubChats();
       unsubAnnos();
 
-      if (user) {
+      if (user && storageMode === "database") {
         // --- PRIVATE PERSISTENT MODE ---
         // Save/Sync profile
         try {
@@ -1861,6 +1901,27 @@ export default function App() {
           });
           window.dispatchEvent(new Event("annotationsUpdated"));
         });
+      } else if (user && storageMode === "local") {
+        // --- PRIVATE SECURED LOCAL STORAGE MODE FOR USER ---
+        setIsSessionLoaded(true);
+        try {
+          const cachedFolders = localStorage.getItem(`cosmi_folders_${user.uid}`);
+          setFolders(cachedFolders ? JSON.parse(cachedFolders) : [{ id: "f1", name: "My Research", createdAt: Date.now() - 172800000 }]);
+          const cachedPapers = localStorage.getItem(`cosmi_papers_${user.uid}`);
+          setPapers(cachedPapers ? JSON.parse(cachedPapers) : []);
+          const cachedTabs = localStorage.getItem(`cosmi_tabs_${user.uid}`);
+          setTabs(cachedTabs ? JSON.parse(cachedTabs) : [{ id: "initial-home", type: "home", title: "Home" }]);
+          const cachedActiveTabId = localStorage.getItem(`cosmi_activeTabId_${user.uid}`);
+          setActiveTabId(cachedActiveTabId || "initial-home");
+          const cachedMessages = localStorage.getItem(`cosmi_messages_${user.uid}`);
+          setMessages(cachedMessages ? JSON.parse(cachedMessages) : []);
+        } catch {
+          setFolders([{ id: "f1", name: "My Research", createdAt: Date.now() - 172800000 }]);
+          setPapers([]);
+          setTabs([{ id: "initial-home", type: "home", title: "Home" }]);
+          setActiveTabId("initial-home");
+          setMessages([]);
+        }
       } else {
         // --- GUEST / OFFLINE MODE ---
         setIsSessionLoaded(true);
@@ -1909,6 +1970,10 @@ export default function App() {
       setCurrentUser(user);
       currentUserIdRef.current = user ? user.uid : null;
       
+      const uid = user ? user.uid : "guest";
+      const userCallMe = localStorage.getItem(`cosmi_settings_call_me_${uid}`) || "";
+      setCallMe(userCallMe);
+      
       setupListeners(user);
 
       setIsAuthLoading(false);
@@ -1921,7 +1986,7 @@ export default function App() {
       unsubChats();
       unsubAnnos();
     };
-  }, []);
+  }, [storageMode]);
 
   const handleGoogleLogin = async () => {
     // Detect if we are inside Electron or Tauri
@@ -2105,7 +2170,15 @@ export default function App() {
   const [chatInput, setChatInput] = useState("");
   const [selectedModel, setSelectedModel] = useState("auto");
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
-  const [callMe, setCallMe] = useState(() => localStorage.getItem("cosmi_settings_call_me") || "");
+  const [callMe, setCallMe] = useState(() => {
+    try {
+      const cachedRef = localStorage.getItem("cosmi_user_snapshot");
+      const uid = cachedRef ? JSON.parse(cachedRef).uid : "guest";
+      return localStorage.getItem(`cosmi_settings_call_me_${uid}`) || "";
+    } catch {
+      return "";
+    }
+  });
   const [assistantInput, setAssistantInput] = useState("");
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [researchStatus, setResearchStatus] = useState<
@@ -2136,7 +2209,7 @@ export default function App() {
 
     // If the title changed, delete the old document
     if (tab.originalTitle && tab.originalTitle !== paperTitle) {
-    if (currentUser) {
+    if (currentUser && storageMode === "database") {
       const oldPaperId = encodeURIComponent(tab.originalTitle).replace(
         /\./g,
         "%2E",
@@ -2171,7 +2244,7 @@ export default function App() {
       folderId: tab.folderId || folders[0]?.id || "f1",
     };
 
-    if (currentUser) {
+    if (currentUser && storageMode === "database") {
       const path = `users/${currentUser.uid}/papers/${paperId}`;
       try {
         await setDoc(
@@ -2195,7 +2268,7 @@ export default function App() {
   };
 
   const saveChatToLibrary = async (targetUserId: string, chatTab: Tab) => {
-    if (!chatTab || chatTab.type !== "chat") return;
+    if (!chatTab || chatTab.type !== "chat" || storageMode !== "database") return;
     const path = `users/${targetUserId}/chats/${chatTab.id}`;
     try {
       const chatDocRef = doc(db, "users", targetUserId, "chats", chatTab.id);
@@ -2256,7 +2329,7 @@ export default function App() {
         setTabs(updatedTabs);
 
         // Also save to persistent chat library
-        if (currentUser) {
+        if (currentUser && storageMode === "database") {
           const chatTab = updatedTabs.find((t) => t.id === targetTabId);
           if (chatTab) saveChatToLibrary(currentUser.uid, chatTab);
         }
@@ -2280,7 +2353,7 @@ export default function App() {
   useEffect(() => {
     if (!isSessionLoaded || !tabs || tabs.length === 0) return;
 
-    if (currentUser) {
+    if (currentUser && storageMode === "database") {
       const handler = setTimeout(() => {
         const sessionRef = doc(
           db,
@@ -2824,6 +2897,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
       attachment: attachedFile ? { ...attachedFile } : undefined,
     };
 
+    setAttachedFile(null);
+
     updateChatMessages((prev) => [...prev, userMessage], false);
     if (!customText) {
       const isFromAssistant =
@@ -2864,7 +2939,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
               const updatedTabs = prev.map((t) =>
                 t.id === currentTabId ? { ...t, title: titleData.title } : t,
               );
-              if (currentUser) {
+              if (currentUser && storageMode === "database") {
                 const updatedTab = updatedTabs.find(
                   (t) => t.id === currentTabId,
                 );
@@ -2904,7 +2979,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
               content: m.content,
               attachment: m.attachment ? { fileId: m.attachment.fileId, fileName: m.attachment.fileName, mimetype: m.attachment.mimetype } : undefined
             })),
-          model: selectedModel,
+          model: (currentAttachment && !currentAttachment.mimetype?.startsWith("image/")) ? "mistral-large-latest" : selectedModel,
           webSearch: webSearchEnabled,
           attachment: currentAttachment,
           context: {
@@ -3631,6 +3706,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     mimetype: data.mimetype,
                     url: `/api/files/${data.fileId}`
                   });
+                  setSelectedModel("mistral-large-latest");
                 }
 
                 let extractedText = "";
@@ -4178,7 +4254,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         };
                         setTabs([...tabs, newChatTab]);
                         setActiveTabId(newId);
-                        if (currentUser) {
+                        if (currentUser && storageMode === "database") {
                           saveChatToLibrary(currentUser.uid, newChatTab);
                         }
                       }}
@@ -5168,6 +5244,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   attachedFile={attachedFile}
                   setAttachedFile={setAttachedFile}
                   handlePaperclipClick={handlePaperclipClick}
+                  handleStopGeneration={() => {
+                    abortControllerRef.current?.abort();
+                    setIsAiTyping(false);
+                  }}
                 />
               </div>
             ) : activeTab.type === "library" ? (
@@ -6225,7 +6305,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                           window.dispatchEvent(new Event("annotationsUpdated"));
 
-                          if (currentUser) {
+                          if (currentUser && storageMode === "database") {
                             try {
                               await setDoc(
                                 doc(
@@ -6359,7 +6439,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             JSON.stringify([...currentAnnos, newAnno]),
                           );
                           window.dispatchEvent(new Event("annotationsUpdated"));
-                          if (currentUser) {
+                          if (currentUser && storageMode === "database") {
                             try {
                               await setDoc(
                                 doc(
@@ -7365,7 +7445,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setActiveAssistantTabId(newId);
                           setMessages([]);
                           setIsAssistantChatDropdownOpen(false);
-                          if (currentUser) {
+                          if (currentUser && storageMode === "database") {
                             saveChatToLibrary(currentUser.uid, newChatTab);
                           }
                         }}
@@ -7408,89 +7488,98 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   .map((m) => (
                     <div
                       key={m.id}
-                      className={`flex flex-col ${
-                        m.role === "user"
-                          ? "self-end max-w-[88%] bg-[#262626] text-white rounded-xl rounded-br-none p-3.5"
-                          : "self-start max-w-full bg-transparent text-[#d4d4d8] py-2"
-                      } text-[13px] leading-relaxed transition-all`}
+                      className={`flex flex-col w-full ${
+                        m.role === "user" ? "items-end" : "items-start"
+                      } gap-1.5`}
                     >
-                      {m.role === "assistant" && m.thought && (
-                        <div className="mb-3">
-                          <details className="group [&_summary::-webkit-details-marker]:hidden">
-                            <summary className="flex items-center gap-2 cursor-pointer text-xs font-medium text-[#71717a] hover:text-[#a1a1aa] transition-colors select-none w-fit">
-                              <Icon
-                                icon="ph:lightbulb"
-                                className="w-3.5 h-3.5"
-                              />
-                              <span>Thinking</span>
-                              <Icon
-                                icon="ph:caret-right"
-                                className="w-[10px] h-[10px] group-open:rotate-90 transition-transform"
-                              />
-                            </summary>
-                            <div className="mt-2 pl-3 border-l border-zinc-800 text-xs text-zinc-400 font-sans leading-relaxed markdown-body">
-                              <ReactMarkdown>{m.thought}</ReactMarkdown>
-                            </div>
-                          </details>
-                        </div>
-                      )}
-                      {/* Text message */}
+                      {/* Separate Attachment Bubble */}
                       {m.role === "user" && m.attachment && (
-                        <div className="mb-2 p-1.5 bg-[#18181b] rounded-lg border border-zinc-800 flex items-center gap-2 max-w-full">
+                        <div className="mb-0.5 w-fit">
                           {m.attachment.mimetype?.startsWith("image/") ? (
                             <img 
                               src={m.attachment.url} 
-                              alt={m.attachment.fileName} 
-                              className="w-[52px] h-[52px] object-cover rounded border border-zinc-700 pointer-events-auto cursor-zoom-in"
+                              alt="attachment" 
+                              className="w-40 h-auto max-h-56 object-cover rounded-xl border border-zinc-800 pointer-events-auto cursor-zoom-in"
                               onClick={() => window.open(m.attachment!.url, "_blank")}
                               referrerPolicy="no-referrer"
                             />
                           ) : (
-                            <div className="w-8 h-8 rounded bg-zinc-805 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0">
-                              <Icon icon="ph:file-text" className="w-[18px] h-[18px]" />
+                            <div className="max-w-[88%] bg-[#262626] text-white rounded-xl p-1.5 border border-zinc-800 flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-lg bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0">
+                                <Icon icon="ph:file-text" className="w-[18px] h-[18px]" />
+                              </div>
+                              <div className="min-w-0 flex-1 pr-2 mt-0.5">
+                                <p className="text-[11px] font-semibold text-zinc-300 truncate pr-2 max-w-[130px]">{m.attachment.fileName}</p>
+                                <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-wide">
+                                  DOCUMENT FILE
+                                </p>
+                              </div>
                             </div>
                           )}
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[11px] font-semibold text-zinc-300 truncate pr-2">{m.attachment.fileName}</p>
-                            <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-wide">
-                              {m.attachment.mimetype?.startsWith("image/") ? "IMAGE PHOTO" : "DOCUMENT REFERENCE"}
-                            </p>
+                        </div>
+                      )}
+
+                      {/* Text message bubble */}
+                      {(!m.attachment || (m.content && m.content.trim().length > 0) || m.role !== "user") && (
+                        <div
+                          className={`${
+                            m.role === "user"
+                              ? "self-end max-w-[88%] bg-[#262626] text-white rounded-xl rounded-br-none p-3.5"
+                              : "self-start max-w-full bg-transparent text-[#d4d4d8] py-2"
+                          } text-[13px] leading-relaxed transition-all`}
+                        >
+                          {m.role === "assistant" && m.thought && (
+                            <div className="mb-3">
+                              <details className="group [&_summary::-webkit-details-marker]:hidden">
+                                <summary className="flex items-center gap-2 cursor-pointer text-xs font-medium text-[#71717a] hover:text-[#a1a1aa] transition-colors select-none w-fit">
+                                  <Icon
+                                    icon="ph:lightbulb"
+                                    className="w-3.5 h-3.5"
+                                  />
+                                  <span>Thinking</span>
+                                  <Icon
+                                    icon="ph:caret-right"
+                                    className="w-[10px] h-[10px] group-open:rotate-90 transition-transform"
+                                  />
+                                </summary>
+                                <div className="mt-2 pl-3 border-l border-zinc-800 text-xs text-zinc-400 font-sans leading-relaxed markdown-body">
+                                  <ReactMarkdown>{m.thought}</ReactMarkdown>
+                                </div>
+                              </details>
+                            </div>
+                          )}
+                          <div
+                            className={`select-text break-words ${m.role === "user" ? "whitespace-pre-wrap" : "markdown-body text-[#d4d4d8]"}`}
+                          >
+                            {m.role === "user" ? (
+                              renderLinkifiedText(m.content)
+                            ) : (
+                              <TypewriterMarkdown
+                                content={m.content}
+                                timestamp={m.timestamp}
+                                onCitationClick={handleCitationClick}
+                                isStreaming={
+                                  isAiTyping &&
+                                  m.id === messages[messages.length - 1]?.id
+                                }
+                              />
+                            )}
                           </div>
                         </div>
                       )}
-                      <div
-                        className={`select-text break-words ${m.role === "user" ? "whitespace-pre-wrap" : "markdown-body text-[#d4d4d8]"}`}
-                      >
-                        {m.role === "user" ? (
-                          renderLinkifiedText(m.content)
-                        ) : (
-                          <TypewriterMarkdown
-                            content={m.content}
-                            timestamp={m.timestamp}
-                            onCitationClick={handleCitationClick}
-                            isStreaming={
-                              isAiTyping &&
-                              m.id === messages[messages.length - 1]?.id
-                            }
-                          />
-                        )}
-                      </div>
                     </div>
                   ))
               )}
 
               {/* Streaming loading animation state */}
-              {(isAiTyping || researchStatus) && (
+              {(isAiTyping || researchStatus) && !(messages[messages.length - 1]?.role === "assistant" && messages[messages.length - 1]?.content?.trim() && !researchStatus) && (
                 <div className="self-start bg-transparent py-2 max-w-full text-[13px] leading-relaxed select-none">
-                  <span className="shimmer-text font-jakarta font-medium">
-                    {researchStatus === "fetching"
-                      ? "Fetching..."
-                      : researchStatus === "downloading"
-                        ? "Downloading..."
-                        : researchStatus === "polishing"
-                          ? "Polishing..."
-                          : "Thinking..."}
-                  </span>
+                  <DynamicShimmer
+                    isAiTyping={isAiTyping}
+                    researchStatus={researchStatus}
+                    messages={messages}
+                    webSearchEnabled={webSearchEnabled}
+                  />
                 </div>
               )}
 
@@ -7501,34 +7590,45 @@ Once you have content, I can help you draft sections, summarize findings, or for
             {/* Workspace Assistant Prompt Input Bar (Fixed at layout bottom) */}
             <div className="p-3.5 shrink-0 bg-[#121212]">
               {attachedFile && (
-                <div className="bg-[#18181b] border border-[#27272a] rounded px-2.5 py-1.5 text-xs text-[#a1a1aa] mb-2 flex items-center justify-between animate-fade-in gap-3">
-                  <div className="flex items-center gap-2 min-w-0">
-                    {attachedFile.mimetype?.startsWith("image/") ? (
+                <div className="mb-2 w-fit px-1 pt-1 animate-fade-in">
+                  {attachedFile.mimetype?.startsWith("image/") ? (
+                    <div className="relative group w-fit">
                       <img 
                         src={attachedFile.url} 
-                        alt={attachedFile.fileName} 
-                        className="w-10 h-10 object-cover rounded border border-zinc-700 shrink-0"
+                        alt="attachment preview" 
+                        className="w-16 h-16 object-cover rounded-xl border border-zinc-700"
                         referrerPolicy="no-referrer"
                       />
-                    ) : (
-                      <div className="w-10 h-10 rounded bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0">
-                        <Icon icon="ph:file-text" className="w-5 h-5" />
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-semibold text-zinc-200 truncate pr-2">{attachedFile.fileName}</p>
-                      <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-wide">
-                        {attachedFile.mimetype?.startsWith("image/") ? "IMAGE PHOTO" : "DOCUMENT REFERENCE"}
-                      </p>
+                      <button
+                        onClick={() => setAttachedFile(null)}
+                        className="absolute -top-2 -right-2 bg-zinc-800 border border-zinc-700 text-zinc-300 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-md hover:bg-zinc-700 font-semibold cursor-pointer"
+                        title="Remove image"
+                      >
+                        <Icon icon="ph:x" className="w-3 h-3" />
+                      </button>
                     </div>
-                  </div>
-                  <button
-                    onClick={() => setAttachedFile(null)}
-                    className="text-zinc-500 hover:text-zinc-350 cursor-pointer p-1 rounded hover:bg-[#222222]"
-                    title="Remove attachment"
-                  >
-                    <Icon icon="ph:x" className="w-3.5 h-3.5" />
-                  </button>
+                  ) : (
+                    <div className="bg-[#1a1a1c] border border-zinc-800 rounded-2xl px-3 py-2 flex items-center justify-between gap-3 shadow-sm max-w-[240px]">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-xl bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0 shadow-inner">
+                          <Icon icon="ph:file-text" className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0 pr-2 flex flex-col justify-center">
+                          <p className="text-[12px] font-semibold text-zinc-200 truncate pr-1">{attachedFile.fileName}</p>
+                          <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest mt-0.5">
+                            DOCUMENT FILE
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setAttachedFile(null)}
+                        className="text-zinc-500 hover:text-zinc-300 cursor-pointer p-1.5 rounded-lg hover:bg-zinc-800 transition-colors border border-transparent hover:border-zinc-700"
+                        title="Remove file"
+                      >
+                        <Icon icon="ph:x" className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -7578,18 +7678,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     <button
                       onClick={() => {
                         abortControllerRef.current?.abort();
-                        if (assistantMessageIdRef.current) {
-                          updateChatMessages((prev) =>
-                            prev.map((m) =>
-                              m.id === assistantMessageIdRef.current
-                                ? { ...m, content: "You made me stop :(" }
-                                : m,
-                            ),
-                          );
-                        }
                         setIsAiTyping(false);
                       }}
-                      className="text-[#ef4444] hover:bg-[#2d2d30] transition-colors p-[6px] rounded-md cursor-pointer animate-pulse"
+                      className="text-[#ef4444] hover:bg-[#2d2d30] transition-colors p-[6px] rounded-md cursor-pointer relative"
                     >
                       <Icon
                         icon="ph:spinner-gap"
@@ -8054,6 +8145,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
             setEditorFontSize={setEditorFontSize}
             callMe={callMe}
             setCallMe={setCallMe}
+            storageMode={storageMode}
+            setStorageMode={setStorageMode}
           />
         )}
       </AnimatePresence>

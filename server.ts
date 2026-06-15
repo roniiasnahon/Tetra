@@ -538,7 +538,7 @@ const ai = new Proxy({} as GoogleGenAI, {
     if (!aiInstance) {
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        throw new Error("GEMINI_API_KEY is not defined. Please configure it in your environment/secrets in Vercel.");
+        throw new Error("GEMINI_API_KEY is not configured.");
       }
       aiInstance = new GoogleGenAI({
         apiKey: apiKey,
@@ -841,28 +841,31 @@ async function saveFile(fileId: string, data: { buffer: Buffer, mimetype: string
     console.error(`[STORAGE] Disk save failed for ${fileId}:`, diskErr);
   }
 
-  // 3. Upload to Mega Storage
-  try {
-    const mega = await getMegaClient();
-    console.log(`[STORAGE] Uploading ${fileId} to Mega Storage...`);
-    const uploadBuffer = Buffer.alloc(safeBuffer.length); // extra defensive deep copy for mega
-    safeBuffer.copy(uploadBuffer);
-    
-    await new Promise<void>((resolve, reject) => {
-      const stream = mega.root.upload({name: fileId, size: uploadBuffer.length}, uploadBuffer, (err: any) => {
-        if (err) return reject(err);
-        resolve();
+  // 3. Upload to Mega Storage in Background
+  (async () => {
+    try {
+      const mega = await getMegaClient();
+      console.log(`[STORAGE] Uploading ${fileId} to Mega Storage in background...`);
+      const uploadBuffer = Buffer.alloc(safeBuffer.length); // extra defensive deep copy for mega
+      safeBuffer.copy(uploadBuffer);
+      
+      if (!mega.root) throw new Error("mega.root is undefined, cannot upload");
+      await new Promise<void>((resolve, reject) => {
+        const stream = mega.root.upload({name: fileId, size: uploadBuffer.length}, uploadBuffer, (err: any) => {
+          if (err) return reject(err);
+          resolve();
+        });
+        // prevent unhandled stream errors in mega from crashing node
+        stream.on('error', (err: any) => {
+           console.warn(`[STORAGE] Stream error during mega upload for ${fileId}`, err.message);
+        });
       });
-      // prevent unhandled stream errors in mega from crashing node
-      stream.on('error', (err: any) => {
-         console.warn(`[STORAGE] Stream error during mega upload for ${fileId}`, err.message);
-      });
-    });
-    
-    console.log(`[STORAGE] Successfully uploaded ${fileId} to Mega Storage`);
-  } catch (storageErr: any) {
-    console.error(`[STORAGE] Mega Storage upload FAILED for ${fileId}:`, storageErr.message || storageErr);
-  }
+      
+      console.log(`[STORAGE] Successfully uploaded ${fileId} to Mega Storage`);
+    } catch (storageErr: any) {
+      console.error(`[STORAGE] Mega Storage upload FAILED for ${fileId}:`, storageErr.message || storageErr);
+    }
+  })();
 }
 
 async function getFile(fileId: string) {
@@ -899,7 +902,7 @@ async function getFile(fileId: string) {
   try {
     const mega = await getMegaClient();
     console.log(`[STORAGE] Fetching ${fileId} from Mega Storage...`);
-    const file = mega.root.children?.find((f: any) => f.name === fileId);
+    const file = mega.root?.children?.find((f: any) => f.name === fileId);
     if (file) {
       const buffer = await new Promise<Buffer>((resolve, reject) => {
         // In MegaJS, if a callback is passed to download(), it buffers the entire file and passes err, data (Buffer).
@@ -947,12 +950,10 @@ async function getFile(fileId: string) {
   try {
     console.log(`[STORAGE] File ID ${fileId} not found. Initiating Firestore papers collection query for self-healing...`);
     const customDbId = (firebaseConfig as any).firestoreDatabaseId;
-    let firestore;
-    if (customDbId) {
-      firestore = (admin.firestore as any)(admin.app(), customDbId);
-    } else {
-      firestore = admin.firestore();
-    }
+    const { getFirestore } = require("firebase-admin/firestore");
+    let firestore = customDbId 
+      ? getFirestore(admin.app(), customDbId) 
+      : admin.firestore();
     const papersRef = firestore.collectionGroup("papers");
     const paperSnap = await papersRef.where("fileId", "==", fileId).limit(1).get();
     
@@ -1335,7 +1336,16 @@ async function startServer() {
   });
 
   // Safe upload route using standard multer middleware
-  app.post("/api/upload", upload.single("file"), async (req, res) => {
+  app.post("/api/upload", (req, res, next) => {
+    upload.single("file")(req, res, function (err) {
+      if (err instanceof multer.MulterError) {
+        return res.status(400).json({ success: false, error: err.message });
+      } else if (err) {
+        return res.status(500).json({ success: false, error: err.message });
+      }
+      next();
+    });
+  }, async (req, res) => {
     try {
       if (!req.file) {
         console.warn("[UPLOAD] No file was found in req.file");
@@ -2362,6 +2372,43 @@ CRITICAL RULES:
       let researchContext = "";
       if (attachment && !attachment.mimetype?.startsWith("image/")) {
         researchContext += `\n[SPECIAL FOCUS ATTACHMENT]: The user has attached the workspace document "${attachment.fileName}" (ID: ${attachment.fileId}) specifically to prompt this reply. Give absolute highest priority to files/data/claims contained within this file in your response.\n`;
+        try {
+          const fileData = await getFile(attachment.fileId);
+          if (fileData) {
+            let fileText = "";
+            const ext = attachment.fileName.toLowerCase().split('.').pop() || "";
+            if (ext === "docx") {
+              const resDoc = await mammoth.extractRawText({ buffer: fileData.buffer });
+              fileText = resDoc.value;
+            } else if (ext === "pdf") {
+              // For PDFs, we scan the workspace citations attached in the body context if present
+              if (context && context.citations) {
+                const matched = context.citations.find((c: any) => c.fileId === attachment.fileId);
+                if (matched && matched.fullText) {
+                  fileText = matched.fullText;
+                }
+              }
+            } else if (["txt", "md", "html", "htm", "json", "csv", "tsv", "xml", "css", "js", "ts", "py"].includes(ext)) {
+              fileText = fileData.buffer.toString("utf-8");
+            }
+
+            if (fileText && fileText.trim().length > 0) {
+              researchContext += `\n--- CONTENT OF ATTACHED FILE "${attachment.fileName}" ---\n${fileText.substring(0, 45000)}\n----------------------------------------\n`;
+              console.log(`[CHAT ATTACHMENT] Successfully parsed text (${fileText.length} characters) from document ${attachment.fileName} and attached to LLM payload.`);
+            } else {
+              // Fallback check in context citations
+              if (context && context.citations) {
+                const matched = context.citations.find((c: any) => c.fileId === attachment.fileId);
+                if (matched && matched.fullText) {
+                  fileText = matched.fullText;
+                  researchContext += `\n--- CONTENT OF ATTACHED FILE "${attachment.fileName}" ---\n${fileText.substring(0, 45000)}\n----------------------------------------\n`;
+                }
+              }
+            }
+          }
+        } catch (e: any) {
+          console.error("[CHAT ATTACHMENT] Failed server-side attachment parsing:", e.message || e);
+        }
       }
 
       if (webSearchEnabled) {
@@ -2654,31 +2701,43 @@ ${researchContext}
 
       let completionStream;
       let usedGeminiFallback = !!(attachment && attachment.mimetype?.startsWith("image/"));
-      const tryMistralFirst = !usedGeminiFallback;
+      let tryMistralFirst = !usedGeminiFallback;
+      let mistralModelToUse = "mistral-large-latest";
+
+      if (requestedModel && requestedModel !== "auto") {
+        if (requestedModel.includes("mistral")) {
+          tryMistralFirst = true;
+          usedGeminiFallback = false;
+          mistralModelToUse = requestedModel;
+        } else if (requestedModel.includes("gemini")) {
+          tryMistralFirst = false;
+          usedGeminiFallback = true;
+        }
+      }
 
       if (tryMistralFirst) {
         try {
-          console.log(`[LLM] Streaming chat with Mistral (mistral-large-latest)...`);
+          console.log(`[LLM] Streaming chat with Mistral (${mistralModelToUse})...`);
           const client = getMistralClient();
           completionStream = await client.chat.completions.create({
-            model: "mistral-large-latest",
+            model: mistralModelToUse,
             messages: messagesPayload,
             temperature: 0.7,
             stream: true
           });
         } catch (err: any) {
-          console.warn(`[LLM] Mistral large streaming failed, trying with default ministral-8b-latest:`, err.message || err);
-          try {
-            const client = getMistralClient();
-            completionStream = await client.chat.completions.create({
-              model: "ministral-8b-latest",
-              messages: messagesPayload,
-              temperature: 0.7,
-              stream: true
-            });
-          } catch (err2: any) {
-            console.warn("[LLM] Mistral streaming fallback failed too, falling back to Gemini:", err2.message || err2);
+          console.warn(`[LLM] Mistral streaming failed (${mistralModelToUse}):`, err.message || err);
+          
+          if (err.message?.includes("MISTRAL_API_KEY is not configured")) {
+             throw new Error("MISTRAL_API_KEY is not defined. Please configure it in your Settings.");
+          }
+
+          // ONLY fallback to Gemini if they didn't explicitly request a Mistral model
+          if (!requestedModel.includes("mistral")) {
+            console.warn("[LLM] Falling back to Gemini...");
             usedGeminiFallback = true;
+          } else {
+             throw new Error(`Mistral LLM failed: ${err.message || "Unknown error during streaming."}`);
           }
         }
       }

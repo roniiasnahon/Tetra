@@ -162,14 +162,14 @@ body {
 }
 
 .markdown-body a {
-  color: #60a5fa;
+  color: inherit;
   text-decoration: underline;
   cursor: pointer;
   transition: color 0.15s ease-in-out;
 }
 
 .markdown-body a:hover {
-  color: #93c5fd;
+  color: #f4f4f5;
   text-decoration: underline;
 }
 
