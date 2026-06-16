@@ -56,8 +56,8 @@ export const Settings = ({
   // Input States (with LocalStorage persistence)
   const [fullName, setFullName] = useState(() => {
     const uid = currentUser?.uid || "guest";
-    // Prefer the Firebase display name if available, otherwise fallback to local storage
-    return currentUser?.displayName || localStorage.getItem(`cosmi_settings_full_name_${uid}`) || "";
+    // Prefer saved local storage, otherwise fallback to Firebase display name
+    return localStorage.getItem(`cosmi_settings_full_name_${uid}`) || currentUser?.displayName || "";
   });
   const [workType, setWorkType] = useState(() => {
     return localStorage.getItem("cosmi_settings_work_desc") || "Other";
@@ -871,7 +871,7 @@ export const Settings = ({
                   </div>
 
                   {/* Switch 3: auto draft */}
-                  <div className="flex items-center justify-between border-b border-[#3f3f3f]/60 pb-6">
+                  <div className="flex items-center justify-between pb-6">
                     <div className="max-w-[480px]">
                       <p className="text-[13px] font-medium text-[#e1e1e0]">Automatic Draft and Local Synchronization</p>
                       <p className="text-[12px] text-zinc-400 mt-1 leading-[1.4]">
@@ -1248,7 +1248,7 @@ export const Settings = ({
                   </div>
 
                   {/* Dropdown 4: Storage Persistence Mode */}
-                  <div className="flex items-center justify-between border-b border-[#3f3f3f]/60 pb-6 relative">
+                  <div className="flex items-center justify-between pb-6 relative">
                     <div>
                       <p className="text-[13px] font-medium text-[#e1e1e0]">Storage Persistence Mode</p>
                       <p className="text-[12px] text-zinc-400 mt-1 leading-[1.4]">
@@ -1309,7 +1309,7 @@ export const Settings = ({
             </div> {/* max-w-[700px] */}
 
             {/* NON-STICKY BOTTOM FOOTER BAR */}
-            <div className="mt-8 pt-6 border-t border-[#27272a] flex items-center justify-end select-none">
+            <div className={`mt-8 pt-6 flex items-center justify-end select-none ${(activeTab === "capabilities" || activeTab === "desktop") ? "" : "border-t border-[#27272a]"}`}>
               <div className="flex items-center gap-3">
                 <button 
                   onClick={onClose}

@@ -974,6 +974,7 @@ export default function App() {
 
     showToast(`Closed "${closedTitle}"`, "info");
 
+    const uid = currentUser ? currentUser.uid : "guest";
     if (currentUser && storageMode === "database") {
       const path = `users/${currentUser.uid}/chats/${id}`;
       try {
@@ -981,6 +982,12 @@ export default function App() {
       } catch (err) {
         handleFirestoreError(err, OperationType.DELETE, path);
       }
+    } else {
+      setAllChats((prev) => {
+        const next = prev.filter((c) => c.id !== id);
+        localStorage.setItem(`cosmi_chats_${uid}`, JSON.stringify(next));
+        return next;
+      });
     }
     setIsChatMenuOpen(false);
     setIsAssistantChatDropdownOpen(false);
@@ -1209,6 +1216,64 @@ export default function App() {
         prev.map((t) => (t.id === activeTabId ? { ...t, content: html } : t)),
       );
     }
+  };
+
+  const handleInsertTable = () => {
+    if (!editorRef.current) return;
+    
+    // Ensure the editor has focus before trying selection
+    if (document.activeElement !== editorRef.current) {
+      editorRef.current.focus();
+    }
+    
+    const tableHTML = `<table style="width:100%; border-collapse:collapse; margin:16px 0; font-size:13px; border:1px solid #27272a; border-radius:8px; overflow:hidden;"><thead><tr style="background-color:#1a1a1c; border-bottom:1px solid #27272a;"><th style="padding:10px 12px; text-align:left; font-weight:600; color:#e4e4e7; border-right:1px solid #27272a;">Header 1</th><th style="padding:10px 12px; text-align:left; font-weight:600; color:#e4e4e7; border-right:1px solid #27272a;">Header 2</th><th style="padding:10px 12px; text-align:left; font-weight:600; color:#e4e4e7;">Header 3</th></tr></thead><tbody><tr style="border-bottom:1px solid #27272a;"><td style="padding:10px 12px; color:#d4d4d8; border-right:1px solid #27272a;">Row 1, Cell 1</td><td style="padding:10px 12px; color:#d4d4d8; border-right:1px solid #27272a;">Row 1, Cell 2</td><td style="padding:10px 12px; color:#d4d4d8;">Row 1, Cell 3</td></tr><tr style="border-bottom:1px solid #27272a;"><td style="padding:10px 12px; color:#d4d4d8; border-right:1px solid #27272a;">Row 2, Cell 1</td><td style="padding:10px 12px; color:#d4d4d8; border-right:1px solid #27272a;">Row 2, Cell 2</td><td style="padding:10px 12px; color:#d4d4d8;">Row 2, Cell 3</td></tr></tbody></table><p><br></p>`;
+    
+    let success = false;
+    try {
+      success = document.execCommand("insertHTML", false, tableHTML);
+    } catch (e) {
+      console.warn("execCommand failed:", e);
+    }
+    
+    // Fallback if execCommand fails (e.g. no selection range or unsupported)
+    if (!success) {
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        
+        // Ensure range is within our editor
+        if (editorRef.current.contains(range.commonAncestorContainer)) {
+          range.deleteContents();
+          const el = document.createElement("div");
+          el.innerHTML = tableHTML;
+          const frag = document.createDocumentFragment();
+          let node, lastNode;
+          while ((node = el.firstChild)) {
+            lastNode = frag.appendChild(node);
+          }
+          range.insertNode(frag);
+          if (lastNode) {
+            range.setStartAfter(lastNode);
+            range.setEndAfter(lastNode);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+        } else {
+          editorRef.current.innerHTML += tableHTML;
+        }
+      } else {
+        editorRef.current.innerHTML += tableHTML;
+      }
+    }
+    
+    // Sync state
+    const html = editorRef.current.innerHTML;
+    lastContentRef.current = html;
+    setDocumentContent(html);
+    setTabs((prev) =>
+      prev.map((t) => (t.id === activeTabId ? { ...t, content: html } : t)),
+    );
+    setDocSaveStatus("saving");
   };
 
   useEffect(() => {
@@ -1915,12 +1980,15 @@ export default function App() {
           setActiveTabId(cachedActiveTabId || "initial-home");
           const cachedMessages = localStorage.getItem(`cosmi_messages_${user.uid}`);
           setMessages(cachedMessages ? JSON.parse(cachedMessages) : []);
+          const cachedChats = localStorage.getItem(`cosmi_chats_${user.uid}`);
+          setAllChats(cachedChats ? JSON.parse(cachedChats) : []);
         } catch {
           setFolders([{ id: "f1", name: "My Research", createdAt: Date.now() - 172800000 }]);
           setPapers([]);
           setTabs([{ id: "initial-home", type: "home", title: "Home" }]);
           setActiveTabId("initial-home");
           setMessages([]);
+          setAllChats([]);
         }
       } else {
         // --- GUEST / OFFLINE MODE ---
@@ -1936,12 +2004,15 @@ export default function App() {
           setActiveTabId(cachedActiveTabId || "initial-home");
           const cachedMessages = localStorage.getItem(`cosmi_messages_guest`);
           setMessages(cachedMessages ? JSON.parse(cachedMessages) : []);
+          const cachedChats = localStorage.getItem(`cosmi_chats_guest`);
+          setAllChats(cachedChats ? JSON.parse(cachedChats) : []);
         } catch {
           setFolders([{ id: "f1", name: "My Research", createdAt: Date.now() - 172800000 }]);
           setPapers([]);
           setTabs([{ id: "initial-home", type: "home", title: "Home" }]);
           setActiveTabId("initial-home");
           setMessages([]);
+          setAllChats([]);
         }
       }
     };
@@ -2268,21 +2339,37 @@ export default function App() {
   };
 
   const saveChatToLibrary = async (targetUserId: string, chatTab: Tab) => {
-    if (!chatTab || chatTab.type !== "chat" || storageMode !== "database") return;
-    const path = `users/${targetUserId}/chats/${chatTab.id}`;
-    try {
-      const chatDocRef = doc(db, "users", targetUserId, "chats", chatTab.id);
-      await setDoc(
-        chatDocRef,
-        {
-          title: chatTab.title || "Untitled",
+    if (!chatTab || chatTab.type !== "chat") return;
+    
+    const uid = currentUser ? currentUser.uid : "guest";
+    
+    if (storageMode === "database" && currentUser) {
+      const path = `users/${targetUserId}/chats/${chatTab.id}`;
+      try {
+        const chatDocRef = doc(db, "users", targetUserId, "chats", chatTab.id);
+        await setDoc(
+          chatDocRef,
+          {
+            title: chatTab.title || "Untitled",
+            messages: chatTab.messages || [],
+            updatedAt: Date.now(),
+          },
+          { merge: true },
+        );
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, path);
+      }
+    } else {
+      setAllChats((prev) => {
+        const filtered = prev.filter((c) => c.id !== chatTab.id);
+        const updatedChat = {
+          ...chatTab,
           messages: chatTab.messages || [],
-          updatedAt: Date.now(),
-        },
-        { merge: true },
-      );
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, path);
+        };
+        const next = [updatedChat, ...filtered];
+        localStorage.setItem(`cosmi_chats_${uid}`, JSON.stringify(next));
+        return next;
+      });
     }
   };
 
@@ -2329,9 +2416,9 @@ export default function App() {
         setTabs(updatedTabs);
 
         // Also save to persistent chat library
-        if (currentUser && storageMode === "database") {
-          const chatTab = updatedTabs.find((t) => t.id === targetTabId);
-          if (chatTab) saveChatToLibrary(currentUser.uid, chatTab);
+        const chatTab = updatedTabs.find((t) => t.id === targetTabId);
+        if (chatTab) {
+          saveChatToLibrary(currentUser?.uid || "guest", chatTab);
         }
       }
       return next;
@@ -2591,7 +2678,7 @@ export default function App() {
     return "";
   });
 
-  // When activeTabId changes, pull the corresponding tab's values and title into states and the editor
+  // When activeTabId, tabs, or isSessionLoaded changes, pull the corresponding tab's values and title into states and the editor
   useEffect(() => {
     if (ignoreNextTabSyncRef.current) {
       ignoreNextTabSyncRef.current = false;
@@ -2613,7 +2700,7 @@ export default function App() {
       setDocumentContent(targetTab.content || "");
       setDocSaveStatus("saved");
       setChatInput("");
-      if (editorRef.current) {
+      if (editorRef.current && document.activeElement !== editorRef.current) {
         editorRef.current.innerHTML = targetTab.content || "";
         lastContentRef.current = targetTab.content || "";
       }
@@ -2626,14 +2713,14 @@ export default function App() {
       if (activeTabId !== "initial-home") {
         setDocumentTitle("Untitled");
         setDocumentContent("");
-        if (editorRef.current) {
+        if (editorRef.current && document.activeElement !== editorRef.current) {
           editorRef.current.innerHTML = "";
           lastContentRef.current = "";
         }
       }
     }
     loadedTabIdRef.current = activeTabId;
-  }, [activeTabId]);
+  }, [activeTabId, tabs, isSessionLoaded]);
 
   // Debounced auto-save of active document draft to Firestore/LocalStorage
   useEffect(() => {
@@ -2939,14 +3026,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
               const updatedTabs = prev.map((t) =>
                 t.id === currentTabId ? { ...t, title: titleData.title } : t,
               );
-              if (currentUser && storageMode === "database") {
-                const updatedTab = updatedTabs.find(
-                  (t) => t.id === currentTabId,
+              const updatedTab = updatedTabs.find(
+                (t) => t.id === currentTabId,
+              );
+              if (updatedTab) {
+                saveChatToLibrary(currentUser?.uid || "guest", updatedTab).catch(
+                  console.error,
                 );
-                if (updatedTab)
-                  saveChatToLibrary(currentUser.uid, updatedTab).catch(
-                    console.error,
-                  );
               }
               return updatedTabs;
             });
@@ -4254,9 +4340,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         };
                         setTabs([...tabs, newChatTab]);
                         setActiveTabId(newId);
-                        if (currentUser && storageMode === "database") {
-                          saveChatToLibrary(currentUser.uid, newChatTab);
-                        }
+                        saveChatToLibrary(currentUser?.uid || "guest", newChatTab);
                       }}
                       className="p-1 hover:bg-[#27272a] rounded text-[#71717a] hover:text-[#f4f4f5] transition-colors cursor-pointer"
                       title="New Chat"
@@ -4622,7 +4706,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         />
                       </div>
                       <span className="truncate font-medium flex-1 text-left">
-                        {currentUser.displayName ||
+                        {localStorage.getItem(`cosmi_settings_full_name_${currentUser?.uid || "guest"}`) ||
+                          currentUser.displayName ||
                           currentUser.email ||
                           "Google Account"}
                       </span>
@@ -4860,7 +4945,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     let timeGreeting = "Good evening";
                     if (hour < 12) timeGreeting = "Good morning";
                     else if (hour < 18) timeGreeting = "Good afternoon";
-                    const preferredName = callMe || (currentUser?.displayName ? currentUser.displayName.split(" ")[0] : "");
+                    const customFullName = localStorage.getItem(`cosmi_settings_full_name_${currentUser?.uid || "guest"}`);
+                    const preferredName = callMe || (customFullName ? customFullName.trim().split(" ")[0] : (currentUser?.displayName ? currentUser.displayName.split(" ")[0] : ""));
                     return (
                       <h1 className="text-3xl md:text-4xl text-[#f4f4f5] font-medium tracking-tight mb-8">
                         {timeGreeting}
@@ -5258,6 +5344,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   handleStopGeneration={() => {
                     abortControllerRef.current?.abort();
                     setIsAiTyping(false);
+                    updateChatMessages((prev) => prev, false);
                   }}
                 />
               </div>
@@ -6839,6 +6926,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     >
                       <Icon icon="ph:text-underline" className="w-4 h-4" />
                     </button>
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => handleInsertTable()}
+                      className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
+                      title="Insert Table"
+                    >
+                      <Icon icon="ph:table" className="w-4 h-4" />
+                    </button>
                   </div>
 
                   <div className="h-4 w-[1px] bg-[#2d2d30] shrink-0" />
@@ -7110,7 +7205,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             <div className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider mb-1 select-none text-left">
                               Insert
                             </div>
-                            <div className="grid grid-cols-3 gap-1">
+                            <div className="grid grid-cols-4 gap-1">
                               <button
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => {
@@ -7149,6 +7244,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 title="Horizontal Rule"
                               >
                                 <Icon icon="ph:minus" className="w-4 h-4" />
+                              </button>
+                              <button
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => {
+                                  handleInsertTable();
+                                  setIsMoreToolsOpen(false);
+                                }}
+                                className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
+                                title="Table"
+                              >
+                                <Icon icon="ph:table" className="w-4 h-4" />
                               </button>
                             </div>
                           </div>
@@ -7456,9 +7562,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setActiveAssistantTabId(newId);
                           setMessages([]);
                           setIsAssistantChatDropdownOpen(false);
-                          if (currentUser && storageMode === "database") {
-                            saveChatToLibrary(currentUser.uid, newChatTab);
-                          }
+                          saveChatToLibrary(currentUser?.uid || "guest", newChatTab);
                         }}
                         className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-[#222222] transition-colors cursor-pointer"
                         title="New Chat"
@@ -7690,6 +7794,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       onClick={() => {
                         abortControllerRef.current?.abort();
                         setIsAiTyping(false);
+                        updateChatMessages((prev) => prev, false);
                       }}
                       className="text-[#ef4444] hover:bg-[#2d2d30] transition-colors p-[6px] rounded-md cursor-pointer relative"
                     >
@@ -8105,7 +8210,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       ) : (
                         <span className="text-xs font-bold uppercase">
                           {
-                            (currentUser?.displayName ||
+                            (localStorage.getItem(`cosmi_settings_full_name_${currentUser?.uid || "guest"}`) ||
+                              currentUser?.displayName ||
                               currentUser?.email?.split("@")[0] ||
                               "Y")[0]
                           }
@@ -8114,7 +8220,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </div>
                     <div>
                       <p className="text-[11px] font-semibold text-[#f4f4f5] leading-none mb-1">
-                        {currentUser?.displayName ||
+                        {localStorage.getItem(`cosmi_settings_full_name_${currentUser?.uid || "guest"}`) ||
+                          currentUser?.displayName ||
                           currentUser?.email?.split("@")[0] ||
                           "Guest user"}{" "}
                         (You)
