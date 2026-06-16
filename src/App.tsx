@@ -882,14 +882,22 @@ export default function App() {
   >("left");
   const [isFontDropdownOpen, setIsFontDropdownOpen] = useState(false);
   const [isMoreToolsOpen, setIsMoreToolsOpen] = useState(false);
+  const [isTablePickerOpen, setIsTablePickerOpen] = useState(false);
+  const [tableGrid, setTableGrid] = useState({ r: 0, c: 0 });
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  // Link context menu and rename modal state
+  // Link and Table context menu and rename modal state
   const [linkContextMenu, setLinkContextMenu] = useState<{
     x: number;
     y: number;
     target: HTMLAnchorElement;
+  } | null>(null);
+  const [tableContextMenu, setTableContextMenu] = useState<{
+    x: number;
+    y: number;
+    target: HTMLTableElement;
+    cell: HTMLTableCellElement | null;
   } | null>(null);
   const [showLinkRenameModal, setShowLinkRenameModal] = useState(false);
   const [linkToRename, setLinkToRename] = useState<{
@@ -1113,6 +1121,7 @@ export default function App() {
   useEffect(() => {
     const handleOutsideClick = () => {
       setLinkContextMenu(null);
+      setTableContextMenu(null);
       setPdfContextMenu(null);
       setIsCreateDropdownOpen(false);
       setIsHomeCreateDropdownOpen(false);
@@ -1218,7 +1227,7 @@ export default function App() {
     }
   };
 
-  const handleInsertTable = () => {
+  const handleInsertTable = (rows: number = 2, cols: number = 3) => {
     if (!editorRef.current) return;
     
     // Ensure the editor has focus before trying selection
@@ -1226,7 +1235,23 @@ export default function App() {
       editorRef.current.focus();
     }
     
-    const tableHTML = `<table style="width:100%; border-collapse:collapse; margin:16px 0; font-size:13px; border:1px solid #27272a; border-radius:8px; overflow:hidden;"><thead><tr style="background-color:#1a1a1c; border-bottom:1px solid #27272a;"><th style="padding:10px 12px; text-align:left; font-weight:600; color:#e4e4e7; border-right:1px solid #27272a;">Header 1</th><th style="padding:10px 12px; text-align:left; font-weight:600; color:#e4e4e7; border-right:1px solid #27272a;">Header 2</th><th style="padding:10px 12px; text-align:left; font-weight:600; color:#e4e4e7;">Header 3</th></tr></thead><tbody><tr style="border-bottom:1px solid #27272a;"><td style="padding:10px 12px; color:#d4d4d8; border-right:1px solid #27272a;">Row 1, Cell 1</td><td style="padding:10px 12px; color:#d4d4d8; border-right:1px solid #27272a;">Row 1, Cell 2</td><td style="padding:10px 12px; color:#d4d4d8;">Row 1, Cell 3</td></tr><tr style="border-bottom:1px solid #27272a;"><td style="padding:10px 12px; color:#d4d4d8; border-right:1px solid #27272a;">Row 2, Cell 1</td><td style="padding:10px 12px; color:#d4d4d8; border-right:1px solid #27272a;">Row 2, Cell 2</td><td style="padding:10px 12px; color:#d4d4d8;">Row 2, Cell 3</td></tr></tbody></table><p><br></p>`;
+    let thead = `<thead><tr style="background-color:#1a1a1c; border-bottom:1px solid #27272a;">`;
+    for (let i = 0; i < cols; i++) {
+        thead += `<th style="padding:10px 12px; text-align:left; font-weight:600; color:#e4e4e7; border-right:${i < cols - 1 ? '1px solid #27272a' : 'none'};">Header ${i + 1}</th>`;
+    }
+    thead += `</tr></thead>`;
+
+    let tbody = `<tbody>`;
+    for (let r = 0; r < rows; r++) {
+        tbody += `<tr style="border-bottom:${r < rows - 1 ? '1px solid #27272a' : 'none'};">`;
+        for (let c = 0; c < cols; c++) {
+            tbody += `<td style="padding:10px 12px; color:#d4d4d8; border-right:${c < cols - 1 ? '1px solid #27272a' : 'none'};">Row ${r + 1}, Cell ${c + 1}</td>`;
+        }
+        tbody += `</tr>`;
+    }
+    tbody += `</tbody>`;
+
+    const tableHTML = `<table style="width:100%; border-collapse:collapse; margin:16px 0; font-size:13px; border:1px solid #27272a; border-radius:8px; overflow:hidden;">${thead}${tbody}</table><p><br></p>`;
     
     let success = false;
     try {
@@ -1274,6 +1299,33 @@ export default function App() {
       prev.map((t) => (t.id === activeTabId ? { ...t, content: html } : t)),
     );
     setDocSaveStatus("saving");
+  };
+
+  const handleRemoveTable = () => {
+    if (!editorRef.current) return;
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      let node = selection.anchorNode as Node | null;
+      let tableEl = null;
+      while (node && node !== editorRef.current) {
+        if (node.nodeName === "TABLE") {
+          tableEl = node as HTMLTableElement;
+          break;
+        }
+        node = node.parentNode;
+      }
+      if (tableEl) {
+        tableEl.remove();
+        // Sync state
+        const html = editorRef.current.innerHTML;
+        lastContentRef.current = html;
+        setDocumentContent(html);
+        setTabs((prev) =>
+          prev.map((t) => (t.id === activeTabId ? { ...t, content: html } : t)),
+        );
+        setDocSaveStatus("saving");
+      }
+    }
   };
 
   useEffect(() => {
@@ -6926,14 +6978,64 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     >
                       <Icon icon="ph:text-underline" className="w-4 h-4" />
                     </button>
-                    <button
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => handleInsertTable()}
-                      className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
-                      title="Insert Table"
-                    >
-                      <Icon icon="ph:table" className="w-4 h-4" />
-                    </button>
+                    <div className="relative flex items-center">
+                      <button
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setIsTablePickerOpen(!isTablePickerOpen);
+                          setTableGrid({ r: 0, c: 0 });
+                        }}
+                        className={`p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022] ${isTablePickerOpen ? "bg-[#2c2c2e] text-white" : ""}`}
+                        title="Insert Table"
+                      >
+                        <Icon icon="ph:table" className="w-4 h-4" />
+                      </button>
+                      <AnimatePresence>
+                        {isTablePickerOpen && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: -8, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                            transition={{ duration: 0.15, ease: "easeOut" }}
+                            className="absolute bottom-full left-0 mb-2 z-50 bg-[#1a1a1c] border border-[#2d2d30] rounded-lg p-3 shadow-xl flex flex-col gap-3 min-w-[140px]"
+                          >
+                            <div className="flex flex-col gap-1">
+                              {[...Array(Math.max(6, Math.min(10, tableGrid.r + 2)))].map((_, rowIndex) => (
+                                <div key={rowIndex} className="flex gap-1">
+                                  {[...Array(Math.max(6, Math.min(10, tableGrid.c + 2)))].map((_, colIndex) => (
+                                    <div
+                                      key={colIndex}
+                                      className={`w-4 h-4 border border-[#3f3f3f] rounded-[2px] cursor-pointer transition-colors ${
+                                        rowIndex < tableGrid.r && colIndex < tableGrid.c ? "bg-emerald-500/80 border-emerald-500" : "hover:bg-[#2a2a2c]"
+                                      }`}
+                                      onMouseEnter={() => setTableGrid({ r: rowIndex + 1, c: colIndex + 1 })}
+                                      onClick={() => {
+                                        handleInsertTable(rowIndex + 1, colIndex + 1);
+                                        setIsTablePickerOpen(false);
+                                      }}
+                                    />
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                            <div className="text-[11px] text-center text-zinc-400 font-mono">
+                              {tableGrid.r > 0 && tableGrid.c > 0 ? `${tableGrid.r} × ${tableGrid.c}` : "Select size"}
+                            </div>
+                            <div className="h-[1px] bg-[#2d2d30]" />
+                            <button
+                              onClick={() => {
+                                handleRemoveTable();
+                                setIsTablePickerOpen(false);
+                              }}
+                              className="text-xs text-red-400/90 hover:text-red-400 hover:bg-red-400/10 py-1.5 px-2 rounded w-full flex flex-row items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                            >
+                              <Icon icon="ph:trash" className="w-3.5 h-3.5" />
+                              Remove Table
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
                   </div>
 
                   <div className="h-4 w-[1px] bg-[#2d2d30] shrink-0" />
@@ -7248,7 +7350,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               <button
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => {
-                                  handleInsertTable();
+                                  setIsTablePickerOpen(true);
                                   setIsMoreToolsOpen(false);
                                 }}
                                 className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
@@ -7389,13 +7491,26 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         onContextMenu={(e) => {
                           const target = e.target as HTMLElement;
                           const anchor = target.closest("a");
+                          const table = target.closest("table") as HTMLTableElement | null;
                           if (anchor) {
                             e.preventDefault();
                             e.stopPropagation();
+                            setTableContextMenu(null);
                             setLinkContextMenu({
                               x: e.clientX,
                               y: e.clientY,
                               target: anchor,
+                            });
+                          } else if (table) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setLinkContextMenu(null);
+                            const cell = target.closest("th, td") as HTMLTableCellElement | null;
+                            setTableContextMenu({
+                              x: e.clientX,
+                              y: e.clientY,
+                              target: table,
+                              cell: cell,
                             });
                           }
                         }}
@@ -7857,6 +7972,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
             e.preventDefault();
             e.stopPropagation();
           }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+          }}
         >
           <button
             id="btn-rename-hyperlink"
@@ -7932,6 +8050,337 @@ Once you have content, I can help you draft sections, summarize findings, or for
           >
             <Unlink size={13} />
             <span>Remove link</span>
+          </button>
+        </div>
+      )}
+
+      {tableContextMenu && (
+        <div
+          id="table-context-menu"
+          className="fixed z-[9999] bg-[#121212] border border-[#27272a] rounded-lg py-1 min-w-[180px] text-[#e4e4e7] select-none text-xs font-medium shadow-2xl"
+          style={{
+            top: `${tableContextMenu.y}px`,
+            left: `${tableContextMenu.x}px`,
+          }}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+          }}
+        >
+          {tableContextMenu.cell && (
+            <>
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const targetCell = tableContextMenu.cell;
+                  const curRow = targetCell?.closest("tr");
+                  if (curRow && editorRef.current) {
+                    const numCells = curRow.children.length;
+                    const isHeader = curRow.closest("thead") !== null;
+                    const newRow = document.createElement("tr");
+                    newRow.style.borderBottom = "1px solid #27272a";
+                    for (let i = 0; i < numCells; i++) {
+                      const cellTag = isHeader ? "th" : "td";
+                      const newCell = document.createElement(cellTag);
+                      newCell.style.padding = "10px 12px";
+                      newCell.style.color = isHeader ? "#e4e4e7" : "#d4d4d8";
+                      if (isHeader) {
+                        newCell.style.fontWeight = "600";
+                        newCell.style.textAlign = "left";
+                      }
+                      if (i < numCells - 1) {
+                        newCell.style.borderRight = "1px solid #27272a";
+                      }
+                      newCell.innerHTML = isHeader ? `Header` : `Cell`;
+                      newRow.appendChild(newCell);
+                    }
+                    curRow.parentNode?.insertBefore(newRow, curRow);
+                    
+                    const html = editorRef.current.innerHTML;
+                    lastContentRef.current = html;
+                    setDocumentContent(html);
+                    setTabs((prev) =>
+                      prev.map((tb) =>
+                        tb.id === activeTabId ? { ...tb, content: html } : tb,
+                      ),
+                    );
+                    setDocSaveStatus("saving");
+                  }
+                  setTableContextMenu(null);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-[#202022] hover:text-white transition-colors flex items-center gap-2 cursor-pointer text-zinc-300"
+              >
+                <Icon icon="ph:arrow-fat-up-light" className="w-[14px] h-[14px] text-zinc-400" />
+                <span>Insert Row Above</span>
+              </button>
+
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const targetCell = tableContextMenu.cell;
+                  const curRow = targetCell?.closest("tr");
+                  if (curRow && editorRef.current) {
+                    const numCells = curRow.children.length;
+                    const newRow = document.createElement("tr");
+                    newRow.style.borderBottom = "1px solid #27272a";
+                    for (let i = 0; i < numCells; i++) {
+                      const cellTag = "td";
+                      const newCell = document.createElement(cellTag);
+                      newCell.style.padding = "10px 12px";
+                      newCell.style.color = "#d4d4d8";
+                      if (i < numCells - 1) {
+                        newCell.style.borderRight = "1px solid #27272a";
+                      }
+                      newCell.innerHTML = `Cell`;
+                      newRow.appendChild(newCell);
+                    }
+                    curRow.parentNode?.insertBefore(newRow, curRow.nextSibling);
+                    
+                    const html = editorRef.current.innerHTML;
+                    lastContentRef.current = html;
+                    setDocumentContent(html);
+                    setTabs((prev) =>
+                      prev.map((tb) =>
+                        tb.id === activeTabId ? { ...tb, content: html } : tb,
+                      ),
+                    );
+                    setDocSaveStatus("saving");
+                  }
+                  setTableContextMenu(null);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-[#202022] hover:text-white transition-colors flex items-center gap-2 cursor-pointer text-zinc-300"
+              >
+                <Icon icon="ph:arrow-fat-down-light" className="w-[14px] h-[14px] text-zinc-400" />
+                <span>Insert Row Below</span>
+              </button>
+
+              <div className="h-[1px] bg-[#2d2d30] my-1" />
+
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const targetCell = tableContextMenu.cell;
+                  const table = tableContextMenu.target;
+                  if (targetCell && table && editorRef.current) {
+                    const colIndex = targetCell.cellIndex;
+                    if (colIndex !== undefined && colIndex !== -1) {
+                      const rows = table.querySelectorAll("tr");
+                      rows.forEach((r) => {
+                        const cells = Array.from(r.children);
+                        const originCell = cells[colIndex];
+                        if (originCell) {
+                          const isHeader = originCell.nodeName === "TH";
+                          const newCell = document.createElement(isHeader ? "th" : "td");
+                          newCell.style.padding = "10px 12px";
+                          newCell.style.color = isHeader ? "#e4e4e7" : "#d4d4d8";
+                          newCell.innerHTML = isHeader ? "Header" : "Cell";
+                          if (isHeader) {
+                            newCell.style.fontWeight = "600";
+                            newCell.style.textAlign = "left";
+                          }
+                          r.insertBefore(newCell, originCell);
+                        }
+                      });
+
+                      table.querySelectorAll("tr").forEach((r) => {
+                        const cells = Array.from(r.children) as HTMLElement[];
+                        cells.forEach((cell, idx) => {
+                          cell.style.borderRight = idx === cells.length - 1 ? "none" : "1px solid #27272a";
+                        });
+                      });
+
+                      const html = editorRef.current.innerHTML;
+                      lastContentRef.current = html;
+                      setDocumentContent(html);
+                      setTabs((prev) =>
+                        prev.map((tb) =>
+                          tb.id === activeTabId ? { ...tb, content: html } : tb,
+                        ),
+                      );
+                      setDocSaveStatus("saving");
+                    }
+                  }
+                  setTableContextMenu(null);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-[#202022] hover:text-white transition-colors flex items-center gap-2 cursor-pointer text-zinc-300"
+              >
+                <Icon icon="ph:arrow-fat-left-light" className="w-[14px] h-[14px] text-zinc-400" />
+                <span>Insert Column Left</span>
+              </button>
+
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const targetCell = tableContextMenu.cell;
+                  const table = tableContextMenu.target;
+                  if (targetCell && table && editorRef.current) {
+                    const colIndex = targetCell.cellIndex;
+                    if (colIndex !== undefined && colIndex !== -1) {
+                      const rows = table.querySelectorAll("tr");
+                      rows.forEach((r) => {
+                        const cells = Array.from(r.children);
+                        const originCell = cells[colIndex];
+                        if (originCell) {
+                          const isHeader = originCell.nodeName === "TH";
+                          const newCell = document.createElement(isHeader ? "th" : "td");
+                          newCell.style.padding = "10px 12px";
+                          newCell.style.color = isHeader ? "#e4e4e7" : "#d4d4d8";
+                          newCell.innerHTML = isHeader ? "Header" : "Cell";
+                          if (isHeader) {
+                            newCell.style.fontWeight = "600";
+                            newCell.style.textAlign = "left";
+                          }
+                          r.insertBefore(newCell, originCell.nextSibling);
+                        }
+                      });
+
+                      table.querySelectorAll("tr").forEach((r) => {
+                        const cells = Array.from(r.children) as HTMLElement[];
+                        cells.forEach((cell, idx) => {
+                          cell.style.borderRight = idx === cells.length - 1 ? "none" : "1px solid #27272a";
+                        });
+                      });
+
+                      const html = editorRef.current.innerHTML;
+                      lastContentRef.current = html;
+                      setDocumentContent(html);
+                      setTabs((prev) =>
+                        prev.map((tb) =>
+                          tb.id === activeTabId ? { ...tb, content: html } : tb,
+                        ),
+                      );
+                      setDocSaveStatus("saving");
+                    }
+                  }
+                  setTableContextMenu(null);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-[#202022] hover:text-white transition-colors flex items-center gap-2 cursor-pointer text-zinc-300"
+              >
+                <Icon icon="ph:arrow-fat-right-light" className="w-[14px] h-[14px] text-zinc-400" />
+                <span>Insert Column Right</span>
+              </button>
+
+              <div className="h-[1px] bg-[#2d2d30] my-1" />
+
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const targetCell = tableContextMenu.cell;
+                  const curRow = targetCell?.closest("tr");
+                  const table = tableContextMenu.target;
+                  if (curRow && table && editorRef.current) {
+                    curRow.remove();
+                    if (table.querySelectorAll("tr").length === 0) {
+                      table.remove();
+                    }
+                    
+                    const html = editorRef.current.innerHTML;
+                    lastContentRef.current = html;
+                    setDocumentContent(html);
+                    setTabs((prev) =>
+                      prev.map((tb) =>
+                        tb.id === activeTabId ? { ...tb, content: html } : tb,
+                      ),
+                    );
+                    setDocSaveStatus("saving");
+                  }
+                  setTableContextMenu(null);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-[#202022] text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-2 cursor-pointer"
+              >
+                <Icon icon="ph:minus" className="w-[14px] h-[14px]" />
+                <span>Remove Current Row</span>
+              </button>
+
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const targetCell = tableContextMenu.cell;
+                  const table = tableContextMenu.target;
+                  if (targetCell && table && editorRef.current) {
+                    const colIndex = targetCell.cellIndex;
+                    if (colIndex !== undefined && colIndex !== -1) {
+                      const rows = table.querySelectorAll("tr");
+                      rows.forEach((r) => {
+                        const cells = Array.from(r.children);
+                        if (cells[colIndex]) {
+                          cells[colIndex].remove();
+                        }
+                      });
+
+                      const firstRow = table.querySelector("tr");
+                      if (!firstRow || firstRow.children.length === 0) {
+                        table.remove();
+                      } else {
+                        table.querySelectorAll("tr").forEach((r) => {
+                          const cells = Array.from(r.children) as HTMLElement[];
+                          cells.forEach((cell, idx) => {
+                            cell.style.borderRight = idx === cells.length - 1 ? "none" : "1px solid #27272a";
+                          });
+                        });
+                      }
+
+                      const html = editorRef.current.innerHTML;
+                      lastContentRef.current = html;
+                      setDocumentContent(html);
+                      setTabs((prev) =>
+                        prev.map((tb) =>
+                          tb.id === activeTabId ? { ...tb, content: html } : tb,
+                        ),
+                      );
+                      setDocSaveStatus("saving");
+                    }
+                  }
+                  setTableContextMenu(null);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-[#202022] text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-2 cursor-pointer"
+              >
+                <Icon icon="ph:columns-light" className="w-[14px] h-[14px]" />
+                <span>Remove Current Column</span>
+              </button>
+
+              <div className="h-[1px] bg-[#2d2d30] my-1" />
+            </>
+          )}
+
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const t = tableContextMenu.target;
+              if (t) {
+                t.remove();
+                if (editorRef.current) {
+                  const html = editorRef.current.innerHTML;
+                  lastContentRef.current = html;
+                  setDocumentContent(html);
+                  setTabs((prev) =>
+                    prev.map((tb) =>
+                      tb.id === activeTabId ? { ...tb, content: html } : tb,
+                    ),
+                  );
+                  setDocSaveStatus("saving");
+                }
+              }
+              setTableContextMenu(null);
+            }}
+            className="w-full text-left px-3 py-2.5 hover:bg-[#202022] text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-2 cursor-pointer font-semibold"
+          >
+            <Icon icon="ph:trash" className="w-[14px] h-[14px]" />
+            <span>Remove Entire Table</span>
           </button>
         </div>
       )}
