@@ -14,7 +14,7 @@ interface MainChatProps {
   isAiTyping: boolean;
   handleSendMessage: (customText?: string, options?: { isHidden?: boolean; fromSidePanel?: boolean }) => Promise<void>;
   handleStopGeneration: () => void;
-  researchStatus: 'fetching' | 'downloading' | 'polishing' | null;
+  researchStatus: 'fetching' | 'downloading' | 'polishing' | 'editor_agent' | null;
   currentUser: any;
   isOnline?: boolean;
   selectedModel: string;

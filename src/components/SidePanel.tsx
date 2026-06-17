@@ -1130,15 +1130,15 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 className="p-1 hover:bg-[#1a1a1c] rounded-md cursor-pointer transition-all text-[#a1a1aa] hover:text-[#f4f4f5]"
                 title="Add manual source"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-5 h-5" />
               </button>
             </div>
 
             {/* List of current sources with dynamically resolved favicon */}
             {sources.length === 0 ? (
-              <div className="text-center py-12 px-4 flex flex-col items-center justify-center">
-                <Globe className="w-6 h-6 text-zinc-600 mb-2" />
-                <span className="text-[11px] text-zinc-500">No linked research sources yet.</span>
+              <div className="text-center py-16 px-4 flex flex-col items-center justify-center">
+                <Globe className="w-12 h-12 text-zinc-650 mb-3" />
+                <span className="text-[11.5px] text-zinc-500 font-medium">No linked research sources yet.</span>
               </div>
             ) : (
               <div className="divide-y divide-[#1c1c1e] max-h-[360px] overflow-y-auto">
@@ -1154,38 +1154,38 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                       key={src.id}
                       className="group flex items-center justify-between gap-3 px-4 py-3 hover:bg-[#131315] transition-all text-xs"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
                         <img 
                           src={iconUrl} 
                           alt="" 
-                          className="w-4 h-4 rounded shrink-0 bg-zinc-800"
+                          className="w-5 h-5 rounded shrink-0 bg-zinc-800"
                           referrerPolicy="no-referrer"
                           onError={(e) => {
                             (e.target as HTMLElement).style.display = 'none';
                           }}
                         />
                         <div className="min-w-0 flex-1">
-                          <div className="font-medium text-zinc-200 truncate leading-tight">{src.title}</div>
-                          <div className="text-[10px] text-zinc-500 font-mono truncate">{host}</div>
+                          <div className="font-semibold text-zinc-200 truncate leading-tight">{src.title}</div>
+                          <div className="text-[10px] text-zinc-500 font-mono truncate mt-0.5">{host}</div>
                         </div>
                       </div>
                       
-                      <div className="flex items-center gap-1.5 shrink-0 opacity-85 group-hover:opacity-100">
+                      <div className="flex items-center gap-2 shrink-0 opacity-85 group-hover:opacity-100">
                         <a 
                           href={src.url} 
                           target="_blank" 
                           rel="noopener noreferrer" 
-                          className="p-1 text-zinc-400 hover:text-blue-400 hover:bg-zinc-800 rounded transition-all cursor-pointer"
+                          className="p-1.5 text-zinc-400 hover:text-blue-400 hover:bg-zinc-800 rounded transition-all cursor-pointer"
                           title="Open URL in new tab"
                         >
-                          <ExternalLink className="w-3.5 h-3.5" />
+                          <ExternalLink className="w-4 h-4" />
                         </a>
                         <button 
                           onClick={() => handleDeleteSource(src.id)}
-                          className="p-1 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded transition-all cursor-pointer"
+                          className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded transition-all cursor-pointer"
                           title="Delete reference"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
@@ -1430,7 +1430,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   className="hidden" 
                   disabled={isUploadingAttachment}
                 />
-                <Paperclip className="w-3.5 h-3.5" />
+                <Paperclip className="w-4 h-4" />
               </label>
             </div>
 
@@ -1443,18 +1443,18 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
             {isUploadingAttachment && (
               <div className="mb-4 p-3 rounded-lg bg-zinc-900/40 border border-zinc-800/40 text-zinc-400 text-xs flex items-center gap-3 shrink-0">
-                <div className="w-3.5 h-3.5 border-2 border-zinc-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                <div className="w-4 h-4 border-2 border-zinc-400 border-t-transparent rounded-full animate-spin shrink-0" />
                 <span className="font-medium animate-pulse">Uploading attachment...</span>
               </div>
             )}
 
             {attachments.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center py-12 text-center select-none">
-                <Paperclip className="w-6 h-6 text-zinc-600 mb-2" />
-                <span className="text-[11px] text-zinc-500 max-w-[200px] leading-relaxed">
+              <div className="flex-1 flex flex-col items-center justify-center py-16 text-center select-none">
+                <Paperclip className="w-12 h-12 text-zinc-650 mb-3" />
+                <span className="text-[11.5px] text-zinc-500 max-w-[220px] leading-relaxed font-medium">
                   No attachments yet. Link audio recordings, images, templates, or spreadsheets.
                 </span>
-                <label className="mt-4 px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white rounded-lg cursor-pointer transition-colors font-semibold">
+                <label className="mt-5 px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white rounded-lg cursor-pointer transition-colors font-semibold">
                   <input 
                     type="file" 
                     onChange={handleAttachmentUpload} 
@@ -1479,18 +1479,18 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                       className="p-3 bg-[#18181b] border border-[#27272a] rounded-xl flex flex-col gap-2 group hover:border-zinc-700 transition-colors"
                     >
                       <div className="flex items-start justify-between gap-2.5">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="p-1 px-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 shrink-0">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="p-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 shrink-0">
                             {isAudio ? (
-                              <Music className="w-3.5 h-3.5" />
+                              <Music className="w-5 h-5" />
                             ) : isImage ? (
-                              <ImageIcon className="w-3.5 h-3.5" />
+                              <ImageIcon className="w-5 h-5" />
                             ) : (
-                              <File className="w-3.5 h-3.5" />
+                              <File className="w-5 h-5" />
                             )}
                           </div>
                           <div className="min-w-0">
-                            <span className="block text-[12px] font-medium text-zinc-200 truncate leading-tight" title={att.name}>
+                            <span className="block text-[12px] font-semibold text-zinc-200 truncate leading-tight" title={att.name}>
                               {att.name}
                             </span>
                             <span className="block text-[9px] text-[#71717a] font-mono mt-0.5 uppercase tracking-wider">
@@ -1503,17 +1503,17 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                           <a 
                             href={`/api/files/${att.id}`}
                             download={att.name}
-                            className="p-1 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors"
+                            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors"
                             title="Download reference"
                           >
-                            <Download className="w-3.5 h-3.5" />
+                            <Download className="w-4 h-4" />
                           </a>
                           <button 
                             onClick={() => handleDeleteAttachment(att.id)}
-                            className="p-1 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded transition-colors cursor-pointer"
+                            className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded transition-colors cursor-pointer"
                             title="Delete attachment"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </div>

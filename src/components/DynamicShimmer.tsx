@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 
 interface DynamicShimmerProps {
   isAiTyping: boolean;
-  researchStatus: "fetching" | "downloading" | "polishing" | null;
+  researchStatus: "fetching" | "downloading" | "polishing" | "editor_agent" | null;
   messages: any[];
   webSearchEnabled: boolean;
 }
@@ -48,6 +48,8 @@ export const DynamicShimmer: React.FC<DynamicShimmerProps> = ({
     text = "Downloading...";
   } else if (researchStatus === "polishing") {
     text = "Polishing...";
+  } else if (researchStatus === "editor_agent") {
+    text = "🤖 Blob is drafting content...";
   } else {
     // Get last user query to establish context
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");

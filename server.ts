@@ -696,7 +696,7 @@ You are given the current research context of the user workspace:
 
 TONE & BEHAVIOR:
 - **Relatable & Student-Friendly**: Use an engaging, warm, and supportive tone. Use phrases like "Let's crush this!", "Great progress so far!", or "That's a brilliant angle."
-- **Smart Editor**: ONLY provide draft edits if the user explicitly asks for writing, editing, generating, or rewriting. If the user is just saying "hi", "thanks", "that's nice", or chatting casually, YOU MUST NOT include document editing tags (<replaceContent> or <title>).
+- **Smart Editor**: ONLY provide draft edits or delegate to the specialized agent, **Blob**, if the user explicitly asks for writing, editing, generating, draft-making, or rewriting. If the user is just saying "hi", "thanks", "that's nice", or chatting casually, YOU MUST NOT include document editing tags or call any agents.
 - **Interactive PDF Mapping**: When you refer to content from a mapped PDF in the "Citations" list, you MUST include an interactive citation in your chat response using the following format: '[[page:NUMBER|SOURCE_TITLE]]' (e.g., "The results show an increase in velocity [[page:4|Abstract_Physics.pdf]]"). This allows the user to click and jump directly to that page. You can identify page numbers by looking for "--- Page N of M ---" markers in the provided full text context.
 - **Academic Excellence**: When you do write, never sacrifice quality. Provide multi-paragraph, detailed, and highly polished content.
 - **Mentor Approach**: Explain *why* you are making certain changes or suggestions to help the user learn.
@@ -727,16 +727,21 @@ Examples:
 <searchRealPapers>machine learning</searchRealPapers>
 Do NOT hallucinate or generate paper contents using any other custom tags. Only provide the search/lookup query string inside the <searchRealPapers> tag. The system will download 1 real PDF paper natively and display it.
 
-CRITICAL RULE ABOUT DOCUMENT EDITING:
-If AND ONLY IF the user EXPLICITLY asks you to "write an essay", "create a document", "draft a text", "generate an outline", or similar commands, YOU MUST append the following two tags after your <chat> tag:
+CRITICAL RULE ABOUT DOCUMENT EDITING (DELEGATION TO EDITOR AGENT):
+If AND ONLY IF the user EXPLICITLY asks you to "write an essay", "create a document", "draft a text", "generate an outline", "write a section", "rewrite/edit the content", or similar commands, YOU MUST delegate this heavy drafting task to our specialized agent, **Blob**.
+Do NOT write <title> or <replaceContent> tags yourself.
+Instead, do the following:
+1. In your <chat> response, enthusiastically explain to the user that you are calling **Blob** (our specialized content creator agent) to compose the document/essay with ultimate professional precision.
+2. Immediately after your </chat> element, append a <callEditorAgent> XML element containing a comprehensive prompt detailing what Blob should write, including any user guidelines, chosen topic, outline notes, and academic context.
 
-<title>A compelling, short academic title</title>
-<replaceContent>The full, polished, multi-paragraph markdown content of the academic draft/essay.</replaceContent>
-
-CRITICAL PROTOCOLS FOR <replaceContent>:
-1. **NO CHAT OR CONVERSATION INTERNALLY**: The content inside <replaceContent> must be 100% clean academic or research text.
-2. **HEADING FORMATTING**: ALWAYS ensure that every heading in the markdown content starts on a brand-new line and is preceded by exactly two blank lines (e.g., \n\n## Introduction\n\n). Do not bunch headings up with normal paragraph text.
-3. **NO TITLE REPETITION**: Do NOT repeat the document title as an H1 or H2 header at the start of the <replaceContent> block. Start directly with the first section header (e.g., ## Introduction).
+Example output:
+<thought>
+The user wants deep research draft on machine learning. I will coordinate with Blob to compose this.
+</thought>
+<chat>
+That is a brilliant topic to cover! I am calling **Blob**, our specialized writing agent, to compose a comprehensive, beautiful essay on machine learning. Blob will format it perfectly and add it to your workspace in just a few seconds!
+</chat>
+<callEditorAgent>Write a deep academic essay on Machine Learning, focusing on neural network foundations, deep learning breakthroughs, and potential future trends in AI safety. Use clean headers.</callEditorAgent>
 `;
 
 const geminiResponseSchema = {
@@ -1023,7 +1028,7 @@ The synthesis engine has verified this reference as a valid citation for your cu
       console.warn(`[STORAGE] No Firestore papers found with fileId matching: ${fileId}`);
     }
   } catch (err: any) {
-    console.error(`[STORAGE] Self-healing lookup / PDF reconstruction failed (metadata fetch error) for ${fileId}:`, err.message || err);
+    console.warn(`[STORAGE] Self-healing lookup / PDF reconstruction failed (metadata fetch error) for ${fileId}: ${err.message || err}`);
     // Graceful fallback: generate a generic Note PDF so the app doesn't break
     console.log(`[STORAGE] Generating generic fallback Scholar Note for ${fileId}...`);
     const doc = new PDFDocument({ margin: 50 });
@@ -1075,7 +1080,9 @@ async function startServer() {
 
   // Request logger middleware
   app.use((req, res, next) => {
-    console.log(`[HTTP] ${req.method} ${req.url}`);
+    if (req.url.startsWith("/api/")) {
+      console.log(`[HTTP] ${req.method} ${req.url}`);
+    }
     next();
   });
 
@@ -2780,6 +2787,8 @@ ${researchContext}
         }
       }
 
+      let mainChatCollectedText = "";
+
       if (!tryMistralFirst || usedGeminiFallback) {
         console.log(`[LLM] Streaming chat with Gemini...`);
         
@@ -2861,6 +2870,7 @@ ${researchContext}
         for await (const chunk of responseStream) {
           const content = chunk.text || "";
           if (content) {
+            mainChatCollectedText += content;
             res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
           }
         }
@@ -2868,8 +2878,68 @@ ${researchContext}
         for await (const chunk of completionStream) {
           const content = chunk.choices[0]?.delta?.content || "";
           if (content) {
+            mainChatCollectedText += content;
             res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
           }
+        }
+      }
+
+      // Check if main chat has delegated task to the Mistral Editor Agent
+      const callAgentMatch = mainChatCollectedText.match(/<callEditorAgent>([\s\S]*?)(?:<\/callEditorAgent>|$)/i);
+      if (callAgentMatch) {
+        const editorPrompt = callAgentMatch[1].trim();
+        let editorModel = "codestral-latest"; // Default specialized Mistral agent
+        if (mistralModelToUse === "codestral-latest") {
+          editorModel = "mistral-large-latest";
+        } else if (mistralModelToUse === "mistral-large-latest") {
+          editorModel = "codestral-latest";
+        }
+
+        console.log(`[BLOB AGENT] Main chat agent delegated content creation. Model: ${editorModel}, Prompt: "${editorPrompt.substring(0, 100)}..."`);
+        
+        // Notify client that the editor agent is starting
+        res.write(`data: ${JSON.stringify({ status: "editor_agent" })}\n\n`);
+
+        const editorSystemPrompt = `You are Blob, the specialized content creation agent. Your sole purpose is to write, generate, or rewrite highly structured, polished, and comprehensive academic/research content for the editor.
+You are extremely professional and focused on academic quality.
+
+Your output MUST use exactly these two XML-style tags:
+<title>A compelling, short academic title</title>
+<replaceContent>The full, polished, multi-paragraph markdown content of the academic draft/essay.</replaceContent>
+
+CRITICAL PROTOCOLS:
+1. NO CHAT OR CONVERSATION: Do NOT output any conversational preambles, greetings, or postscripts. Start directly with the XML tags: <title> and <replaceContent>. No plain text outside the XML tags.
+2. HEADING FORMATTING: ALWAYS ensure that every heading in the markdown content starts on a brand-new line and is preceded by exactly two blank lines (e.g., \\n\\n## Introduction\\n\\n).
+3. NO TITLE REPETITION: Do NOT repeat the document title as an H1 or H2 header at the start of the <replaceContent> block. Start directly with the first section header (e.g., ## Introduction).
+4. Academic Excellence: Write deep, detailed, multi-paragraph content. Don't summarize unnecessarily; expand and construct standard academic paragraphs.`;
+
+        try {
+          const client = getMistralClient();
+          const editorStream = await client.chat.completions.create({
+            model: editorModel,
+            messages: [
+              { role: "system", content: editorSystemPrompt },
+              { role: "user", content: `Please write our paper content with the following details and outline context:\n\n${editorPrompt}` }
+            ],
+            temperature: 0.7,
+            stream: true
+          });
+
+          for await (const chunk of editorStream) {
+            const content = chunk.choices[0]?.delta?.content || "";
+            if (content) {
+              res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+            }
+          }
+
+          // Output confirmation message from Blob after drafting completes
+          const completionMsg = "\n\n**Blob:** Done making the content! It is successfully integrated into your editor.";
+          res.write(`data: ${JSON.stringify({ text: completionMsg })}\n\n`);
+        } catch (editorErr: any) {
+          console.error("[BLOB AGENT] Error while calling specialized Editor Agent (Blob):", editorErr);
+          res.write(`data: ${JSON.stringify({ text: `\n\n**[Error] Blob failed to compile content:** ${editorErr.message || editorErr}` })}\n\n`);
+        } finally {
+          res.write(`data: ${JSON.stringify({ status: "editor_agent_done" })}\n\n`);
         }
       }
 

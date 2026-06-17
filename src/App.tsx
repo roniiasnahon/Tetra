@@ -124,6 +124,8 @@ export interface Tab {
   messages?: ChatMessage[];
   folderId?: string;
   chatInput?: string;
+  undoStack?: string[];
+  redoStack?: string[];
 }
 
 export interface ChatMessage {
@@ -322,9 +324,12 @@ const parseAssistantResponse = (text: string) => {
   let titleStartSearchIdx = chatStartSearchIdx;
 
   const stripSearchTags = (str: string) => {
-    const idx = str.toLowerCase().indexOf("<searchrealpapers");
-    if (idx !== -1) return str.substring(0, idx).trim();
-    return str;
+    let res = str;
+    const idx = res.toLowerCase().indexOf("<searchrealpapers");
+    if (idx !== -1) res = res.substring(0, idx).trim();
+    const idx2 = res.toLowerCase().indexOf("<calleditoragent");
+    if (idx2 !== -1) res = res.substring(0, idx2).trim();
+    return res;
   };
 
   if (chatStartIdx !== -1) {
@@ -338,8 +343,9 @@ const parseAssistantResponse = (text: string) => {
       const titleTagIdx = lowerText.indexOf("<title>", chatStartIdx);
       const contentTagIdx = lowerText.indexOf("<replacecontent>", chatStartIdx);
       const paperTagIdx = lowerText.indexOf("<searchrealpapers>", chatStartIdx);
+      const callAgentTagIdx = lowerText.indexOf("<calleditoragent>", chatStartIdx);
 
-      const candidates = [titleTagIdx, contentTagIdx, paperTagIdx].filter(
+      const candidates = [titleTagIdx, contentTagIdx, paperTagIdx, callAgentTagIdx].filter(
         (idx) => idx !== -1,
       );
 
@@ -356,7 +362,7 @@ const parseAssistantResponse = (text: string) => {
         // Clean any leaking unclosed tags from streaming chat in progress
         chat = chat
           .replace(
-            /<(title|replacecontent|searchrealpapers|thought)[\s\S]*/gi,
+            /<(title|replacecontent|searchrealpapers|thought|calleditoragent)[\s\S]*/gi,
             "",
           )
           .trim();
@@ -417,6 +423,10 @@ const parseAssistantResponse = (text: string) => {
     );
     if (contentEndTagIdx !== -1) {
       replaceContent = text.substring(contentStartIdx, contentEndTagIdx).trim();
+      const followUpText = text.substring(contentEndTagIdx + 17).trim();
+      if (followUpText) {
+        chat = chat + "\n\n" + followUpText;
+      }
     } else {
       replaceContent = text.substring(contentStartIdx).trim();
     }
@@ -646,6 +656,86 @@ const cleanJsonLeakFront = (text: string): string => {
 
   return clean.trim();
 };
+
+const PDF_CACHE_NAME = "rapid-pdf-cache-v1";
+
+const preCachePdfFile = async (fileId: string, blob: Blob) => {
+  const fileUrl = `/api/files/${fileId}`;
+  if (typeof window !== "undefined" && "caches" in window) {
+    try {
+      const cache = await window.caches.open(PDF_CACHE_NAME);
+      const response = new Response(blob, {
+        headers: { "Content-Type": "application/pdf" },
+      });
+      await cache.put(fileUrl, response);
+      console.log(`Pre-cached uploaded/received PDF ${fileId} in Cache Storage.`);
+    } catch (e) {
+      console.warn("Failed to pre-cache PDF response in Cache Storage:", e);
+    }
+  }
+
+  if (typeof window !== "undefined") {
+    const win = window as any;
+    if (!win.__pdfMemoryCache) {
+      win.__pdfMemoryCache = new Map();
+    }
+    const blobUrl = URL.createObjectURL(blob);
+    win.__pdfMemoryCache.set(fileId, blobUrl);
+  }
+};
+
+const getOrCreateCachedPdf = async (fileId: string): Promise<string> => {
+  const fileUrl = `/api/files/${fileId}`;
+
+  // 1. First check the local session memory cache URL mapped directly
+  if (typeof window !== "undefined") {
+    const win = window as any;
+    if (!win.__pdfMemoryCache) {
+      win.__pdfMemoryCache = new Map();
+    }
+    const memCache = win.__pdfMemoryCache;
+    if (memCache.has(fileId)) {
+      return memCache.get(fileId)!;
+    }
+  }
+
+  // 2. Next check browser's persistent Cache Storage API
+  if (typeof window !== "undefined" && "caches" in window) {
+    try {
+      const cache = await window.caches.open(PDF_CACHE_NAME);
+      const cachedResponse = await cache.match(fileUrl);
+      if (cachedResponse) {
+        const blob = await cachedResponse.blob();
+        const objUrl = URL.createObjectURL(blob);
+        const win = window as any;
+        if (win.__pdfMemoryCache) {
+          win.__pdfMemoryCache.set(fileId, objUrl);
+        }
+        return objUrl;
+      }
+
+      // If not cached persistently, fetch, cache, and return local object URL
+      const response = await fetch(fileUrl);
+      if (response.ok) {
+        // Save a clone to Cache Storage for next time
+        await cache.put(fileUrl, response.clone());
+        const blob = await response.blob();
+        const objUrl = URL.createObjectURL(blob);
+        const win = window as any;
+        if (win.__pdfMemoryCache) {
+          win.__pdfMemoryCache.set(fileId, objUrl);
+        }
+        return objUrl;
+      }
+    } catch (e) {
+      console.warn("Cache Storage API error/fallback to standard fetch:", e);
+    }
+  }
+
+  // 3. Fallback to direct network URL if all local disk/blob helpers fail
+  return fileUrl;
+};
+
 
 const formatAbstractText = (text: string) => {
   if (!text) return "";
@@ -889,9 +979,11 @@ export default function App() {
   const [isChartModalOpen, setIsChartModalOpen] = useState(false);
   const [chartType, setChartType] = useState<"bar" | "line" | "pie">("bar");
   const [chartTitle, setChartTitle] = useState("");
-  const [chartDataColor, setChartDataColor] = useState<"multicolor" | "emerald" | "blue" | "purple" | "amber" | "rose">("blue");
+  const [chartDataColor, setChartDataColor] = useState<string>("blue");
   const [chartLabels, setChartLabels] = useState<string[]>(["Group A", "Group B", "Group C", "Group D"]);
   const [chartValues, setChartValues] = useState<number[]>([45, 60, 30, 50]);
+  const [chartIndividualColors, setChartIndividualColors] = useState<string[]>([]);
+  const [openRowColorPickerIdx, setOpenRowColorPickerIdx] = useState<number | null>(null);
   const [chartBeingEdited, setChartBeingEdited] = useState<HTMLElement | null>(null);
 
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
@@ -1022,6 +1114,8 @@ export default function App() {
   const [currentPdfPage, setCurrentPdfPage] = useState<number>(1);
   const [pdfScale, setPdfScale] = useState<number>(1);
   const [pdfViewMode, setPdfViewMode] = useState<Record<string, "pdf" | "overview">>({});
+  const [activePdfBlobUrl, setActivePdfBlobUrl] = useState<string | null>(null);
+  const [isBlobLoading, setIsBlobLoading] = useState<boolean>(false);
   const [isSharingLoading, setIsSharingLoading] = useState(false);
   const [generatedLink, setGeneratedLink] = useState("");
   const [generatedLinkType, setGeneratedLinkType] = useState<
@@ -1140,6 +1234,9 @@ export default function App() {
       setPdfContextMenu(null);
       setIsCreateDropdownOpen(false);
       setIsHomeCreateDropdownOpen(false);
+      setIsDisplayDropdownOpen(false);
+      setIsSortDropdownOpen(false);
+      setIsFilterDropdownOpen(false);
     };
     window.addEventListener("click", handleOutsideClick);
     return () => {
@@ -1147,8 +1244,37 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    if (activeTab && activeTab.fileId && activeTab.mimetype === "application/pdf") {
+      setIsBlobLoading(true);
+      getOrCreateCachedPdf(activeTab.fileId)
+        .then((blobUrl) => {
+          if (active) {
+            setActivePdfBlobUrl(blobUrl);
+            setIsBlobLoading(false);
+          }
+        })
+        .catch((err) => {
+          console.error("Local caching PDF load error:", err);
+          if (active) {
+            setActivePdfBlobUrl(`/api/files/${activeTab.fileId}`);
+            setIsBlobLoading(false);
+          }
+        });
+    } else {
+      setActivePdfBlobUrl(null);
+      setIsBlobLoading(false);
+    }
+    return () => {
+      active = false;
+    };
+  }, [activeTab?.fileId, activeTab?.mimetype]);
+
   const editorRef = useRef<HTMLDivElement>(null);
   const lastContentRef = useRef("");
+  const typingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isTypingRef = useRef(false);
 
   useEffect(() => {
     const handleSelectionChange = () => {
@@ -1230,7 +1356,106 @@ export default function App() {
     }
   };
 
+  const pushToUndo = () => {
+    if (!editorRef.current) return;
+    const currentHtml = editorRef.current.innerHTML;
+    setTabs((prev) =>
+      prev.map((t) => {
+        if (t.id === activeTabId) {
+          const undoStack = t.undoStack || [];
+          if (undoStack.length === 0 || undoStack[undoStack.length - 1] !== currentHtml) {
+            return {
+              ...t,
+              undoStack: [...undoStack.slice(-99), currentHtml],
+              redoStack: [], // Clear redo stack on key change
+            };
+          }
+        }
+        return t;
+      })
+    );
+  };
+
+  const handleUndo = () => {
+    if (!editorRef.current) return;
+    const currentHtml = editorRef.current.innerHTML;
+    let targetHtml: string | null = null;
+    
+    setTabs((prev) => {
+      const currentTab = prev.find((t) => t.id === activeTabId);
+      if (!currentTab) return prev;
+      const undoStack = currentTab.undoStack || [];
+      if (undoStack.length === 0) {
+        return prev;
+      }
+      const previousHtml = undoStack[undoStack.length - 1];
+      targetHtml = previousHtml;
+      const newUndoStack = undoStack.slice(0, -1);
+      const redoStack = currentTab.redoStack || [];
+      const newRedoStack = [...redoStack, currentHtml];
+      
+      return prev.map((t) =>
+        t.id === activeTabId
+          ? { ...t, content: previousHtml, undoStack: newUndoStack, redoStack: newRedoStack }
+          : t
+      );
+    });
+
+    if (targetHtml !== null) {
+      editorRef.current.innerHTML = targetHtml;
+      lastContentRef.current = targetHtml;
+      setDocumentContent(targetHtml);
+      setDocSaveStatus("saving");
+    } else {
+      document.execCommand("undo");
+    }
+  };
+
+  const handleRedo = () => {
+    if (!editorRef.current) return;
+    const currentHtml = editorRef.current.innerHTML;
+    let targetHtml: string | null = null;
+
+    setTabs((prev) => {
+      const currentTab = prev.find((t) => t.id === activeTabId);
+      if (!currentTab) return prev;
+      const redoStack = currentTab.redoStack || [];
+      if (redoStack.length === 0) {
+        return prev;
+      }
+      const nextHtml = redoStack[redoStack.length - 1];
+      targetHtml = nextHtml;
+      const newRedoStack = redoStack.slice(0, -1);
+      const undoStack = currentTab.undoStack || [];
+      const newUndoStack = [...undoStack, currentHtml];
+
+      return prev.map((t) =>
+        t.id === activeTabId
+          ? { ...t, content: nextHtml, undoStack: newUndoStack, redoStack: newRedoStack }
+          : t
+      );
+    });
+
+    if (targetHtml !== null) {
+      editorRef.current.innerHTML = targetHtml;
+      lastContentRef.current = targetHtml;
+      setDocumentContent(targetHtml);
+      setDocSaveStatus("saving");
+    } else {
+      document.execCommand("redo");
+    }
+  };
+
   const handleFormat = (command: string, value?: string) => {
+    if (command === "undo") {
+      handleUndo();
+      return;
+    }
+    if (command === "redo") {
+      handleRedo();
+      return;
+    }
+    pushToUndo();
     document.execCommand(command, false, value);
     if (editorRef.current) {
       const html = editorRef.current.innerHTML;
@@ -1244,6 +1469,7 @@ export default function App() {
 
   const handleInsertTable = (rows: number = 2, cols: number = 3) => {
     if (!editorRef.current) return;
+    pushToUndo();
     
     // Ensure the editor has focus before trying selection
     if (document.activeElement !== editorRef.current) {
@@ -1345,7 +1571,8 @@ export default function App() {
 
   const handleInsertChart = () => {
     if (!editorRef.current) return;
-
+    pushToUndo();
+    
     // Filter out empty rows or invalid values
     const labels = chartLabels.map(l => l.trim() || "Item");
     const values = chartValues.map(v => isNaN(v) ? 0 : v);
@@ -1353,12 +1580,18 @@ export default function App() {
 
     // Color schemes that fit our clean visual design
     const schemeColors: Record<string, string[]> = {
-      multicolor: ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b", "#f43f5e", "#06b6d4"],
+      multicolor: ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b", "#f43f5e", "#06b6d4", "#f97316", "#6366f1"],
       emerald: ["#10b981", "#34d399", "#059669", "#a7f3d0", "#047857", "#065f46"],
       blue: ["#3b82f6", "#60a5fa", "#2563eb", "#bfdbfe", "#1d4ed8", "#1e40af"],
       purple: ["#8b5cf6", "#a78bfa", "#7c3aed", "#ddd6fe", "#6d28d9", "#5b21b6"],
       amber: ["#f59e0b", "#fbbf24", "#d97706", "#fde68a", "#b45309", "#92400e"],
-      rose: ["#f43f5e", "#fb7185", "#e11d48", "#fecdd3", "#be123c", "#9f1239"]
+      rose: ["#f43f5e", "#fb7185", "#e11d48", "#fecdd3", "#be123c", "#9f1239"],
+      cyan: ["#06b6d4", "#22d3ee", "#0891b2", "#cffafe", "#0e7490", "#155e75"],
+      orange: ["#f97316", "#fb923c", "#ea580c", "#ffedd5", "#c2410c", "#9a3412"],
+      pink: ["#ec4899", "#f472b6", "#db2777", "#fce7f3", "#be185d", "#9d174d"],
+      indigo: ["#6366f1", "#818cf8", "#4f46e5", "#e0e7ff", "#4338ca", "#3730a3"],
+      slate: ["#64748b", "#94a3b8", "#475569", "#f1f5f9", "#334155", "#1e293b"],
+      forest: ["#22c55e", "#4ade80", "#16a34a", "#dcfce7", "#15803d", "#14532d"]
     };
 
     const activeColors = schemeColors[chartDataColor] || schemeColors.blue;
@@ -1400,7 +1633,7 @@ export default function App() {
         const barHeight = (val / maxVal) * graphHeight;
         const x = paddingLeft + barSpacing + i * (barWidth + barSpacing);
         const y = paddingTop + graphHeight - barHeight;
-        const color = chartDataColor === "multicolor" ? activeColors[i % activeColors.length] : activeColors[0];
+        const color = (chartIndividualColors && chartIndividualColors[i]) || (chartDataColor === "multicolor" ? activeColors[i % activeColors.length] : activeColors[0]);
 
         bars += `
           <g>
@@ -1465,10 +1698,11 @@ export default function App() {
       const fillColor = chartDataColor === "multicolor" ? activeColors[1] || strokeColor : strokeColor;
 
       let markers = "";
-      points.forEach((pt) => {
+      points.forEach((pt, i) => {
+        const ptColor = (chartIndividualColors && chartIndividualColors[i]) || strokeColor;
         markers += `
           <g>
-            <circle cx="${pt.x}" cy="${pt.y}" r="4" fill="${strokeColor}" stroke="transparent" stroke-width="1.5" />
+            <circle cx="${pt.x}" cy="${pt.y}" r="4.5" fill="${ptColor}" stroke="#121212" stroke-width="1.5" />
             <text x="${pt.x}" y="${pt.y - 8}" fill="#f4f4f5" font-size="10" font-family="sans-serif" font-weight="600" text-anchor="middle">${pt.val}</text>
             <text x="${pt.x}" y="${paddingTop + graphHeight + 16}" fill="#a1a1aa" font-size="10" font-family="sans-serif" text-anchor="middle">${pt.label}</text>
           </g>
@@ -1516,7 +1750,7 @@ export default function App() {
         const y2_in = cy + cut * Math.sin(rad2);
 
         const largeArc = angle > 180 ? 1 : 0;
-        const color = activeColors[i % activeColors.length];
+        const color = (chartIndividualColors && chartIndividualColors[i]) || activeColors[i % activeColors.length];
 
         let pathStr = "";
         if (pct >= 0.999) {
@@ -1565,7 +1799,7 @@ export default function App() {
       `;
     }
 
-    const chartState = { chartType, chartTitle, chartDataColor, chartLabels, chartValues };
+    const chartState = { chartType, chartTitle, chartDataColor, chartLabels, chartValues, chartIndividualColors };
     const encodedState = btoa(encodeURIComponent(JSON.stringify(chartState)));
     
     const chartWrapperHTML = `
@@ -2640,7 +2874,7 @@ export default function App() {
   const [assistantInput, setAssistantInput] = useState("");
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [researchStatus, setResearchStatus] = useState<
-    "fetching" | "downloading" | "polishing" | null
+    "fetching" | "downloading" | "polishing" | "editor_agent" | null
   >(null);
   const aiWritingTabIdRef = useRef<string | null>(null);
   const [isChatSuggestionsDismissed, setIsChatSuggestionsDismissed] =
@@ -3542,6 +3776,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
               if (data === "[DONE]") break;
               try {
                 const parsed = JSON.parse(data);
+                if (parsed.status === "editor_agent") {
+                  setResearchStatus("editor_agent");
+                } else if (parsed.status === "editor_agent_done") {
+                  setResearchStatus(null);
+                }
                 if (parsed.text) {
                   accumulatedText += parsed.text;
 
@@ -4187,6 +4426,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 let pagesCountString = "";
 
                 if (fileLabel.toLowerCase().endsWith(".pdf")) {
+                  // Pre-cache PDF in client-side storage so next view and parser is instant
+                  preCachePdfFile(data.fileId, file);
                   try {
                     extractedText = await extractTextFromPdf(
                       `/api/files/${data.fileId}`,
@@ -5772,24 +6013,194 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   {/* Toolbar - Aligned precisely with table edge */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 mb-2 select-none relative px-4 text-zinc-400">
                     <div className="flex items-center gap-2">
-                      <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1a1a1a] hover:bg-[#222222] border border-[#27272a] rounded-lg text-[11px] font-medium text-[#e4e4e7] transition-all cursor-pointer">
-                        <Icon icon="ph:rows" className="w-3.5 h-3.5" />
-                        <span>Display</span>
-                      </button>
-                      <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1a1a1a] hover:bg-[#222222] border border-[#27272a] rounded-lg text-[11px] font-medium text-[#e4e4e7] transition-all cursor-pointer">
-                        <Icon
-                          icon="ph:arrows-down-up"
-                          className="w-3.5 h-3.5"
-                        />
-                        <span>Sort</span>
-                      </button>
-                      <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1a1a1a] hover:bg-[#222222] border border-[#27272a] rounded-lg text-[11px] font-medium text-[#e4e4e7] transition-all cursor-pointer">
-                        <Icon
-                          icon="ph:sliders-horizontal"
-                          className="w-3.5 h-3.5"
-                        />
-                        <span>Filter</span>
-                      </button>
+                      <div className="relative">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsDisplayDropdownOpen(!isDisplayDropdownOpen);
+                            setIsSortDropdownOpen(false);
+                            setIsFilterDropdownOpen(false);
+                          }}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                            isDisplayDropdownOpen
+                              ? "bg-[#27272a] text-white border-zinc-500"
+                              : "bg-[#1a1a1a] hover:bg-[#222222] border-[#27272a] text-[#e4e4e7]"
+                          }`}
+                        >
+                          <Icon icon="ph:rows" className="w-3.5 h-3.5" />
+                          <span>Display</span>
+                        </button>
+                        {isDisplayDropdownOpen && (
+                          <div className="absolute left-0 mt-1.5 w-44 bg-[#121212] border border-[#27272a] rounded-lg py-1 shadow-xl z-50 text-xs text-zinc-300">
+                            <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+                              Density
+                            </div>
+                            <button
+                              onClick={() => {
+                                setDisplayDensity("comfortable");
+                                setIsDisplayDropdownOpen(false);
+                              }}
+                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                            >
+                              <span>Comfortable</span>
+                              {displayDensity === "comfortable" && (
+                                <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setDisplayDensity("compact");
+                                setIsDisplayDropdownOpen(false);
+                              }}
+                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                            >
+                              <span>Compact</span>
+                              {displayDensity === "compact" && (
+                                <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="relative">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsSortDropdownOpen(!isSortDropdownOpen);
+                            setIsDisplayDropdownOpen(false);
+                            setIsFilterDropdownOpen(false);
+                          }}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                            isSortDropdownOpen
+                              ? "bg-[#27272a] text-white border-zinc-500"
+                              : "bg-[#1a1a1a] hover:bg-[#222222] border-[#27272a] text-[#e4e4e7]"
+                          }`}
+                        >
+                          <Icon icon="ph:arrows-down-up" className="w-3.5 h-3.5" />
+                          <span>Sort</span>
+                        </button>
+                        {isSortDropdownOpen && (
+                          <div className="absolute left-0 mt-1.5 w-48 bg-[#121212] border border-[#27272a] rounded-lg py-1 shadow-xl z-50 text-xs text-zinc-300">
+                            <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+                              Sort By
+                            </div>
+                            <button
+                              onClick={() => setSortBy("title")}
+                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                            >
+                              <span>Title</span>
+                              {sortBy === "title" && (
+                                <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => setSortBy("added")}
+                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                            >
+                              <span>Date Added</span>
+                              {sortBy === "added" && (
+                                <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => setSortBy("viewed")}
+                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                            >
+                              <span>Last Viewed</span>
+                              {sortBy === "viewed" && (
+                                <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
+                              )}
+                            </button>
+
+                            <div className="my-1 border-t border-[#27272a]" />
+
+                            <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+                              Direction
+                            </div>
+                            <button
+                              onClick={() => setSortOrder("asc")}
+                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                            >
+                              <span>Ascending</span>
+                              {sortOrder === "asc" && (
+                                <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => setSortOrder("desc")}
+                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                            >
+                              <span>Descending</span>
+                              {sortOrder === "desc" && (
+                                <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="relative">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsFilterDropdownOpen(!isFilterDropdownOpen);
+                            setIsDisplayDropdownOpen(false);
+                            setIsSortDropdownOpen(false);
+                          }}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                            isFilterDropdownOpen
+                              ? "bg-[#27272a] text-white border-zinc-500"
+                              : "bg-[#1a1a1a] hover:bg-[#222222] border-[#27272a] text-[#e4e4e7]"
+                          }`}
+                        >
+                          <Icon icon="ph:sliders-horizontal" className="w-3.5 h-3.5" />
+                          <span>Filter</span>
+                        </button>
+                        {isFilterDropdownOpen && (
+                          <div className="absolute left-0 mt-1.5 w-44 bg-[#121212] border border-[#27272a] rounded-lg py-1 shadow-xl z-50 text-xs text-zinc-300">
+                            <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+                              File Type
+                            </div>
+                            <button
+                              onClick={() => {
+                                setFilterType("all");
+                                setIsFilterDropdownOpen(false);
+                              }}
+                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                            >
+                              <span>All Files</span>
+                              {filterType === "all" && (
+                                <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setFilterType("Note");
+                                setIsFilterDropdownOpen(false);
+                              }}
+                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                            >
+                              <span>Notes</span>
+                              {filterType === "Note" && (
+                                <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setFilterType("Document");
+                                setIsFilterDropdownOpen(false);
+                              }}
+                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                            >
+                              <span>Documents</span>
+                              {filterType === "Document" && (
+                                <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-3 sm:ml-auto text-xs w-full sm:w-auto justify-between sm:justify-end">
@@ -6014,7 +6425,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                   onClick={() => setSelectedFolderId(folder.id)}
                                   className="hover:bg-[#1a1a1a]/40 transition-colors group cursor-pointer"
                                 >
-                                  <td className="py-3.5 pl-6 pr-3 font-medium">
+                                  <td className={`pl-6 pr-3 font-medium ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}>
                                     <div className="flex items-center gap-3">
                                       <Icon
                                         icon="ph:folder-open"
@@ -6061,16 +6472,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                       )}
                                     </div>
                                   </td>
-                                  <td className="px-3 py-3.5 text-zinc-400 font-jakarta">
+                                  <td className={`px-3 text-zinc-400 font-jakarta ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}>
                                     {folderFiles.length} item
                                     {folderFiles.length !== 1 ? "s" : ""}
                                   </td>
-                                  <td className="px-3 py-3.5 text-zinc-500">
+                                  <td className={`px-3 text-zinc-500 ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}>
                                     {new Date(
                                       folder.createdAt,
                                     ).toLocaleDateString()}
                                   </td>
-                                  <td className="py-3.5 pr-6 pl-3">
+                                  <td className={`pr-6 pl-3 ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}>
                                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                       <button
                                         onClick={(e) => {
@@ -6256,7 +6667,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                       className={`hover:bg-[#1a1a1a]/40 transition-colors group cursor-pointer ${isChecked ? "bg-[#1a1a1a]/25" : ""}`}
                                     >
                                       <td
-                                        className="w-[44px] pl-4 py-3.5"
+                                        className={`w-[44px] pl-4 ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           if (isChecked) {
@@ -6284,7 +6695,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                           )}
                                         </div>
                                       </td>
-                                      <td className="px-3 py-3.5 font-medium">
+                                      <td className={`px-3 font-medium ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}>
                                         <div className="flex items-center gap-2.5">
                                           {paper.fileType === "Note" ? (
                                             <Icon
@@ -6303,7 +6714,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                         </div>
                                       </td>
                                       <td
-                                        className="px-3"
+                                        className={`px-3 ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}
                                         onClick={(e) => e.stopPropagation()}
                                       >
                                         <div
@@ -6406,19 +6817,19 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                           </AnimatePresence>
                                         </div>
                                       </td>
-                                      <td className="px-3 text-zinc-400">
+                                      <td className={`px-3 text-zinc-400 ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}>
                                         {paper.author || "—"}
                                       </td>
-                                      <td className="px-3 text-zinc-500">
+                                      <td className={`px-3 text-zinc-500 ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}>
                                         {paper.added || "—"}
                                       </td>
-                                      <td className="px-3 text-zinc-500">
+                                      <td className={`px-3 text-zinc-500 ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}>
                                         {paper.viewed || "—"}
                                       </td>
-                                      <td className="px-3 text-zinc-400 capitalize">
+                                      <td className={`px-3 text-zinc-400 capitalize ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}>
                                         {paper.fileType || "—"}
                                       </td>
-                                      <td className="px-3 text-[#52525b]">
+                                      <td className={`px-3 text-[#52525b] ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}>
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
@@ -6647,45 +7058,52 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     onContextMenu={handlePdfContextMenu}
                     id="pdf-scroll-container"
                   >
-                    <Document
-                      file={`/api/files/${activeTab.fileId}`}
-                      onLoadSuccess={({ numPages }) => setPdfNumPages(numPages)}
-                      className="flex flex-col items-center py-8 gap-6"
-                      loading={
-                        <div className="text-zinc-500 font-mono text-sm py-12 flex items-center justify-center gap-3">
-                          <div className="w-4 h-4 border-2 border-zinc-500 border-t-zinc-300 rounded-full animate-spin" />
-                          Loading PDF...
-                        </div>
-                      }
-                      error={
-                        <div className="text-red-400 py-12">
-                          Failed to load PDF file.
-                        </div>
-                      }
-                    >
-                      {Array.from(new Array(pdfNumPages || 0), (el, index) => (
-                        <div
-                          key={`page_container_${index + 1}`}
-                          id={`pdf-page-${index + 1}`}
-                          className="relative pdf-page-wrapper"
-                          onContextMenu={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handlePdfContextMenu(e);
-                          }}
-                          style={{ transformOrigin: "top center" }}
-                        >
-                          <Page
-                            pageNumber={index + 1}
-                            renderTextLayer={true}
-                            renderAnnotationLayer={true}
-                            className="bg-[#18181b] border border-[#27272a] text-[#e4e4e7] relative"
-                            width={800}
-                            scale={pdfScale}
-                          />
-                        </div>
-                      ))}
-                    </Document>
+                    {isBlobLoading || !activePdfBlobUrl ? (
+                      <div className="text-zinc-500 font-mono text-sm py-12 flex items-center justify-center gap-3">
+                        <div className="w-4 h-4 border-2 border-zinc-500 border-t-zinc-300 rounded-full animate-spin" />
+                        Loading Cached PDF...
+                      </div>
+                    ) : (
+                      <Document
+                        file={activePdfBlobUrl}
+                        onLoadSuccess={({ numPages }) => setPdfNumPages(numPages)}
+                        className="flex flex-col items-center py-8 gap-6"
+                        loading={
+                          <div className="text-zinc-500 font-mono text-sm py-12 flex items-center justify-center gap-3">
+                            <div className="w-4 h-4 border-2 border-zinc-500 border-t-zinc-300 rounded-full animate-spin" />
+                            Loading PDF Renderer...
+                          </div>
+                        }
+                        error={
+                          <div className="text-red-400 py-12">
+                            Failed to load PDF file.
+                          </div>
+                        }
+                      >
+                        {Array.from(new Array(pdfNumPages || 0), (el, index) => (
+                          <div
+                            key={`page_container_${index + 1}`}
+                            id={`pdf-page-${index + 1}`}
+                            className="relative pdf-page-wrapper"
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handlePdfContextMenu(e);
+                            }}
+                            style={{ transformOrigin: "top center" }}
+                          >
+                            <Page
+                              pageNumber={index + 1}
+                              renderTextLayer={true}
+                              renderAnnotationLayer={true}
+                              className="bg-[#18181b] border border-[#27272a] text-[#e4e4e7] relative"
+                              width={800}
+                              scale={pdfScale}
+                            />
+                          </div>
+                        ))}
+                      </Document>
+                    )}
                   </div>
 
                   {/* Popover UI over PDF text selection */}
@@ -7757,6 +8175,19 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         className="w-full bg-transparent text-inherit outline-none min-h-[400px] leading-relaxed focus:outline-none markdown-body"
                         onInput={(e) => {
                           const html = e.currentTarget.innerHTML;
+                          
+                          // Typing session manager for undo/redo snapshots
+                          if (!isTypingRef.current) {
+                            pushToUndo();
+                            isTypingRef.current = true;
+                          }
+                          if (typingTimerRef.current) {
+                            clearTimeout(typingTimerRef.current);
+                          }
+                          typingTimerRef.current = setTimeout(() => {
+                            isTypingRef.current = false;
+                          }, 1200);
+
                           lastContentRef.current = html;
                           lastLocalEditTimeRef.current = Date.now();
                           setDocumentContent(html);
@@ -7769,7 +8200,25 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           );
                           setDocSaveStatus("saving");
                         }}
+                        onKeyDown={(e) => {
+                          const isMod = e.metaKey || e.ctrlKey;
+                          if (isMod && e.key.toLowerCase() === "z") {
+                            e.preventDefault();
+                            if (e.shiftKey) {
+                              handleRedo();
+                            } else {
+                              handleUndo();
+                            }
+                          } else if (isMod && e.key.toLowerCase() === "y") {
+                            e.preventDefault();
+                            handleRedo();
+                          }
+                        }}
                         onBlur={() => {
+                          isTypingRef.current = false;
+                          if (typingTimerRef.current) {
+                            clearTimeout(typingTimerRef.current);
+                          }
                           if (editorRef.current) {
                             const originalHtml = editorRef.current.innerHTML;
                             const html = linkifyHtml(originalHtml);
@@ -7797,6 +8246,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         }}
                         onPaste={(e) => {
                           e.preventDefault();
+                          pushToUndo();
+                          isTypingRef.current = false;
+                          if (typingTimerRef.current) {
+                            clearTimeout(typingTimerRef.current);
+                          }
                           const text = e.clipboardData.getData("text/plain");
                           if (text) {
                             const urlPattern =
@@ -8435,6 +8889,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  pushToUndo();
                   const targetCell = tableContextMenu.cell;
                   const curRow = targetCell?.closest("tr");
                   if (curRow && editorRef.current) {
@@ -8481,6 +8936,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  pushToUndo();
                   const targetCell = tableContextMenu.cell;
                   const curRow = targetCell?.closest("tr");
                   if (curRow && editorRef.current) {
@@ -8524,6 +8980,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  pushToUndo();
                   const targetCell = tableContextMenu.cell;
                   const table = tableContextMenu.target;
                   if (targetCell && table && editorRef.current) {
@@ -8577,6 +9034,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  pushToUndo();
                   const targetCell = tableContextMenu.cell;
                   const table = tableContextMenu.target;
                   if (targetCell && table && editorRef.current) {
@@ -8632,6 +9090,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  pushToUndo();
                   const targetCell = tableContextMenu.cell;
                   const curRow = targetCell?.closest("tr");
                   const table = tableContextMenu.target;
@@ -8663,6 +9122,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  pushToUndo();
                   const targetCell = tableContextMenu.cell;
                   const table = tableContextMenu.target;
                   if (targetCell && table && editorRef.current) {
@@ -8715,6 +9175,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              pushToUndo();
               const t = tableContextMenu.target;
               if (t) {
                 t.remove();
@@ -8771,6 +9232,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     if (decoded.chartDataColor) setChartDataColor(decoded.chartDataColor);
                     if (decoded.chartLabels) setChartLabels(decoded.chartLabels);
                     if (decoded.chartValues) setChartValues(decoded.chartValues);
+                    if (decoded.chartIndividualColors) {
+                      setChartIndividualColors(decoded.chartIndividualColors);
+                    } else {
+                      setChartIndividualColors([]);
+                    }
+                    setOpenRowColorPickerIdx(null);
                   } catch (err) {
                     console.warn("Could not decode chart state");
                   }
@@ -8793,6 +9260,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              pushToUndo();
               const t = chartContextMenu.target;
               if (t) {
                 // If it is followed by an empty p tag, maybe remove that too (optional, let's keep it simple)
@@ -9176,7 +9644,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
               </button>
 
               <div className="mb-4 text-left">
-                <h3 className="text-sm font-semibold text-zinc-150 uppercase tracking-wider">Embed Scientific Chart/Graph</h3>
+                <h3 className="text-sm font-semibold text-zinc-150 uppercase tracking-wider">Embed Chart/Graph</h3>
                 <p className="text-xs text-zinc-500">Design and insert fully responsive data visualizations into your documents.</p>
               </div>
 
@@ -9186,7 +9654,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   {/* Chart Type Selector */}
                   <div>
                     <span className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Chart Type</span>
-                    <div className="grid grid-cols-3 gap-1 bg-[#1a1a1c] p-1 rounded-xl border border-[#27272a]">
+                    <div className="flex gap-4 border-b border-[#27272a] pb-2 px-0.5">
                       {[
                         { id: "bar", label: "Bar Chart", icon: "ph:chart-bar" },
                         { id: "line", label: "Line Chart", icon: "ph:chart-line" },
@@ -9195,10 +9663,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         <button
                           key={t.id}
                           onClick={() => setChartType(t.id as any)}
-                          className={`py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                          className={`py-1 px-1.5 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer border-b-2 -mb-[10px] ${
                             chartType === t.id
-                              ? "bg-[#2c2c2e] text-white"
-                              : "text-zinc-400 hover:text-zinc-250"
+                              ? "border-zinc-250 text-white"
+                              : "border-transparent text-zinc-500 hover:text-zinc-300"
                           }`}
                         >
                           <Icon icon={t.icon} className="w-3.5 h-3.5" />
@@ -9222,31 +9690,38 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                   {/* Color Schemes */}
                   <div>
-                    <span className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Color Scheme</span>
-                    <div className="flex flex-row flex-wrap gap-2">
+                    <span className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Color Scheme presets</span>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {[
-                        { id: "multicolor", label: "Multicolor", colors: ["#10b981", "#3b82f6", "#8b5cf6"] },
+                        { id: "multicolor", label: "Multicolor", colors: ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b"] },
                         { id: "blue", label: "Blue Slate", colors: ["#3b82f6"] },
                         { id: "emerald", label: "Emerald", colors: ["#10b981"] },
                         { id: "purple", label: "Amethyst", colors: ["#8b5cf6"] },
                         { id: "amber", label: "Amber", colors: ["#f59e0b"] },
-                        { id: "rose", label: "Crimson", colors: ["#f43f5e"] }
+                        { id: "rose", label: "Crimson", colors: ["#f43f5e"] },
+                        { id: "cyan", label: "Cyan", colors: ["#06b6d4"] },
+                        { id: "orange", label: "Sunset Orange", colors: ["#f97316"] },
+                        { id: "pink", label: "Hot Pink", colors: ["#ec4899"] },
+                        { id: "indigo", label: "Indigo Sky", colors: ["#6366f1"] },
+                        { id: "slate", label: "Cool Slate", colors: ["#64748b"] },
+                        { id: "forest", label: "Forest Green", colors: ["#22c55e"] }
                       ].map((scheme) => (
                         <button
                           key={scheme.id}
-                          onClick={() => setChartDataColor(scheme.id as any)}
-                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] transition-colors cursor-pointer ${
+                          type="button"
+                          onClick={() => setChartDataColor(scheme.id)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] transition-colors cursor-pointer justify-between ${
                             chartDataColor === scheme.id
                               ? "border-zinc-500 bg-zinc-800/40 text-white"
                               : "border-[#27272a] bg-[#161616] text-zinc-400 hover:border-zinc-500"
                           }`}
                         >
-                          <div className="flex -space-x-1.5">
-                            {scheme.colors.map((c, i) => (
+                          <span className="truncate">{scheme.label}</span>
+                          <div className="flex -space-x-1.5 shrink-0">
+                            {scheme.colors.slice(0, 3).map((c, i) => (
                               <div key={i} className="w-2.5 h-2.5 rounded-full ring-1 ring-black" style={{ backgroundColor: c }} />
                             ))}
                           </div>
-                          <span>{scheme.label}</span>
                         </button>
                       ))}
                     </div>
@@ -9257,64 +9732,166 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     <div className="flex justify-between items-center mb-1.5">
                       <span className="text-[10px] text-[#71717a] font-bold uppercase tracking-wider">Data Series ({chartLabels.length})</span>
                       <button
+                        type="button"
                         onClick={() => {
                           setChartLabels([...chartLabels, `Group ${String.fromCharCode(65 + chartLabels.length)}`]);
                           setChartValues([...chartValues, 50]);
+                          if (chartIndividualColors) {
+                            setChartIndividualColors([...chartIndividualColors, ""]);
+                          }
                         }}
-                        className="text-[10px] text-zinc-400 hover:text-white bg-[#1a1a1c] border border-[#27272a] px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                        className="text-[10px] text-zinc-400 hover:text-white bg-[#1a1a1c] border border-[#27272a] px-2.5 py-1 rounded-lg transition-colors cursor-pointer mr-[34px]"
                       >
                         + Add Row
                       </button>
                     </div>
 
-                    <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
-                      {chartLabels.map((lbl, idx) => (
-                        <div key={idx} className="flex gap-2 items-center">
-                          <span className="text-[10px] text-zinc-650 font-mono w-4 text-center">{idx + 1}</span>
-                          <input
-                            type="text"
-                            value={lbl}
-                            onChange={(e) => {
-                              const updated = [...chartLabels];
-                              updated[idx] = e.target.value;
-                              setChartLabels(updated);
-                            }}
-                            className="flex-1 bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3 py-1.5 text-xs text-[#f4f4f5] outline-none transition-colors"
-                            placeholder="Label"
-                          />
-                          <input
-                            type="number"
-                            value={chartValues[idx]}
-                            onChange={(e) => {
-                              const updated = [...chartValues];
-                              const parsedVal = parseFloat(e.target.value);
-                              updated[idx] = isNaN(parsedVal) ? 0 : parsedVal;
-                              setChartValues(updated);
-                            }}
-                            className="w-20 bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3 py-1.5 text-xs text-right text-[#f4f4f5] outline-none font-mono transition-colors"
-                            placeholder="Value"
-                          />
-                          <button
-                            onClick={() => {
-                              if (chartLabels.length > 2) {
-                                setChartLabels(chartLabels.filter((_, i) => i !== idx));
-                                setChartValues(chartValues.filter((_, i) => i !== idx));
-                              }
-                            }}
-                            disabled={chartLabels.length <= 2}
-                            className="p-1.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-400/10 cursor-pointer transition-colors disabled:opacity-30 disabled:pointer-events-none"
-                          >
-                            <Icon icon="ph:trash" className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
+                    <div className="space-y-2 max-h-[190px] overflow-y-auto pr-1">
+                      {chartLabels.map((lbl, idx) => {
+                        const schemeColors: Record<string, string[]> = {
+                          multicolor: ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b", "#f43f5e", "#06b6d4", "#f97316", "#6366f1"],
+                          emerald: ["#10b981", "#34d399", "#059669", "#a7f3d0", "#047857", "#065f46"],
+                          blue: ["#3b82f6", "#60a5fa", "#2563eb", "#bfdbfe", "#1d4ed8", "#1e40af"],
+                          purple: ["#8b5cf6", "#a78bfa", "#7c3aed", "#ddd6fe", "#6d28d9", "#5b21b6"],
+                          amber: ["#f59e0b", "#fbbf24", "#d97706", "#fde68a", "#b45309", "#92400e"],
+                          rose: ["#f43f5e", "#fb7185", "#e11d48", "#fecdd3", "#be123c", "#9f1239"],
+                          cyan: ["#06b6d4", "#22d3ee", "#0891b2", "#cffafe", "#0e7490", "#155e75"],
+                          orange: ["#f97316", "#fb923c", "#ea580c", "#ffedd5", "#c2410c", "#9a3412"],
+                          pink: ["#ec4899", "#f472b6", "#db2777", "#fce7f3", "#be185d", "#9d174d"],
+                          indigo: ["#6366f1", "#818cf8", "#4f46e5", "#e0e7ff", "#4338ca", "#3730a3"],
+                          slate: ["#64748b", "#94a3b8", "#475569", "#f1f5f9", "#334155", "#1e293b"],
+                          forest: ["#22c55e", "#4ade80", "#16a34a", "#dcfce7", "#15803d", "#14532d"]
+                        };
+                        const activeColors = schemeColors[chartDataColor] || schemeColors.blue;
+                        const defaultRowColor = chartDataColor === "multicolor" ? activeColors[idx % activeColors.length] : activeColors[0];
+                        const activeRowColor = (chartIndividualColors && chartIndividualColors[idx]) || defaultRowColor;
+
+                        return (
+                          <div key={idx} className="flex gap-2 items-center relative">
+                            {/* Color Selector */}
+                            <div className="relative shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setOpenRowColorPickerIdx(openRowColorPickerIdx === idx ? null : idx)}
+                                className="w-[26px] h-[26px] rounded-lg border border-[#27272a] hover:border-zinc-500 cursor-pointer flex items-center justify-center transition-all focus:outline-none"
+                                style={{ backgroundColor: activeRowColor }}
+                                title="Set Item Color"
+                              >
+                                <Icon icon="ph:paint-brush-broad" className="w-3.5 h-3.5 text-zinc-900 bg-white/80 p-0.5 rounded-md" />
+                              </button>
+
+                              {openRowColorPickerIdx === idx && (
+                                <div className="absolute left-0 top-[32px] z-[150] bg-[#161618] border border-[#2d2d30] rounded-xl p-2.5 shadow-2xl w-44 flex flex-col gap-2">
+                                  <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider text-left">Select Color</div>
+                                  <div className="grid grid-cols-4 gap-1.5 justify-items-center">
+                                    {[
+                                      "#3b82f6", "#10b981", "#8b5cf6", "#ec4899",
+                                      "#f59e0b", "#f43f5e", "#0ea5e9", "#eab308",
+                                      "#f97316", "#6366f1", "#14b8a6", "#84cc16",
+                                      "#22c55e", "#64748b", "#a1a1aa", "#ffffff"
+                                    ].map((paletteColor) => (
+                                      <button
+                                        key={paletteColor}
+                                        type="button"
+                                        onClick={() => {
+                                          const updatedColors = [...chartIndividualColors];
+                                          while (updatedColors.length <= idx) {
+                                            updatedColors.push("");
+                                          }
+                                          updatedColors[idx] = paletteColor;
+                                          setChartIndividualColors(updatedColors);
+                                          setOpenRowColorPickerIdx(null);
+                                        }}
+                                        className="w-5 h-5 rounded-md cursor-pointer border border-[#27272a] hover:scale-110 transition-transform block"
+                                        style={{ backgroundColor: paletteColor }}
+                                      />
+                                    ))}
+                                  </div>
+                                  <div className="border-t border-[#27272a] pt-1.5 flex items-center justify-between gap-1">
+                                    <span className="text-[9px] font-bold text-zinc-500 uppercase">Custom Pick</span>
+                                    <input
+                                      type="color"
+                                      value={activeRowColor.startsWith("#") && activeRowColor.length === 7 ? activeRowColor : "#3b82f6"}
+                                      onChange={(e) => {
+                                        const updatedColors = [...chartIndividualColors];
+                                        while (updatedColors.length <= idx) {
+                                          updatedColors.push("");
+                                        }
+                                        updatedColors[idx] = e.target.value;
+                                        setChartIndividualColors(updatedColors);
+                                      }}
+                                      className="w-7 h-5 bg-transparent border-none cursor-pointer outline-none rounded shrink-0 p-0"
+                                    />
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updatedColors = [...chartIndividualColors];
+                                      while (updatedColors.length <= idx) {
+                                        updatedColors.push("");
+                                      }
+                                      updatedColors[idx] = "";
+                                      setChartIndividualColors(updatedColors);
+                                      setOpenRowColorPickerIdx(null);
+                                    }}
+                                    className="w-full text-center text-[9px] text-[#71717a] hover:text-white bg-zinc-805 hover:bg-zinc-800 py-1 rounded transition-colors"
+                                  >
+                                    Use Scheme Default
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            <span className="text-[10px] text-zinc-650 font-mono w-4 text-center">{idx + 1}</span>
+                            <input
+                              type="text"
+                              value={lbl}
+                              onChange={(e) => {
+                                const updated = [...chartLabels];
+                                updated[idx] = e.target.value;
+                                setChartLabels(updated);
+                              }}
+                              className="flex-1 bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3 py-1.5 text-xs text-[#f4f4f5] outline-none transition-colors"
+                              placeholder="Label"
+                            />
+                            <input
+                              type="number"
+                              value={chartValues[idx]}
+                              onChange={(e) => {
+                                const updated = [...chartValues];
+                                const parsedVal = parseFloat(e.target.value);
+                                updated[idx] = isNaN(parsedVal) ? 0 : parsedVal;
+                                setChartValues(updated);
+                              }}
+                              className="w-20 bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3 py-1.5 text-xs text-right text-[#f4f4f5] outline-none font-mono transition-colors"
+                              placeholder="Value"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (chartLabels.length > 2) {
+                                  setChartLabels(chartLabels.filter((_, i) => i !== idx));
+                                  setChartValues(chartValues.filter((_, i) => i !== idx));
+                                  if (chartIndividualColors) {
+                                    setChartIndividualColors(chartIndividualColors.filter((_, i) => i !== idx));
+                                  }
+                                }
+                              }}
+                              disabled={chartLabels.length <= 2}
+                              className="p-1.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-400/10 cursor-pointer transition-colors disabled:opacity-30 disabled:pointer-events-none shrink-0"
+                            >
+                              <Icon icon="ph:trash" className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
 
-                {/* Right side: Live Designer Preview */}
+                {/* Right side: Preview */}
                 <div className="flex flex-col h-full text-left">
-                  <span className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Live Designer Preview</span>
+                  <span className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Preview</span>
                   <div className="flex-1 bg-[#09090b] border border-[#27272a] rounded-2xl p-4 flex flex-col items-center justify-center min-h-[220px]">
                     {chartTitle && (
                       <div className="w-full text-center mb-3">
@@ -9331,12 +9908,18 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         const height = 240;
 
                         const schemeColors: Record<string, string[]> = {
-                          multicolor: ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b", "#f43f5e", "#06b6d4"],
+                          multicolor: ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b", "#f43f5e", "#06b6d4", "#f97316", "#6366f1"],
                           emerald: ["#10b981", "#34d399", "#059669", "#a7f3d0", "#047857", "#065f46"],
                           blue: ["#3b82f6", "#60a5fa", "#2563eb", "#bfdbfe", "#1d4ed8", "#1e40af"],
                           purple: ["#8b5cf6", "#a78bfa", "#7c3aed", "#ddd6fe", "#6d28d9", "#5b21b6"],
                           amber: ["#f59e0b", "#fbbf24", "#d97706", "#fde68a", "#b45309", "#92400e"],
-                          rose: ["#f43f5e", "#fb7185", "#e11d48", "#fecdd3", "#be123c", "#9f1239"]
+                          rose: ["#f43f5e", "#fb7185", "#e11d48", "#fecdd3", "#be123c", "#9f1239"],
+                          cyan: ["#06b6d4", "#22d3ee", "#0891b2", "#cffafe", "#0e7490", "#155e75"],
+                          orange: ["#f97316", "#fb923c", "#ea580c", "#ffedd5", "#c2410c", "#9a3412"],
+                          pink: ["#ec4899", "#f472b6", "#db2777", "#fce7f3", "#be185d", "#9d174d"],
+                          indigo: ["#6366f1", "#818cf8", "#4f46e5", "#e0e7ff", "#4338ca", "#3730a3"],
+                          slate: ["#64748b", "#94a3b8", "#475569", "#f1f5f9", "#334155", "#1e293b"],
+                          forest: ["#22c55e", "#4ade80", "#16a34a", "#dcfce7", "#15803d", "#14532d"]
                         };
                         const colors = schemeColors[chartDataColor] || schemeColors.blue;
 
@@ -9369,7 +9952,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 const x = paddingLeft + 15 + idx * ((graphWidth - 20) / chartLabels.length);
                                 const y = paddingTop + graphHeight - barHeight;
                                 const barWidth = Math.max(12, ((graphWidth - 20) / chartLabels.length) * 0.6);
-                                const fill = chartDataColor === "multicolor" ? colors[idx % colors.length] : colors[0];
+                                const fill = (chartIndividualColors && chartIndividualColors[idx]) || (chartDataColor === "multicolor" ? colors[idx % colors.length] : colors[0]);
 
                                 return (
                                   <g key={idx}>
@@ -9434,13 +10017,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               )}
 
                               {/* Dots */}
-                              {pts.map((pt, idx) => (
-                                <g key={idx}>
-                                  <circle cx={pt.x} cy={pt.y} r={3} fill={stroke} stroke="transparent" strokeWidth="1" />
-                                  <text x={pt.x} y={pt.y - 6} fill="#f4f4f5" fontSize="8" fontWeight="600" textAnchor="middle">{pt.val}</text>
-                                  <text x={pt.x} y={paddingTop + graphHeight + 12} fill="#a1a1aa" fontSize="8" textAnchor="middle">{pt.lbl}</text>
-                                </g>
-                              ))}
+                              {pts.map((pt, idx) => {
+                                const ptColor = (chartIndividualColors && chartIndividualColors[idx]) || stroke;
+                                return (
+                                  <g key={idx}>
+                                    <circle cx={pt.x} cy={pt.y} r={3.5} fill={ptColor} stroke="#121212" strokeWidth="1" />
+                                    <text x={pt.x} y={pt.y - 6} fill="#f4f4f5" fontSize="8" fontWeight="600" textAnchor="middle">{pt.val}</text>
+                                    <text x={pt.x} y={paddingTop + graphHeight + 12} fill="#a1a1aa" fontSize="8" textAnchor="middle">{pt.lbl}</text>
+                                  </g>
+                                );
+                              })}
                             </svg>
                           );
                         } else {
@@ -9473,7 +10059,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 const y2_in = cy + cut * Math.sin(rad2);
 
                                 const largeArc = angle > 180 ? 1 : 0;
-                                const fill = colors[idx % colors.length];
+                                const fill = (chartIndividualColors && chartIndividualColors[idx]) || colors[idx % colors.length];
 
                                 let pathStr = "";
                                 if (pct >= 0.999) {
@@ -9511,7 +10097,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 {chartLabels.map((lbl, idx) => {
                                   const val = vals[idx] || 0;
                                   const pct = val / totalVal;
-                                  const fill = colors[idx % colors.length];
+                                  const fill = (chartIndividualColors && chartIndividualColors[idx]) || colors[idx % colors.length];
                                   return (
                                     <g key={idx} transform={`translate(0, ${idx * 16})`}>
                                       <rect width="8" height="8" rx="2" fill={fill} />
@@ -9540,7 +10126,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 </button>
                 <button
                   onClick={handleInsertChart}
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg cursor-pointer transition-colors"
+                  className="px-5 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-900 text-xs font-semibold rounded-lg cursor-pointer transition-colors"
                 >
                   {chartBeingEdited ? "Update Chart" : "Insert Chart"}
                 </button>
