@@ -5,6 +5,104 @@ import remarkGfm from 'remark-gfm';
 import { pdfjs } from 'react-pdf';
 import { motion, AnimatePresence } from 'motion/react';
 
+// Custom, highly polished minimalist number input that implements beautiful bespoke caret arrows
+function CustomNumberInput({
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  placeholder,
+  className = "",
+  suffix,
+  disabled = false,
+  align = "left",
+}: {
+  value: string | number;
+  onChange: (val: string) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  placeholder?: string;
+  className?: string;
+  suffix?: string;
+  disabled?: boolean;
+  align?: "left" | "center" | "right";
+}) {
+  const handleIncrement = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (disabled) return;
+    const currentVal = parseFloat(String(value)) || 0;
+    let newVal = currentVal + step;
+    if (max !== undefined && newVal > max) newVal = max;
+    if (min !== undefined && newVal < min) newVal = min;
+    
+    const decimalPlaces = (String(step).split('.')[1] || '').length;
+    const formattedVal = newVal.toFixed(decimalPlaces);
+    onChange(formattedVal);
+  };
+
+  const handleDecrement = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (disabled) return;
+    const currentVal = parseFloat(String(value)) || 0;
+    let newVal = currentVal - step;
+    if (min !== undefined && newVal < min) newVal = min;
+    if (max !== undefined && newVal > max) newVal = max;
+    
+    const decimalPlaces = (String(step).split('.')[1] || '').length;
+    const formattedVal = newVal.toFixed(decimalPlaces);
+    onChange(formattedVal);
+  };
+
+  return (
+    <div className="relative flex items-center w-full group">
+      <input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        disabled={disabled}
+        min={min}
+        max={max}
+        step={step}
+        className={`w-full bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3.5 py-2.5 text-[12px] text-[#f4f4f5] outline-none transition-colors ${
+          align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left"
+        } ${suffix ? "pr-14" : "pr-10"} ${className}`}
+      />
+      
+      {/* Custom Sleek Step Arrows */}
+      <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 select-none shrink-0 pointer-events-auto">
+        {suffix && (
+          <span className="text-[10px] text-[#52525b] font-mono select-none mr-0.5">{suffix}</span>
+        )}
+        <div className="flex flex-col gap-0.5 overflow-hidden max-h-9 mr-1 md:mr-0">
+          <button
+            type="button"
+            onClick={handleIncrement}
+            disabled={disabled}
+            tabIndex={-1}
+            className="p-[3px] md:p-1 text-[#71717a] hover:text-[#f4f4f5] transition-colors cursor-pointer outline-none flex items-center justify-center rounded-t-lg bg-transparent border-none"
+          >
+            <Icon icon="ph:caret-up-fill" className="w-[8px] h-[8px] md:w-[10px] md:h-[10px]" />
+          </button>
+          <button
+            type="button"
+            onClick={handleDecrement}
+            disabled={disabled}
+            tabIndex={-1}
+            className="p-[3px] md:p-1 text-[#71717a] hover:text-[#f4f4f5] transition-colors cursor-pointer outline-none flex items-center justify-center rounded-b-lg bg-transparent border-none"
+          >
+            <Icon icon="ph:caret-down-fill" className="w-[8px] h-[8px] md:w-[10px] md:h-[10px]" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function StatisticsTools({
   onAddHistory,
   selectedHistoryItem,
@@ -818,33 +916,25 @@ export function StatisticsTools({
       <div className="space-y-4">
         <div>
           <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Population Size (N)</label>
-          <div className="relative">
-            <input 
-              type="number" 
-              value={population}
-              min="1"
-              onChange={e => setPopulation(e.target.value)}
-              className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3.5 py-2.5 text-[12px] text-[#f4f4f5] outline-none transition-colors"
-              placeholder="e.g. 1000"
-            />
-            <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] text-[#52525b] font-mono">N</span>
-          </div>
+          <CustomNumberInput
+            value={population}
+            min={1}
+            onChange={val => setPopulation(val)}
+            placeholder="e.g. 1000"
+            suffix="N"
+          />
         </div>
         <div>
           <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Margin of Error (e)</label>
-          <div className="relative">
-            <input 
-              type="number" 
-              value={marginOfError}
-              step="0.01"
-              min="0.001"
-              max="0.99"
-              onChange={e => setMarginOfError(e.target.value)}
-              className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3.5 py-2.5 text-[12px] text-[#f4f4f5] outline-none transition-colors"
-              placeholder="e.g. 0.05"
-            />
-            <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] text-[#52525b] font-mono">e</span>
-          </div>
+          <CustomNumberInput
+            value={marginOfError}
+            step={0.01}
+            min={0.001}
+            max={0.99}
+            onChange={val => setMarginOfError(val)}
+            placeholder="e.g. 0.05"
+            suffix="e"
+          />
         </div>
         <div className="p-4 rounded-xl bg-[#0e0e0f] text-[11px] text-[#71717a] leading-relaxed">
           <div className="font-semibold text-[#a1a1aa] mb-1">
@@ -899,8 +989,15 @@ export function StatisticsTools({
         <div className="px-8 pt-6 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
           {valid ? (
             <div className="space-y-4 font-mono text-[11.5px] text-[#a1a1aa]">
-              <div className="p-3 bg-[#161618] rounded-lg text-center text-[#f4f4f5] text-sm font-semibold">
-                n = N / (1 + N · e²)
+              <div className="py-2.5 flex items-center justify-center gap-3 text-[#f4f4f5] font-serif text-[17px] select-none">
+                <span className="italic">n</span>
+                <span className="text-[#a1a1aa] font-sans font-normal text-base">=</span>
+                <div className="flex flex-col items-center">
+                  <span className="italic pb-1 border-b border-[#27272a] w-full text-center leading-none px-2">N</span>
+                  <span className="pt-1.5 leading-none text-[#d4d4d8] font-serif px-2">
+                    1 + <span className="italic">N</span> · <span className="italic">e</span>²
+                  </span>
+                </div>
               </div>
               <div className="space-y-2 pt-2">
                 <div className="flex justify-between border-b border-[#1b1b1d] pb-2">
@@ -946,23 +1043,19 @@ export function StatisticsTools({
       <div className="space-y-4">
         <div>
           <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Subgroup/Part Count</label>
-          <input 
-            type="number" 
+          <CustomNumberInput
             value={part}
-            min="0"
-            onChange={e => setPart(e.target.value)}
-            className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3.5 py-2.5 text-[12px] text-[#f4f4f5] outline-none transition-colors"
+            min={0}
+            onChange={val => setPart(val)}
             placeholder="e.g. 75"
           />
         </div>
         <div>
           <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Total Population</label>
-          <input 
-            type="number" 
+          <CustomNumberInput
             value={total}
-            min="1"
-            onChange={e => setTotal(e.target.value)}
-            className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3.5 py-2.5 text-[12px] text-[#f4f4f5] outline-none transition-colors"
+            min={1}
+            onChange={val => setTotal(val)}
             placeholder="e.g. 250"
           />
         </div>
@@ -1060,27 +1153,25 @@ export function StatisticsTools({
           {entries.map((entry, idx) => (
              <div key={idx} className="flex gap-2 relative group items-center">
                 <div className="text-[10.5px] font-mono text-zinc-650 w-4 text-center">{idx + 1}</div>
-                <input 
-                  type="number" 
+                <CustomNumberInput 
                   placeholder="Value (x)"
                   value={entry.value}
-                  onChange={e => {
+                  onChange={val => {
                     const newEntries = [...entries];
-                    newEntries[idx].value = e.target.value;
+                    newEntries[idx].value = val;
                     setEntries(newEntries);
                   }}
-                  className="flex-1 min-w-0 bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3.5 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
+                  className="flex-1 min-w-0 py-2 px-3"
                 />
-                <input 
-                  type="number" 
+                <CustomNumberInput 
                   placeholder="Weight (w)"
                   value={entry.weight}
-                  onChange={e => {
+                  onChange={val => {
                     const newEntries = [...entries];
-                    newEntries[idx].weight = e.target.value;
+                    newEntries[idx].weight = val;
                     setEntries(newEntries);
                   }}
-                  className="flex-1 min-w-0 bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3.5 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
+                  className="flex-1 min-w-0 py-2 px-3"
                 />
                 {entries.length > 1 && (
                   <button 
@@ -1231,35 +1322,34 @@ export function StatisticsTools({
                   placeholder="e.g. Agree"
                 />
               </div>
-
-              {/* Weight Value */}
+                         {/* Weight Value */}
               <div className="col-span-2">
-                <input 
-                  type="number" 
+                <CustomNumberInput 
                   value={choice.weight}
-                  onChange={e => {
+                  onChange={val => {
                     const newChoices = [...likertChoices];
-                    newChoices[idx].weight = parseInt(e.target.value, 10) || 0;
+                    newChoices[idx].weight = parseInt(val, 10) || 0;
                     setLikertChoices(newChoices);
                   }}
-                  className="w-full text-center bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-2 py-2 text-[12px] text-[#f4f4f5] font-mono outline-none transition-colors"
+                  align="center"
                   placeholder="Pts"
+                  className="py-2 px-1"
                 />
               </div>
 
               {/* Frequency Count */}
               <div className="col-span-3">
-                <input 
-                  type="number" 
-                  min="0"
+                <CustomNumberInput 
+                  min={0}
                   value={choice.count}
-                  onChange={e => {
+                  onChange={val => {
                     const newChoices = [...likertChoices];
-                    newChoices[idx].count = e.target.value;
+                    newChoices[idx].count = val;
                     setLikertChoices(newChoices);
                   }}
-                  className="w-full text-center bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-2 py-2 text-[12px] text-[#f4f4f5] font-mono outline-none transition-colors"
+                  align="center"
                   placeholder="Count"
+                  className="py-2 px-1"
                 />
               </div>
 

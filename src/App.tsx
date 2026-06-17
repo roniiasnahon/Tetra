@@ -884,6 +884,16 @@ export default function App() {
   const [isMoreToolsOpen, setIsMoreToolsOpen] = useState(false);
   const [isTablePickerOpen, setIsTablePickerOpen] = useState(false);
   const [tableGrid, setTableGrid] = useState({ r: 0, c: 0 });
+  
+  // Chart creation modal state
+  const [isChartModalOpen, setIsChartModalOpen] = useState(false);
+  const [chartType, setChartType] = useState<"bar" | "line" | "pie">("bar");
+  const [chartTitle, setChartTitle] = useState("");
+  const [chartDataColor, setChartDataColor] = useState<"multicolor" | "emerald" | "blue" | "purple" | "amber" | "rose">("blue");
+  const [chartLabels, setChartLabels] = useState<string[]>(["Group A", "Group B", "Group C", "Group D"]);
+  const [chartValues, setChartValues] = useState<number[]>([45, 60, 30, 50]);
+  const [chartBeingEdited, setChartBeingEdited] = useState<HTMLElement | null>(null);
+
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
@@ -898,6 +908,11 @@ export default function App() {
     y: number;
     target: HTMLTableElement;
     cell: HTMLTableCellElement | null;
+  } | null>(null);
+  const [chartContextMenu, setChartContextMenu] = useState<{
+    x: number;
+    y: number;
+    target: HTMLElement;
   } | null>(null);
   const [showLinkRenameModal, setShowLinkRenameModal] = useState(false);
   const [linkToRename, setLinkToRename] = useState<{
@@ -1326,6 +1341,326 @@ export default function App() {
         setDocSaveStatus("saving");
       }
     }
+  };
+
+  const handleInsertChart = () => {
+    if (!editorRef.current) return;
+
+    // Filter out empty rows or invalid values
+    const labels = chartLabels.map(l => l.trim() || "Item");
+    const values = chartValues.map(v => isNaN(v) ? 0 : v);
+    const maxVal = Math.max(...values, 1);
+
+    // Color schemes that fit our clean visual design
+    const schemeColors: Record<string, string[]> = {
+      multicolor: ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b", "#f43f5e", "#06b6d4"],
+      emerald: ["#10b981", "#34d399", "#059669", "#a7f3d0", "#047857", "#065f46"],
+      blue: ["#3b82f6", "#60a5fa", "#2563eb", "#bfdbfe", "#1d4ed8", "#1e40af"],
+      purple: ["#8b5cf6", "#a78bfa", "#7c3aed", "#ddd6fe", "#6d28d9", "#5b21b6"],
+      amber: ["#f59e0b", "#fbbf24", "#d97706", "#fde68a", "#b45309", "#92400e"],
+      rose: ["#f43f5e", "#fb7185", "#e11d48", "#fecdd3", "#be123c", "#9f1239"]
+    };
+
+    const activeColors = schemeColors[chartDataColor] || schemeColors.blue;
+
+    let svgContent = "";
+    const width = 500;
+    const height = 300;
+
+    if (chartType === "bar") {
+      const paddingLeft = 45;
+      const paddingRight = 20;
+      const paddingTop = 35;
+      const paddingBottom = 40;
+      const graphWidth = width - paddingLeft - paddingRight;
+      const graphHeight = height - paddingTop - paddingBottom;
+
+      // Grid lines
+      const yTicks = 4;
+      let gridLines = "";
+      for (let i = 0; i <= yTicks; i++) {
+        const y = paddingTop + (graphHeight * i) / yTicks;
+        const gridVal = Math.round(maxVal - (maxVal * i) / yTicks);
+        gridLines += `
+          <line x1="${paddingLeft}" y1="${y}" x2="${width - paddingRight}" y2="${y}" stroke="#27272a" stroke-dasharray="3,3" />
+          <text x="${paddingLeft - 8}" y="${y + 4}" fill="#71717a" font-size="10" font-family="sans-serif" text-anchor="end">${gridVal}</text>
+        `;
+      }
+
+      // Draw Bars
+      const nBars = labels.length;
+      const barSpacing = Math.min(24, graphWidth / (nBars * 2.5));
+      const totalSpacingWidth = barSpacing * (nBars + 1);
+      const remainingWidth = graphWidth - totalSpacingWidth;
+      const barWidth = Math.max(16, remainingWidth / nBars);
+
+      let bars = "";
+      for (let i = 0; i < nBars; i++) {
+        const val = values[i];
+        const barHeight = (val / maxVal) * graphHeight;
+        const x = paddingLeft + barSpacing + i * (barWidth + barSpacing);
+        const y = paddingTop + graphHeight - barHeight;
+        const color = chartDataColor === "multicolor" ? activeColors[i % activeColors.length] : activeColors[0];
+
+        bars += `
+          <g>
+            <rect x="${x}" y="${y}" width="${barWidth}" height="${Math.max(2, barHeight)}" rx="4" fill="${color}" />
+            <text x="${x + barWidth / 2}" y="${y - 6}" fill="#f4f4f5" font-size="10" font-family="sans-serif" font-weight="600" text-anchor="middle">${val}</text>
+            <text x="${x + barWidth / 2}" y="${paddingTop + graphHeight + 16}" fill="#a1a1aa" font-size="10" font-family="sans-serif" text-anchor="middle">${labels[i]}</text>
+          </g>
+        `;
+      }
+
+      svgContent = `
+        <svg viewBox="0 0 ${width} ${height}" width="100%" height="auto" style="display:block; background:transparent;">
+          ${gridLines}
+          ${bars}
+        </svg>
+      `;
+
+    } else if (chartType === "line") {
+      const paddingLeft = 45;
+      const paddingRight = 20;
+      const paddingTop = 35;
+      const paddingBottom = 40;
+      const graphWidth = width - paddingLeft - paddingRight;
+      const graphHeight = height - paddingTop - paddingBottom;
+
+      // Grid lines
+      const yTicks = 4;
+      let gridLines = "";
+      for (let i = 0; i <= yTicks; i++) {
+        const y = paddingTop + (graphHeight * i) / yTicks;
+        const gridVal = Math.round(maxVal - (maxVal * i) / yTicks);
+        gridLines += `
+          <line x1="${paddingLeft}" y1="${y}" x2="${width - paddingRight}" y2="${y}" stroke="#27272a" stroke-dasharray="3,3" />
+          <text x="${paddingLeft - 8}" y="${y + 4}" fill="#71717a" font-size="10" font-family="sans-serif" text-anchor="end">${gridVal}</text>
+        `;
+      }
+
+      const nPoints = labels.length;
+      const stepX = nPoints > 1 ? graphWidth / (nPoints - 1) : graphWidth;
+
+      const points = values.map((val, i) => {
+        const x = paddingLeft + i * stepX;
+        const y = paddingTop + graphHeight - (val / maxVal) * graphHeight;
+        return { x, y, val, label: labels[i] };
+      });
+
+      // Path
+      let pathD = "";
+      let areaD = `M ${paddingLeft} ${paddingTop + graphHeight}`;
+
+      if (points.length > 0) {
+        pathD = `M ${points[0].x} ${points[0].y}`;
+        areaD += ` L ${points[0].x} ${points[0].y}`;
+        for (let i = 1; i < points.length; i++) {
+          pathD += ` L ${points[i].x} ${points[i].y}`;
+          areaD += ` L ${points[i].x} ${points[i].y}`;
+        }
+        areaD += ` L ${points[points.length - 1].x} ${paddingTop + graphHeight} Z`;
+      }
+
+      const strokeColor = activeColors[0];
+      const fillColor = chartDataColor === "multicolor" ? activeColors[1] || strokeColor : strokeColor;
+
+      let markers = "";
+      points.forEach((pt) => {
+        markers += `
+          <g>
+            <circle cx="${pt.x}" cy="${pt.y}" r="4" fill="${strokeColor}" stroke="transparent" stroke-width="1.5" />
+            <text x="${pt.x}" y="${pt.y - 8}" fill="#f4f4f5" font-size="10" font-family="sans-serif" font-weight="600" text-anchor="middle">${pt.val}</text>
+            <text x="${pt.x}" y="${paddingTop + graphHeight + 16}" fill="#a1a1aa" font-size="10" font-family="sans-serif" text-anchor="middle">${pt.label}</text>
+          </g>
+        `;
+      });
+
+      svgContent = `
+        <svg viewBox="0 0 ${width} ${height}" width="100%" height="auto" style="display:block; background:transparent;">
+          ${gridLines}
+          <path d="${areaD}" fill="${fillColor}" fill-opacity="0.12" />
+          <path d="${pathD}" fill="none" stroke="${strokeColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+          ${markers}
+        </svg>
+      `;
+
+    } else {
+      // Pie Chart
+      const cx = 180;
+      const cy = 150;
+      const r = 95;
+      const cut = 55;
+
+      const totalVal = values.reduce((a, b) => a + b, 0) || 1;
+      let cumulativeAngle = 0;
+
+      let slices = "";
+      let legendItems = "";
+
+      for (let i = 0; i < labels.length; i++) {
+        const val = values[i];
+        const pct = val / totalVal;
+        const angle = pct * 360;
+
+        const rad1 = (cumulativeAngle - 90) * (Math.PI / 180);
+        const rad2 = (cumulativeAngle + angle - 90) * (Math.PI / 180);
+
+        const x1_out = cx + r * Math.cos(rad1);
+        const y1_out = cy + r * Math.sin(rad1);
+        const x2_out = cx + r * Math.cos(rad2);
+        const y2_out = cy + r * Math.sin(rad2);
+
+        const x1_in = cx + cut * Math.cos(rad1);
+        const y1_in = cy + cut * Math.sin(rad1);
+        const x2_in = cx + cut * Math.cos(rad2);
+        const y2_in = cy + cut * Math.sin(rad2);
+
+        const largeArc = angle > 180 ? 1 : 0;
+        const color = activeColors[i % activeColors.length];
+
+        let pathStr = "";
+        if (pct >= 0.999) {
+          pathStr = `
+            <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${r - cut}" />
+          `;
+        } else {
+          pathStr = `
+            <path d="M ${x1_in} ${y1_in} L ${x1_out} ${y1_out} A ${r} ${r} 0 ${largeArc} 1 ${x2_out} ${y2_out} L ${x2_in} ${y2_in} A ${cut} ${cut} 0 ${largeArc} 0 ${x1_in} ${y1_in} Z" fill="${color}" stroke="transparent" stroke-width="1.5" />
+          `;
+        }
+
+        slices += pathStr;
+
+        const midAngle = cumulativeAngle + angle / 2;
+        const midRad = (midAngle - 90) * (Math.PI / 180);
+        const tx = cx + (r * 0.75) * Math.cos(midRad);
+        const ty = cy + (r * 0.75) * Math.sin(midRad);
+
+        if (pct > 0.05) {
+          slices += `<text x="${tx}" y="${ty + 4}" fill="#ffffff" font-size="9.5" font-family="sans-serif" font-weight="600" text-anchor="middle">${Math.round(pct * 100)}%</text>`;
+        }
+
+        legendItems += `
+          <g transform="translate(0, ${i * 24})">
+            <rect width="12" height="12" rx="3" fill="${color}" />
+            <text x="20" y="10" fill="#f4f4f5" font-size="11.5" font-family="sans-serif" font-weight="500">${labels[i]}</text>
+            <text x="135" y="10" fill="#71717a" font-size="11" font-family="sans-serif" text-anchor="end">${val} (${Math.round(pct * 100)}%)</text>
+          </g>
+        `;
+
+        cumulativeAngle += angle;
+      }
+
+      svgContent = `
+        <svg viewBox="0 0 ${width} ${height}" width="100%" height="auto" style="display:block; background:transparent;">
+          ${slices}
+          <circle cx="${cx}" cy="${cy}" r="${cut - 2}" fill="transparent" />
+          <text x="${cx}" y="${cy - 3}" fill="#71717a" font-size="9" font-family="sans-serif" text-anchor="middle" font-weight="600" letter-spacing="0.5">TOTAL</text>
+          <text x="${cx}" y="${cy + 11}" fill="#f4f4f5" font-size="15" font-family="sans-serif" text-anchor="middle" font-weight="700">${values.reduce((a, b) => a + b, 0)}</text>
+          
+          <g transform="translate(325, ${Math.max(40, 150 - (labels.length * 24) / 2)})">
+            ${legendItems}
+          </g>
+        </svg>
+      `;
+    }
+
+    const chartState = { chartType, chartTitle, chartDataColor, chartLabels, chartValues };
+    const encodedState = btoa(encodeURIComponent(JSON.stringify(chartState)));
+    
+    const chartWrapperHTML = `
+      <div class="chart-embed-wrapper" data-chart-state="${encodedState}" contenteditable="false" style="display:block; margin:24px auto; max-width:540px; text-align:center;">
+        ${svgContent}
+      </div>
+    `;
+    const chartHTML = chartWrapperHTML + `<p><br></p>`;
+
+    const targetChart = editorRef.current?.querySelector('[data-is-editing="true"]') as HTMLElement | null;
+
+    if (targetChart) {
+      const el = document.createElement("div");
+      el.innerHTML = chartWrapperHTML;
+      const frag = document.createDocumentFragment();
+      while (el.firstChild) {
+        frag.appendChild(el.firstChild);
+      }
+      targetChart.parentNode?.replaceChild(frag, targetChart);
+    } else if (chartBeingEdited && chartBeingEdited.parentNode) {
+      const el = document.createElement("div");
+      el.innerHTML = chartWrapperHTML;
+      const frag = document.createDocumentFragment();
+      while (el.firstChild) {
+        frag.appendChild(el.firstChild);
+      }
+      chartBeingEdited.parentNode.replaceChild(frag, chartBeingEdited);
+    } else {
+      if (document.activeElement !== editorRef.current) {
+        editorRef.current.focus();
+      }
+
+      let success = false;
+      try {
+        success = document.execCommand("insertHTML", false, chartHTML);
+      } catch (e) {
+        console.warn("execCommand failed:", e);
+      }
+
+      if (!success) {
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          if (editorRef.current.contains(range.commonAncestorContainer)) {
+            range.deleteContents();
+            const el = document.createElement("div");
+            el.innerHTML = chartHTML;
+            const frag = document.createDocumentFragment();
+            let node, lastNode;
+            while ((node = el.firstChild)) {
+              lastNode = frag.appendChild(node);
+            }
+            range.insertNode(frag);
+            if (lastNode) {
+              range.setStartAfter(lastNode);
+              range.setEndAfter(lastNode);
+              selection.removeAllRanges();
+              selection.addRange(range);
+            }
+          } else {
+            editorRef.current.innerHTML += chartHTML;
+          }
+        } else {
+          editorRef.current.innerHTML += chartHTML;
+        }
+      }
+    }
+
+    // Sync state
+    const html = editorRef.current.innerHTML;
+    lastContentRef.current = html;
+    setDocumentContent(html);
+    setTabs((prev) =>
+      prev.map((t) => (t.id === activeTabId ? { ...t, content: html } : t)),
+    );
+    setDocSaveStatus("saving");
+    
+    // Clean up temporary edit tokens
+    if (editorRef.current) {
+      editorRef.current.querySelectorAll('[data-is-editing="true"]').forEach((el) => {
+        el.removeAttribute('data-is-editing');
+      });
+    }
+    setChartBeingEdited(null);
+    setIsChartModalOpen(false);
+  };
+
+  const closeChartModal = () => {
+    if (editorRef.current) {
+      editorRef.current.querySelectorAll('[data-is-editing="true"]').forEach((el) => {
+        el.removeAttribute('data-is-editing');
+      });
+    }
+    setChartBeingEdited(null);
+    setIsChartModalOpen(false);
   };
 
   useEffect(() => {
@@ -6978,7 +7313,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     >
                       <Icon icon="ph:text-underline" className="w-4 h-4" />
                     </button>
-                    <div className="relative flex items-center">
+                    <div className="relative flex items-center gap-1">
                       <button
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => {
@@ -6990,6 +7325,19 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       >
                         <Icon icon="ph:table" className="w-4 h-4" />
                       </button>
+                      
+                      <button
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setChartBeingEdited(null);
+                          setIsChartModalOpen(true);
+                        }}
+                        className={`p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022] ${isChartModalOpen ? "bg-[#2c2c2e] text-white" : ""}`}
+                        title="Insert Chart/Graph"
+                      >
+                        <Icon icon="ph:chart-bar" className="w-4 h-4" />
+                      </button>
+
                       <AnimatePresence>
                         {isTablePickerOpen && (
                           <motion.div
@@ -7021,17 +7369,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             <div className="text-[11px] text-center text-zinc-400 font-mono">
                               {tableGrid.r > 0 && tableGrid.c > 0 ? `${tableGrid.r} × ${tableGrid.c}` : "Select size"}
                             </div>
-                            <div className="h-[1px] bg-[#2d2d30]" />
-                            <button
-                              onClick={() => {
-                                handleRemoveTable();
-                                setIsTablePickerOpen(false);
-                              }}
-                              className="text-xs text-red-400/90 hover:text-red-400 hover:bg-red-400/10 py-1.5 px-2 rounded w-full flex flex-row items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                            >
-                              <Icon icon="ph:trash" className="w-3.5 h-3.5" />
-                              Remove Table
-                            </button>
                           </motion.div>
                         )}
                       </AnimatePresence>
@@ -7492,10 +7829,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           const target = e.target as HTMLElement;
                           const anchor = target.closest("a");
                           const table = target.closest("table") as HTMLTableElement | null;
+                          const chart = target.closest(".chart-embed-wrapper") as HTMLElement | null;
+                          
                           if (anchor) {
                             e.preventDefault();
                             e.stopPropagation();
                             setTableContextMenu(null);
+                            setChartContextMenu(null);
                             setLinkContextMenu({
                               x: e.clientX,
                               y: e.clientY,
@@ -7505,6 +7845,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             e.preventDefault();
                             e.stopPropagation();
                             setLinkContextMenu(null);
+                            setChartContextMenu(null);
                             const cell = target.closest("th, td") as HTMLTableCellElement | null;
                             setTableContextMenu({
                               x: e.clientX,
@@ -7512,6 +7853,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               target: table,
                               cell: cell,
                             });
+                          } else if (chart) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setLinkContextMenu(null);
+                            setTableContextMenu(null);
+                            setChartContextMenu({
+                              x: e.clientX,
+                              y: e.clientY,
+                              target: chart,
+                            });
+                          } else {
+                            setLinkContextMenu(null);
+                            setTableContextMenu(null);
+                            setChartContextMenu(null);
                           }
                         }}
                         onClick={(e) => {
@@ -8385,6 +8740,85 @@ Once you have content, I can help you draft sections, summarize findings, or for
         </div>
       )}
 
+      {chartContextMenu && (
+        <div
+          id="chart-context-menu"
+          className="fixed z-[9999] bg-[#121212] border border-[#27272a] rounded-lg py-1 min-w-[180px] text-[#e4e4e7] select-none text-xs font-medium shadow-2xl"
+          style={{
+            top: `${chartContextMenu.y}px`,
+            left: `${chartContextMenu.x}px`,
+          }}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const t = chartContextMenu.target;
+              if (t) {
+                const rawState = t.getAttribute('data-chart-state');
+                if (rawState) {
+                  try {
+                    const decoded = JSON.parse(decodeURIComponent(atob(rawState)));
+                    if (decoded.chartType) setChartType(decoded.chartType);
+                    if (decoded.chartTitle !== undefined) setChartTitle(decoded.chartTitle);
+                    if (decoded.chartDataColor) setChartDataColor(decoded.chartDataColor);
+                    if (decoded.chartLabels) setChartLabels(decoded.chartLabels);
+                    if (decoded.chartValues) setChartValues(decoded.chartValues);
+                  } catch (err) {
+                    console.warn("Could not decode chart state");
+                  }
+                }
+                t.setAttribute('data-is-editing', 'true');
+                setChartBeingEdited(t);
+                setIsChartModalOpen(true);
+              }
+              setChartContextMenu(null);
+            }}
+            className="w-full text-left px-3 py-2.5 hover:bg-[#202022] transition-colors flex items-center gap-2 cursor-pointer"
+          >
+            <Edit2 size={13} />
+            <span>Modify Chart</span>
+          </button>
+          
+          <div className="h-[1px] bg-[#1a1a1c] w-full" />
+          
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const t = chartContextMenu.target;
+              if (t) {
+                // If it is followed by an empty p tag, maybe remove that too (optional, let's keep it simple)
+                t.remove();
+                if (editorRef.current) {
+                  const html = editorRef.current.innerHTML;
+                  lastContentRef.current = html;
+                  setDocumentContent(html);
+                  setTabs((prev) =>
+                    prev.map((tb) =>
+                      tb.id === activeTabId ? { ...tb, content: html } : tb,
+                    ),
+                  );
+                  setDocSaveStatus("saving");
+                }
+              }
+              setChartContextMenu(null);
+            }}
+            className="w-full text-left px-3 py-2.5 hover:bg-[#202022] text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-2 cursor-pointer font-semibold"
+          >
+            <Icon icon="ph:trash" className="w-[14px] h-[14px]" />
+            <span>Remove Chart</span>
+          </button>
+        </div>
+      )}
+
       {showLinkRenameModal && linkToRename && (
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 select-none"
@@ -8715,6 +9149,404 @@ Once you have content, I can help you draft sections, summarize findings, or for
             storageMode={storageMode}
             setStorageMode={setStorageMode}
           />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isChartModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            role="dialog"
+            aria-modal="true"
+            className="fixed inset-0 bg-black/80 z-[110] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#121212] border border-[#2d2d30] rounded-2xl w-full max-w-4xl p-6 relative text-zinc-300 flex flex-col max-h-[90vh]"
+            >
+              <button
+                onClick={closeChartModal}
+                className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer"
+              >
+                <Icon icon="ph:x" className="w-5 h-5" />
+              </button>
+
+              <div className="mb-4 text-left">
+                <h3 className="text-sm font-semibold text-zinc-150 uppercase tracking-wider">Embed Scientific Chart/Graph</h3>
+                <p className="text-xs text-zinc-500">Design and insert fully responsive data visualizations into your documents.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto pr-1 flex-1">
+                {/* Left side: Form Settings */}
+                <div className="space-y-4 text-left">
+                  {/* Chart Type Selector */}
+                  <div>
+                    <span className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Chart Type</span>
+                    <div className="grid grid-cols-3 gap-1 bg-[#1a1a1c] p-1 rounded-xl border border-[#27272a]">
+                      {[
+                        { id: "bar", label: "Bar Chart", icon: "ph:chart-bar" },
+                        { id: "line", label: "Line Chart", icon: "ph:chart-line" },
+                        { id: "pie", label: "Doughnut", icon: "ph:chart-pie" },
+                      ].map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => setChartType(t.id as any)}
+                          className={`py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                            chartType === t.id
+                              ? "bg-[#2c2c2e] text-white"
+                              : "text-zinc-400 hover:text-zinc-250"
+                          }`}
+                        >
+                          <Icon icon={t.icon} className="w-3.5 h-3.5" />
+                          <span>{t.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Title */}
+                  <div>
+                    <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Chart Title</label>
+                    <input
+                      type="text"
+                      value={chartTitle}
+                      onChange={(e) => setChartTitle(e.target.value)}
+                      placeholder="e.g. Sales Analysis"
+                      className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3.5 py-2 text-xs text-[#f4f4f5] outline-none transition-colors"
+                    />
+                  </div>
+
+                  {/* Color Schemes */}
+                  <div>
+                    <span className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Color Scheme</span>
+                    <div className="flex flex-row flex-wrap gap-2">
+                      {[
+                        { id: "multicolor", label: "Multicolor", colors: ["#10b981", "#3b82f6", "#8b5cf6"] },
+                        { id: "blue", label: "Blue Slate", colors: ["#3b82f6"] },
+                        { id: "emerald", label: "Emerald", colors: ["#10b981"] },
+                        { id: "purple", label: "Amethyst", colors: ["#8b5cf6"] },
+                        { id: "amber", label: "Amber", colors: ["#f59e0b"] },
+                        { id: "rose", label: "Crimson", colors: ["#f43f5e"] }
+                      ].map((scheme) => (
+                        <button
+                          key={scheme.id}
+                          onClick={() => setChartDataColor(scheme.id as any)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] transition-colors cursor-pointer ${
+                            chartDataColor === scheme.id
+                              ? "border-zinc-500 bg-zinc-800/40 text-white"
+                              : "border-[#27272a] bg-[#161616] text-zinc-400 hover:border-zinc-500"
+                          }`}
+                        >
+                          <div className="flex -space-x-1.5">
+                            {scheme.colors.map((c, i) => (
+                              <div key={i} className="w-2.5 h-2.5 rounded-full ring-1 ring-black" style={{ backgroundColor: c }} />
+                            ))}
+                          </div>
+                          <span>{scheme.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Data Series Fields */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1.5">
+                      <span className="text-[10px] text-[#71717a] font-bold uppercase tracking-wider">Data Series ({chartLabels.length})</span>
+                      <button
+                        onClick={() => {
+                          setChartLabels([...chartLabels, `Group ${String.fromCharCode(65 + chartLabels.length)}`]);
+                          setChartValues([...chartValues, 50]);
+                        }}
+                        className="text-[10px] text-zinc-400 hover:text-white bg-[#1a1a1c] border border-[#27272a] px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                      >
+                        + Add Row
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                      {chartLabels.map((lbl, idx) => (
+                        <div key={idx} className="flex gap-2 items-center">
+                          <span className="text-[10px] text-zinc-650 font-mono w-4 text-center">{idx + 1}</span>
+                          <input
+                            type="text"
+                            value={lbl}
+                            onChange={(e) => {
+                              const updated = [...chartLabels];
+                              updated[idx] = e.target.value;
+                              setChartLabels(updated);
+                            }}
+                            className="flex-1 bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3 py-1.5 text-xs text-[#f4f4f5] outline-none transition-colors"
+                            placeholder="Label"
+                          />
+                          <input
+                            type="number"
+                            value={chartValues[idx]}
+                            onChange={(e) => {
+                              const updated = [...chartValues];
+                              const parsedVal = parseFloat(e.target.value);
+                              updated[idx] = isNaN(parsedVal) ? 0 : parsedVal;
+                              setChartValues(updated);
+                            }}
+                            className="w-20 bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3 py-1.5 text-xs text-right text-[#f4f4f5] outline-none font-mono transition-colors"
+                            placeholder="Value"
+                          />
+                          <button
+                            onClick={() => {
+                              if (chartLabels.length > 2) {
+                                setChartLabels(chartLabels.filter((_, i) => i !== idx));
+                                setChartValues(chartValues.filter((_, i) => i !== idx));
+                              }
+                            }}
+                            disabled={chartLabels.length <= 2}
+                            className="p-1.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-400/10 cursor-pointer transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                          >
+                            <Icon icon="ph:trash" className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right side: Live Designer Preview */}
+                <div className="flex flex-col h-full text-left">
+                  <span className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Live Designer Preview</span>
+                  <div className="flex-1 bg-[#09090b] border border-[#27272a] rounded-2xl p-4 flex flex-col items-center justify-center min-h-[220px]">
+                    {chartTitle && (
+                      <div className="w-full text-center mb-3">
+                        <span className="text-[11px] font-semibold text-zinc-450 uppercase tracking-wider font-sans">{chartTitle}</span>
+                      </div>
+                    )}
+                    
+                    {/* Render raw SVG dynamically based on inputs for preview */}
+                    <div className="w-full max-w-[340px] md:max-w-full">
+                      {(() => {
+                        const vals = chartValues.map(v => isNaN(v) ? 0 : v);
+                        const maxVal = Math.max(...vals, 1);
+                        const width = 450;
+                        const height = 240;
+
+                        const schemeColors: Record<string, string[]> = {
+                          multicolor: ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b", "#f43f5e", "#06b6d4"],
+                          emerald: ["#10b981", "#34d399", "#059669", "#a7f3d0", "#047857", "#065f46"],
+                          blue: ["#3b82f6", "#60a5fa", "#2563eb", "#bfdbfe", "#1d4ed8", "#1e40af"],
+                          purple: ["#8b5cf6", "#a78bfa", "#7c3aed", "#ddd6fe", "#6d28d9", "#5b21b6"],
+                          amber: ["#f59e0b", "#fbbf24", "#d97706", "#fde68a", "#b45309", "#92400e"],
+                          rose: ["#f43f5e", "#fb7185", "#e11d48", "#fecdd3", "#be123c", "#9f1239"]
+                        };
+                        const colors = schemeColors[chartDataColor] || schemeColors.blue;
+
+                        if (chartType === "bar") {
+                          const paddingLeft = 35;
+                          const paddingRight = 10;
+                          const paddingTop = 25;
+                          const paddingBottom = 30;
+                          const graphWidth = width - paddingLeft - paddingRight;
+                          const graphHeight = height - paddingTop - paddingBottom;
+
+                          return (
+                            <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto">
+                              {/* Grid lines */}
+                              {[0, 1, 2, 3, 4].map((i) => {
+                                const y = paddingTop + (graphHeight * i) / 4;
+                                const gridVal = Math.round(maxVal - (maxVal * i) / 4);
+                                return (
+                                  <React.Fragment key={i}>
+                                    <line x1={paddingLeft} y1={y} x2={width - paddingRight} y2={y} stroke="#27272a" strokeDasharray="3,3" />
+                                    <text x={paddingLeft - 6} y={y + 3} fill="#71717a" fontSize="9" textAnchor="end">{gridVal}</text>
+                                  </React.Fragment>
+                                );
+                              })}
+
+                              {/* Bars */}
+                              {chartLabels.map((lbl, idx) => {
+                                const val = vals[idx] || 0;
+                                const barHeight = (val / maxVal) * graphHeight;
+                                const x = paddingLeft + 15 + idx * ((graphWidth - 20) / chartLabels.length);
+                                const y = paddingTop + graphHeight - barHeight;
+                                const barWidth = Math.max(12, ((graphWidth - 20) / chartLabels.length) * 0.6);
+                                const fill = chartDataColor === "multicolor" ? colors[idx % colors.length] : colors[0];
+
+                                return (
+                                  <g key={idx}>
+                                    <rect x={x} y={y} width={barWidth} height={Math.max(2, barHeight)} rx="3" fill={fill} />
+                                    <text x={x + barWidth / 2} y={y - 4} fill="#f4f4f5" fontSize="8" fontWeight="600" textAnchor="middle">{val}</text>
+                                    <text x={x + barWidth / 2} y={paddingTop + graphHeight + 12} fill="#a1a1aa" fontSize="8" textAnchor="middle">{lbl}</text>
+                                  </g>
+                                );
+                              })}
+                            </svg>
+                          );
+                        } else if (chartType === "line") {
+                          const paddingLeft = 35;
+                          const paddingRight = 10;
+                          const paddingTop = 25;
+                          const paddingBottom = 30;
+                          const graphWidth = width - paddingLeft - paddingRight;
+                          const graphHeight = height - paddingTop - paddingBottom;
+                          const stepX = chartLabels.length > 1 ? graphWidth / (chartLabels.length - 1) : graphWidth;
+
+                          const pts = vals.map((val, idx) => {
+                            const x = paddingLeft + idx * stepX;
+                            const y = paddingTop + graphHeight - (val / maxVal) * graphHeight;
+                            return { x, y, val, lbl: chartLabels[idx] };
+                          });
+
+                          let pathD = pts.length > 0 ? `M ${pts[0].x} ${pts[0].y}` : "";
+                          let areaD = pts.length > 0 ? `M ${paddingLeft} ${paddingTop + graphHeight} L ${pts[0].x} ${pts[0].y}` : "";
+                          for (let i = 1; i < pts.length; i++) {
+                            pathD += ` L ${pts[i].x} ${pts[i].y}`;
+                            areaD += ` L ${pts[i].x} ${pts[i].y}`;
+                          }
+                          if (pts.length > 0) {
+                            areaD += ` L ${pts[pts.length - 1].x} ${paddingTop + graphHeight} Z`;
+                          }
+
+                          const stroke = colors[0];
+                          const fillOpacity = chartDataColor === "multicolor" ? colors[1] || stroke : stroke;
+
+                          return (
+                            <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto">
+                              {/* Grid lines */}
+                              {[0, 1, 2, 3, 4].map((i) => {
+                                const y = paddingTop + (graphHeight * i) / 4;
+                                const gridVal = Math.round(maxVal - (maxVal * i) / 4);
+                                return (
+                                  <React.Fragment key={i}>
+                                    <line x1={paddingLeft} y1={y} x2={width - paddingRight} y2={y} stroke="#27272a" strokeDasharray="3,3" />
+                                    <text x={paddingLeft - 6} y={y + 3} fill="#71717a" fontSize="9" textAnchor="end">{gridVal}</text>
+                                  </React.Fragment>
+                                );
+                              })}
+
+                              {/* Fill area */}
+                              {pts.length > 0 && (
+                                <path d={areaD} fill={fillOpacity} fillOpacity="0.12" />
+                              )}
+                              
+                              {/* Line */}
+                              {pts.length > 0 && (
+                                <path d={pathD} fill="none" stroke={stroke} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                              )}
+
+                              {/* Dots */}
+                              {pts.map((pt, idx) => (
+                                <g key={idx}>
+                                  <circle cx={pt.x} cy={pt.y} r={3} fill={stroke} stroke="transparent" strokeWidth="1" />
+                                  <text x={pt.x} y={pt.y - 6} fill="#f4f4f5" fontSize="8" fontWeight="600" textAnchor="middle">{pt.val}</text>
+                                  <text x={pt.x} y={paddingTop + graphHeight + 12} fill="#a1a1aa" fontSize="8" textAnchor="middle">{pt.lbl}</text>
+                                </g>
+                              ))}
+                            </svg>
+                          );
+                        } else {
+                          // Pie/Doughnut Chart
+                          const cx = 130;
+                          const cy = 110;
+                          const r = 70;
+                          const cut = 40;
+                          const totalVal = vals.reduce((a, b) => a + b, 0) || 1;
+                          let cumulativeAngle = 0;
+
+                          return (
+                            <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto">
+                              {chartLabels.map((lbl, idx) => {
+                                const val = vals[idx] || 0;
+                                const pct = val / totalVal;
+                                const angle = pct * 360;
+
+                                const rad1 = (cumulativeAngle - 90) * (Math.PI / 180);
+                                const rad2 = (cumulativeAngle + angle - 90) * (Math.PI / 180);
+
+                                const x1_out = cx + r * Math.cos(rad1);
+                                const y1_out = cy + r * Math.sin(rad1);
+                                const x2_out = cx + r * Math.cos(rad2);
+                                const y2_out = cy + r * Math.sin(rad2);
+
+                                const x1_in = cx + cut * Math.cos(rad1);
+                                const y1_in = cy + cut * Math.sin(rad1);
+                                const x2_in = cx + cut * Math.cos(rad2);
+                                const y2_in = cy + cut * Math.sin(rad2);
+
+                                const largeArc = angle > 180 ? 1 : 0;
+                                const fill = colors[idx % colors.length];
+
+                                let pathStr = "";
+                                if (pct >= 0.999) {
+                                  pathStr = `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx - 0.01} ${cy - r} Z`;
+                                } else {
+                                  pathStr = `M ${x1_in} ${y1_in} L ${x1_out} ${y1_out} A ${r} ${r} 0 ${largeArc} 1 ${x2_out} ${y2_out} L ${x2_in} ${y2_in} A ${cut} ${cut} 0 ${largeArc} 0 ${x1_in} ${y1_in} Z`;
+                                }
+
+                                const gElement = (
+                                  <g key={idx}>
+                                    {pct >= 0.999 ? (
+                                      <>
+                                        <circle cx={cx} cy={cy} r={r} fill="none" stroke={fill} strokeWidth={r - cut} />
+                                        <circle cx={cx} cy={cy} r={r} fill="none" stroke="transparent" strokeWidth="1.5" />
+                                        <circle cx={cx} cy={cy} r={cut} fill="none" stroke="transparent" strokeWidth="1.5" />
+                                      </>
+                                    ) : (
+                                      <path d={pathStr} fill={fill} stroke="transparent" strokeWidth="1.5" />
+                                    )}
+                                  </g>
+                                );
+
+                                cumulativeAngle += angle;
+                                return gElement;
+                              })}
+                              {/* Center details */}
+                              <circle cx={cx} cy={cy} r={cut - 2} fill="transparent" />
+                              <text x={cx} y={cy - 2} fill="#71717a" fontSize="8" textAnchor="middle" fontWeight="600">TOTAL</text>
+                              <text x={cx} y={cy + 9} fill="#f4f4f5" fontSize="11" textAnchor="middle" fontWeight="700">
+                                {vals.reduce((a, b) => a + b, 0)}
+                              </text>
+
+                              {/* Legends */}
+                              <g transform="translate(240, 25)">
+                                {chartLabels.map((lbl, idx) => {
+                                  const val = vals[idx] || 0;
+                                  const pct = val / totalVal;
+                                  const fill = colors[idx % colors.length];
+                                  return (
+                                    <g key={idx} transform={`translate(0, ${idx * 16})`}>
+                                      <rect width="8" height="8" rx="2" fill={fill} />
+                                      <text x="14" y="8" fill="#f4f4f5" fontSize="9" fontWeight="500">{lbl}</text>
+                                      <text x="180" y="8" fill="#71717a" fontSize="9" textAnchor="end">{val} ({Math.round(pct * 100)}%)</text>
+                                    </g>
+                                  );
+                                })}
+                              </g>
+                            </svg>
+                          );
+                        }
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="flex justify-end gap-3 pt-4 mt-4 border-t border-[#2d2d30]">
+                <button
+                  onClick={closeChartModal}
+                  className="px-4 py-2 bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-white text-xs font-semibold rounded-lg cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleInsertChart}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg cursor-pointer transition-colors"
+                >
+                  {chartBeingEdited ? "Update Chart" : "Insert Chart"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 
