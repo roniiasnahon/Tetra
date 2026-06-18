@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { pdfjs } from 'react-pdf';
 import { motion, AnimatePresence } from 'motion/react';
 
-// Custom, highly polished minimalist number input that implements beautiful bespoke caret arrows
+// Custom, highly polished minimalist number input
 function CustomNumberInput({
   value,
   onChange,
@@ -29,34 +29,6 @@ function CustomNumberInput({
   disabled?: boolean;
   align?: "left" | "center" | "right";
 }) {
-  const handleIncrement = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (disabled) return;
-    const currentVal = parseFloat(String(value)) || 0;
-    let newVal = currentVal + step;
-    if (max !== undefined && newVal > max) newVal = max;
-    if (min !== undefined && newVal < min) newVal = min;
-    
-    const decimalPlaces = (String(step).split('.')[1] || '').length;
-    const formattedVal = newVal.toFixed(decimalPlaces);
-    onChange(formattedVal);
-  };
-
-  const handleDecrement = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (disabled) return;
-    const currentVal = parseFloat(String(value)) || 0;
-    let newVal = currentVal - step;
-    if (min !== undefined && newVal < min) newVal = min;
-    if (max !== undefined && newVal > max) newVal = max;
-    
-    const decimalPlaces = (String(step).split('.')[1] || '').length;
-    const formattedVal = newVal.toFixed(decimalPlaces);
-    onChange(formattedVal);
-  };
-
   return (
     <div className="relative flex items-center w-full group">
       <input
@@ -70,35 +42,14 @@ function CustomNumberInput({
         step={step}
         className={`w-full bg-[#161616] border border-[#27272a] focus:border-zinc-500 rounded-xl px-3.5 py-2.5 text-[12px] text-[#f4f4f5] outline-none transition-colors ${
           align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left"
-        } ${suffix ? "pr-14" : "pr-10"} ${className}`}
+        } ${suffix ? "pr-10" : "pr-3.5"} ${className}`}
       />
       
-      {/* Custom Sleek Step Arrows */}
-      <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 select-none shrink-0 pointer-events-auto">
-        {suffix && (
-          <span className="text-[10px] text-[#52525b] font-mono select-none mr-0.5">{suffix}</span>
-        )}
-        <div className="flex flex-col gap-0.5 overflow-hidden max-h-9 mr-1 md:mr-0">
-          <button
-            type="button"
-            onClick={handleIncrement}
-            disabled={disabled}
-            tabIndex={-1}
-            className="p-[3px] md:p-1 text-[#71717a] hover:text-[#f4f4f5] transition-colors cursor-pointer outline-none flex items-center justify-center rounded-t-lg bg-transparent border-none"
-          >
-            <Icon icon="ph:caret-up-fill" className="w-[8px] h-[8px] md:w-[10px] md:h-[10px]" />
-          </button>
-          <button
-            type="button"
-            onClick={handleDecrement}
-            disabled={disabled}
-            tabIndex={-1}
-            className="p-[3px] md:p-1 text-[#71717a] hover:text-[#f4f4f5] transition-colors cursor-pointer outline-none flex items-center justify-center rounded-b-lg bg-transparent border-none"
-          >
-            <Icon icon="ph:caret-down-fill" className="w-[8px] h-[8px] md:w-[10px] md:h-[10px]" />
-          </button>
+      {suffix && (
+        <div className="absolute right-3.5 top-1/2 -translate-y-1/2 flex items-center select-none pointer-events-none">
+          <span className="text-[10px] text-[#52525b] font-mono">{suffix}</span>
         </div>
-      </div>
+      )}
     </div>
   );
 }
