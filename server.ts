@@ -2402,7 +2402,7 @@ CRITICAL RULES:
   // Research Chat & Academic Draft Optimizer Route
   app.post("/api/research/chat", async (req, res) => {
     try {
-      const { messages, context, model, webSearch, attachment } = req.body;
+      const { messages, context, model, thinkingLevel, webSearch, attachment } = req.body;
 
       if (!messages || !Array.isArray(messages)) {
         res.status(400).json({ error: "Invalid request payload. Messages are required." });
@@ -2732,6 +2732,12 @@ ${researchContext}
         activeSystemInstruction += "\n\nCRITICAL REAL-TIME GROUNDING INLINE CITATIONS INSTRUCTIONS:\nWhen answering using the DuckDuckGo / You.com / Internet Web Grounding Results context, you MUST use inline markdown links for citations, formatted exactly as `[[1] Source Title](URL)`. DO NOT output a '### References' section at the end. Place these inline citation links right next to the facts inside your text to anchor your assertions firmly (e.g. `apples are red [[1] Apple Wiki](https://example.com/apple)`).";
       }
 
+      if (thinkingLevel === "Deep") {
+        activeSystemInstruction += "\n\n[DEEP THINKING MODE ENABLED]: You must reason extensively about the user's request. Think step-by-step, explore edge cases, and provide an exceptionally detailed, thorough, and highly analytical response.";
+      } else if (thinkingLevel === "Instant") {
+        activeSystemInstruction += "\n\n[THINKING DISABLED]: You must provide a direct, concise, and immediate response without any extensive reasoning, self-reflection, or internal thinking steps. Do not output any <think> tags. Keep it brief and to the point.";
+      }
+
       const messagesPayload = [
         {
           role: "system",
@@ -2773,13 +2779,14 @@ ${researchContext}
         } catch (err: any) {
           console.warn(`[LLM] Mistral streaming failed (${mistralModelToUse}):`, err.message || err);
           
-          if (err.message?.includes("MISTRAL_API_KEY is not configured")) {
+          if (err.message?.includes("MISTRAL_API_KEY is not configured") && requestedModel.includes("mistral")) {
              throw new Error("MISTRAL_API_KEY is not defined. Please configure it in your Settings.");
           }
 
           // ONLY fallback to Gemini if they didn't explicitly request a Mistral model
           if (!requestedModel.includes("mistral")) {
             console.warn("[LLM] Falling back to Gemini...");
+            tryMistralFirst = false;
             usedGeminiFallback = true;
           } else {
              throw new Error(`Mistral LLM failed: ${err.message || "Unknown error during streaming."}`);
@@ -2856,6 +2863,12 @@ ${researchContext}
           systemInstruction: activeSystemInstruction,
           temperature: 0.7,
         };
+
+        if (thinkingLevel === "Deep") {
+          geminiConfig.thinkingConfig = { thinkingLevel: "HIGH" };
+        } else if (thinkingLevel === "Instant") {
+          geminiConfig.thinkingConfig = { thinkingLevel: "MINIMAL" };
+        }
 
         if (webSearchEnabled) {
           geminiConfig.tools = [{ googleSearch: {} }];

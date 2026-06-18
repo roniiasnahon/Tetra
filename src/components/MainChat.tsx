@@ -19,6 +19,8 @@ interface MainChatProps {
   isOnline?: boolean;
   selectedModel: string;
   setSelectedModel: (val: string) => void;
+  thinkingLevel: 'Standard' | 'Deep' | 'Instant';
+  setThinkingLevel: (val: 'Standard' | 'Deep' | 'Instant') => void;
   webSearchEnabled: boolean;
   setWebSearchEnabled: (val: boolean) => void;
   attachedFile: { fileId: string; fileName: string; mimetype: string; url: string } | null;
@@ -26,11 +28,10 @@ interface MainChatProps {
   handlePaperclipClick: () => void;
 }
 
-const modelsList = [
-  { id: 'auto', label: 'Auto (Gemini)' },
-  { id: 'mistral-large-latest', label: 'Mistral Large' },
-  { id: 'ministral-8b-latest', label: 'Ministral 8B Edge' },
-  { id: 'codestral-latest', label: 'Codestral Code' },
+export const modelsList = [
+  { id: 'auto', label: 'Composition I', desc: 'Fastest answers & multi-modal' },
+  { id: 'mistral-large-latest', label: 'Sift II', desc: 'Advanced multi-lingual logic' },
+  { id: 'codestral-latest', label: 'Kindle Preview', desc: 'Optimized for scripting & automation' },
 ];
 
 const renderLinkifiedText = (text: string) => {
@@ -59,6 +60,8 @@ export const MainChat: React.FC<MainChatProps> = ({
   isOnline = true,
   selectedModel,
   setSelectedModel,
+  thinkingLevel,
+  setThinkingLevel,
   webSearchEnabled,
   webSearchEnabled: _webSearchEnabled, // backup binding
   webSearchEnabled: webSearchVal,
@@ -70,6 +73,8 @@ export const MainChat: React.FC<MainChatProps> = ({
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const [isThinkingMenuOpen, setIsThinkingMenuOpen] = useState(false);
+  const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -78,11 +83,6 @@ export const MainChat: React.FC<MainChatProps> = ({
   const onSend = () => {
     if (!chatInput.trim() || isAiTyping) return;
     handleSendMessage();
-  };
-
-  const getSelectedModelLabel = () => {
-    const found = modelsList.find(m => m.id === selectedModel);
-    return found ? found.label : 'Auto (Gemini)';
   };
 
   return (
@@ -184,9 +184,9 @@ export const MainChat: React.FC<MainChatProps> = ({
         </div>
 
         <div className="shrink-0 p-6 flex flex-col items-center gap-4">
-          <div className="w-full max-w-3xl bg-[#1a1a1a] border border-[#2d2d30] rounded-[28px] p-1.5 flex flex-col transition-all focus-within:border-zinc-700">
+          <div className="w-full max-w-2xl bg-[#1a1a1a] rounded-[28px] p-2 flex flex-col transition-all">
             {attachedFile && (
-              <div className="mx-3 mt-3 animate-fade-in w-fit">
+              <div className="mx-2 mt-1 mb-2 animate-fade-in w-fit">
                 {attachedFile.mimetype?.startsWith("image/") ? (
                   <div className="relative group w-fit">
                     <img 
@@ -228,78 +228,273 @@ export const MainChat: React.FC<MainChatProps> = ({
               </div>
             )}
 
-            <TextareaAutosize 
-              key={`main-chat-input-${tab.id}`}
-              id={`main-chat-input-${tab.id}`}
-              name={`main-chat-input-${tab.id}`}
-              autoComplete="off"
-              placeholder="Ask about anything, / for skills, @ for context..."
-              value={chatInput}
-              onChange={(e) => {
-                const val = e.target.value;
-                setChatInput(val);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  onSend();
-                }
-              }}
-              className="w-full bg-transparent text-[15px] text-[#e4e4e7] placeholder-[#52525b] py-3 px-4 resize-none focus:outline-none min-h-[52px] max-h-[300px] leading-relaxed"
-            />
-            
-            <div className="flex items-center justify-between px-2 pb-2 pt-1 relative">
-              <div className="flex items-center gap-2">
-                {/* Attachment / Upload Trigger */}
+            <div className="px-3 pt-2 pb-3">
+              <TextareaAutosize 
+                key={`main-chat-input-${tab.id}`}
+                id={`main-chat-input-${tab.id}`}
+                name={`main-chat-input-${tab.id}`}
+                autoComplete="off"
+                placeholder="Ask Cosmi..."
+                value={chatInput}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setChatInput(val);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    onSend();
+                  }
+                }}
+                className="w-full bg-transparent text-[14.5px] text-[#e4e4e7] placeholder-[#52525b] resize-none focus:outline-none min-h-[24px] max-h-[300px] leading-relaxed font-sans"
+              />
+            </div>
+
+            <div className="flex items-center justify-between px-1">
+              {/* Left Plus/Upload Icon */}
+              <div className="relative shrink-0 flex items-center gap-2">
                 <button 
-                  onClick={handlePaperclipClick}
-                  className="flex items-center justify-center w-8 h-8 rounded-full border border-[#27272a] text-[#71717a] hover:text-[#e4e4e7] bg-transparent hover:bg-[#222222] transition-colors cursor-pointer shrink-0"
-                  title="Upload File or Photo"
+                  onClick={() => setIsPlusMenuOpen(!isPlusMenuOpen)}
+                  className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors cursor-pointer shrink-0 ${
+                    isPlusMenuOpen
+                      ? "bg-[#222222] text-[#e4e4e7]"
+                      : "text-[#71717a] hover:text-[#e4e4e7] bg-transparent hover:bg-[#222222]"
+                  }`}
+                  title="Upload or Search Options"
                 >
-                  <Icon icon="ph:plus-bold" className="w-[16px] h-[16px]" />
+                  <Icon icon="ph:plus" className={`w-5 h-5 transition-transform duration-200 ${isPlusMenuOpen ? 'rotate-45' : ''}`} />
                 </button>
 
-                {/* Web Search Grounding Toggle */}
-                <button 
-                  onClick={() => setWebSearchEnabled(!webSearchVal)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-colors text-xs font-semibold cursor-pointer border ${
-                    webSearchVal 
-                      ? 'bg-zinc-800 border-zinc-600 text-white' 
-                      : 'border-[#27272a] text-[#71717a] hover:text-[#e4e4e7] bg-transparent hover:bg-[#222222]'
-                  }`}
-                >
-                  <Icon icon={webSearchVal ? "ph:globe-hemisphere-east-fill" : "ph:globe"} className="w-3.5 h-3.5" />
-                  <span>Web</span>
-                </button>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                {isAiTyping ? (
+                {webSearchVal && (
                   <button 
-                    onClick={handleStopGeneration}
-                    className="bg-red-500/20 text-red-500 hover:bg-red-500/30 rounded-full transition-all flex items-center justify-center w-9 h-9 cursor-pointer relative ease-out duration-150"
+                    onClick={() => setWebSearchEnabled(false)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#252528] hover:bg-[#2a2a2d] transition-colors rounded-full text-[#e4e4e7] cursor-pointer group shrink-0"
                   >
-                    <Icon icon="ph:spinner-gap" className="w-6 h-6 animate-spin absolute" />
-                    <Icon icon="ph:stop-fill" className="w-3 h-3" />
-                  </button>
-                ) : (
-                  <button 
-                    onClick={onSend}
-                    disabled={!chatInput.trim()}
-                    className={`p-2 bg-white text-zinc-950 rounded-full transition-all flex items-center justify-center w-9 h-9 ${
-                      chatInput.trim()
-                        ? 'opacity-100 hover:bg-zinc-200 cursor-pointer' 
-                        : 'opacity-40 cursor-not-allowed'
-                    }`}
-                  >
-                    <Icon icon="ph:arrow-up-bold" className="w-5 h-5" />
+                    <Icon icon="ph:globe" className="w-[15px] h-[15px] text-[#a1a1aa] group-hover:text-[#e4e4e7] transition-colors" />
+                    <span className="text-[13px] font-normal leading-none font-jakarta">Search web</span>
                   </button>
                 )}
+
+                {isPlusMenuOpen && (
+                  <>
+                    {/* Transparent backdrop overlay for safe close */}
+                    <div 
+                      className="fixed inset-0 z-[99] bg-transparent" 
+                      onClick={() => setIsPlusMenuOpen(false)}
+                    />
+                    
+                    {/* Plus Options Menu */}
+                    <div className="absolute bottom-full left-0 mb-2.5 w-[200px] bg-[#1a1a1e] rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
+                      {/* Upload files */}
+                      <button
+                        onClick={() => {
+                          setIsPlusMenuOpen(false);
+                          handlePaperclipClick();
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-zinc-350 hover:text-white hover:bg-zinc-800/40 transition-none font-jakarta cursor-pointer"
+                      >
+                        <Icon icon="ph:paperclip-horizontal" className="w-[18px] h-[18px] text-zinc-450 shrink-0" />
+                        <span className="text-[13px] font-normal text-zinc-300 leading-none">Upload files</span>
+                      </button>
+
+                      {/* Web Search Grounding */}
+                      <button
+                        onClick={() => {
+                          setWebSearchEnabled(!webSearchVal);
+                          setIsPlusMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left font-jakarta cursor-pointer transition-none ${
+                          webSearchVal
+                            ? "bg-zinc-800/30 text-zinc-100"
+                            : "text-zinc-300 hover:text-white hover:bg-zinc-800/40"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Icon 
+                            icon="ph:globe" 
+                            className={`w-[18px] h-[18px] shrink-0 ${webSearchVal ? "text-zinc-400" : "text-zinc-500"}`} 
+                          />
+                          <span className="text-[13px] font-normal text-zinc-300 leading-none">Search web</span>
+                        </div>
+                        {webSearchVal && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
+                        )}
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
+
+              {/* Right Menu and Send */}
+              <div className="flex items-center gap-2">
+                {/* Model Choosing Dropdown Inline */}
+                <div className="relative shrink-0">
+                  <button
+                  onClick={() => {
+                    if (isModelMenuOpen) {
+                      setIsThinkingMenuOpen(false);
+                    }
+                    setIsModelMenuOpen(!isModelMenuOpen);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors text-xs font-semibold cursor-pointer bg-transparent hover:bg-[#222222] font-jakarta text-[#71717a]"
+                  title="Choose AI Model"
+                >
+                  <span className="flex items-center gap-1">
+                    <span className="text-white">{modelsList.find(m => m.id === selectedModel)?.label || 'Composition I'}</span>
+                    {thinkingLevel !== 'Standard' && (
+                      <span className="text-[#515155] text-[10.5px] font-normal">
+                        ({thinkingLevel})
+                      </span>
+                    )}
+                  </span>
+                  <Icon icon="ph:caret-down-bold" className="w-3 h-3 text-zinc-500" />
+                </button>
+
+                {isModelMenuOpen && (
+                  <>
+                    {/* Transparent backdrop overlay for safe close */}
+                    <div 
+                      className="fixed inset-0 z-[99] bg-transparent" 
+                      onClick={() => {
+                        setIsModelMenuOpen(false);
+                        setIsThinkingMenuOpen(false);
+                      }}
+                    />
+                    {/* Dropdown Menu */}
+                    <div className="absolute bottom-full right-0 mb-2 w-[280px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
+                      {modelsList.map((m) => {
+                        const isSelected = selectedModel === m.id;
+                        return (
+                          <button
+                            key={m.id}
+                            onClick={() => {
+                              setSelectedModel(m.id);
+                              setIsModelMenuOpen(false);
+                              setIsThinkingMenuOpen(false);
+                            }}
+                            className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                              isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
+                            }`}
+                          >
+                            {/* Left check col */}
+                            <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
+                              {isSelected ? (
+                                <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
+                              ) : (
+                                <div className="w-3.5" />
+                              )}
+                            </div>
+                            {/* Right aligned text block */}
+                            <div className="flex flex-col gap-0.5 text-left min-w-0">
+                              <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
+                                {m.label}
+                              </span>
+                              <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
+                                {m.desc}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+
+                      {/* Divider */}
+                      <div className="border-t border-[#2d2d30]/60 my-1" />
+
+                      {/* Thinking Level visual item exactly matching screenshot */}
+                      <div 
+                        onClick={() => {
+                          setIsThinkingMenuOpen(!isThinkingMenuOpen);
+                        }}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                          isThinkingMenuOpen ? 'bg-zinc-800/30' : ''
+                        }`}
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <div className="w-4 shrink-0" />
+                          <div className="flex flex-col gap-0.5 text-left">
+                            <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">Thinking level</span>
+                            <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">{thinkingLevel}</span>
+                          </div>
+                        </div>
+                        <Icon icon="ph:caret-right-bold" className="w-3 h-3 text-zinc-500 mr-1.5 shrink-0" />
+                      </div>
+
+                      {/* Nested Flyout Menu */}
+                      {isThinkingMenuOpen && (
+                        <div className="absolute right-full bottom-0 mr-2 w-[260px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[101] flex flex-col gap-0.5">
+                          {/* Thinking Options List */}
+                          {[
+                            { id: 'Standard', label: 'Standard', desc: 'Balanced intelligence & speed' },
+                            { id: 'Deep', label: 'Deep thinking', desc: 'Extensive reasoning for complex queries' },
+                            { id: 'Instant', label: 'Instant', desc: 'Direct responses without deep reasoning' }
+                          ].map((opt) => {
+                            const isSelected = thinkingLevel === opt.id;
+                            return (
+                              <button
+                                key={opt.id}
+                                onClick={() => {
+                                  setThinkingLevel(opt.id as any);
+                                  setIsThinkingMenuOpen(false);
+                                }}
+                                className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                  isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
+                                }`}
+                              >
+                                {/* Left Check col */}
+                                <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
+                                  {isSelected ? (
+                                    <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
+                                  ) : (
+                                    <div className="w-3.5" />
+                                  )}
+                                </div>
+                                {/* Options text block */}
+                                <div className="flex flex-col gap-0.5 text-left min-w-0 font-jakarta">
+                                  <span className="text-[13.5px] font-semibold text-zinc-100 leading-tight">
+                                    {opt.label}
+                                  </span>
+                                  <span className="text-[11.5px] text-zinc-400 leading-tight">
+                                    {opt.desc}
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+
+                      {/* Far right send / stop button */}
+                      {isAiTyping ? (
+                        <button 
+                          onClick={handleStopGeneration}
+                          className="bg-red-500/20 text-red-500 hover:bg-red-500/30 rounded-full transition-all flex items-center justify-center w-8.5 h-8.5 shrink-0 cursor-pointer relative"
+                        >
+                          <Icon icon="ph:spinner-gap" className="w-5 h-5 animate-spin absolute" />
+                          <Icon icon="ph:stop-fill" className="w-2.5 h-2.5" />
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={onSend}
+                          disabled={!chatInput.trim()}
+                          className={`flex items-center justify-center w-8.5 h-8.5 rounded-full transition-all shrink-0 ${
+                            chatInput.trim()
+                              ? 'bg-white text-zinc-950 hover:bg-zinc-200 cursor-pointer shadow-sm' 
+                              : 'bg-zinc-800/40 text-zinc-600 cursor-not-allowed border border-zinc-800/10'
+                          }`}
+                          title="Send message"
+                        >
+                          <Icon icon="ph:arrow-up-bold" className="w-4 h-4 font-bold" />
+                        </button>
+                      )}
             </div>
           </div>
         </div>
       </div>
+    </div>
 
       {!isOnline && (
         <div className="absolute inset-0 bg-transparent z-[99] flex flex-col items-center justify-center p-6 text-center animate-fade-in pointer-events-auto">

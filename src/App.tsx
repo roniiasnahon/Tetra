@@ -4,7 +4,7 @@ import TextareaAutosize from "react-textarea-autosize";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { marked } from "marked";
-import { MainChat } from "./components/MainChat";
+import { MainChat, modelsList } from "./components/MainChat";
 import { TypewriterMarkdown } from "./components/TypewriterMarkdown";
 import { DynamicShimmer } from "./components/DynamicShimmer";
 import { motion, AnimatePresence } from "motion/react";
@@ -785,8 +785,42 @@ export default function App() {
     (window as any).ipcRenderer !== undefined ||
     (window as any).process?.versions?.electron !== undefined
   );
+  const isDesktopApp = isElectronApp || (typeof window !== 'undefined' && (window as any).__TAURI__ !== undefined);
   const cleanTitleStr = (t?: string) =>
     t ? t.replace(/[*#]/g, "").trim() : "";
+
+  const handleMinimize = () => {
+    if ((window as any).__TAURI__) {
+      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+        getCurrentWindow().minimize();
+      }).catch(console.error);
+    } else {
+      (window as any).electron?.minimize?.();
+    }
+  };
+
+  const handleMaximize = () => {
+    if ((window as any).__TAURI__) {
+      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+        getCurrentWindow().toggleMaximize();
+      }).catch(console.error);
+    } else {
+      (window as any).electron?.maximize?.();
+    }
+  };
+
+  const handleCloseApp = () => {
+    if ((window as any).__TAURI__) {
+      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+        getCurrentWindow().close();
+      }).catch((err) => {
+        console.error(err);
+        (window as any).electron?.close?.();
+      });
+    } else {
+      (window as any).electron?.close?.();
+    }
+  };
 
   const [isAssistantOpen, setIsAssistantOpen] = useState(true);
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== "undefined" ? navigator.onLine : true);
@@ -993,6 +1027,12 @@ export default function App() {
   const [tabIdToDelete, setTabIdToDelete] = useState<string | null>(null);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
+  // Desktop app exit confirmation modal state
+  const [isExitConfirmOpen, setIsExitConfirmOpen] = useState(false);
+
+  // Tab drag-and-drop state
+  const dragStartIndexRef = useRef<number | null>(null);
+
   // Link and Table context menu and rename modal state
   const [linkContextMenu, setLinkContextMenu] = useState<{
     x: number;
@@ -1018,6 +1058,84 @@ export default function App() {
   } | null>(null);
   const [renameText, setRenameText] = useState("");
   const [renameUrl, setRenameUrl] = useState("");
+
+  // Library folders and files drag-and-drop state
+  const draggedLibraryItemRef = useRef<{ type: "paper" | "folder"; id: string; title?: string } | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [dragOverRootLibrary, setDragOverRootLibrary] = useState(false);
+
+  const handleLibraryDragStart = (e: React.DragEvent, type: "paper" | "folder", id: string, title?: string) => {
+    draggedLibraryItemRef.current = { type, id, title };
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", id);
+  };
+
+  const handleLibraryDragOverFolder = (e: React.DragEvent, folderId: string) => {
+    e.preventDefault();
+    if (!draggedLibraryItemRef.current) return;
+    if (draggedLibraryItemRef.current.type === "paper") {
+      setDragOverFolderId(folderId);
+    } else if (draggedLibraryItemRef.current.type === "folder" && draggedLibraryItemRef.current.id !== folderId) {
+      setDragOverFolderId(folderId);
+    }
+  };
+
+  const handleFolderDragLeave = () => {
+    setDragOverFolderId(null);
+  };
+
+  const handleLibraryDropOnFolder = async (e: React.DragEvent, targetFolderId: string) => {
+    e.preventDefault();
+    setDragOverFolderId(null);
+    const dragged = draggedLibraryItemRef.current;
+    if (!dragged) return;
+
+    if (dragged.type === "paper") {
+      const paperTitle = dragged.title;
+      const paper = papers.find((p) => p.title === paperTitle);
+      if (paper && paper.folderId !== targetFolderId) {
+        dbSetPaper({
+          ...paper,
+          folderId: targetFolderId,
+        });
+      }
+    } else if (dragged.type === "folder") {
+      const draggedFolderId = dragged.id;
+      if (draggedFolderId === targetFolderId) return;
+      const startIndex = folders.findIndex((f) => f.id === draggedFolderId);
+      const hoverIndex = folders.findIndex((f) => f.id === targetFolderId);
+      if (startIndex !== -1 && hoverIndex !== -1) {
+        const updated = [...folders];
+        const [movedFolder] = updated.splice(startIndex, 1);
+        updated.splice(hoverIndex, 0, movedFolder);
+        setFolders(updated);
+      }
+    }
+    draggedLibraryItemRef.current = null;
+  };
+
+  const handleLibraryDragOverRoot = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (draggedLibraryItemRef.current && draggedLibraryItemRef.current.type === "paper") {
+      setDragOverRootLibrary(true);
+    }
+  };
+
+  const handleLibraryDropOnRoot = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverRootLibrary(false);
+    const dragged = draggedLibraryItemRef.current;
+    if (dragged && dragged.type === "paper") {
+      const paper = papers.find((p) => p.title === dragged.title);
+      if (paper && paper.folderId) {
+        dbSetPaper({
+          ...paper,
+          folderId: "",
+        });
+      }
+    }
+    draggedLibraryItemRef.current = null;
+  };
 
   // Library toolbar and interaction states
   const [selectedPapers, setSelectedPapers] = useState<string[]>([]);
@@ -1056,9 +1174,37 @@ export default function App() {
     }
   };
 
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    dragStartIndexRef.current = index;
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: React.DragEvent, hoverIndex: number) => {
+    e.preventDefault();
+    if (dragStartIndexRef.current === null || dragStartIndexRef.current === hoverIndex) {
+      return;
+    }
+
+    const startIndex = dragStartIndexRef.current;
+    
+    // Reorder tabs array
+    setTabs((prevTabs) => {
+      const updated = [...prevTabs];
+      const [draggedItem] = updated.splice(startIndex, 1);
+      updated.splice(hoverIndex, 0, draggedItem);
+      // Update drag index ref to the current hover index since it moved
+      dragStartIndexRef.current = hoverIndex;
+      return updated;
+    });
+  };
+
+  const handleDragEnd = () => {
+    dragStartIndexRef.current = null;
+  };
+
   const requestDeleteTab = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isElectronApp) {
+    if (isDesktopApp) {
       setTabIdToDelete(id);
       setIsDeleteConfirmOpen(true);
     } else {
@@ -2875,6 +3021,9 @@ export default function App() {
   });
   const [chatInput, setChatInput] = useState("");
   const [selectedModel, setSelectedModel] = useState("auto");
+  const [thinkingLevel, setThinkingLevel] = useState<'Standard' | 'Deep' | 'Instant'>('Standard');
+  const [isAgentModelMenuOpen, setIsAgentModelMenuOpen] = useState(false);
+  const [isAgentThinkingMenuOpen, setIsAgentThinkingMenuOpen] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [callMe, setCallMe] = useState(() => {
     try {
@@ -3701,6 +3850,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
               attachment: m.attachment ? { fileId: m.attachment.fileId, fileName: m.attachment.fileName, mimetype: m.attachment.mimetype } : undefined
             })),
           model: (currentAttachment && !currentAttachment.mimetype?.startsWith("image/")) ? "mistral-large-latest" : selectedModel,
+          thinkingLevel: thinkingLevel,
           webSearch: webSearchEnabled,
           attachment: currentAttachment,
           context: {
@@ -4334,17 +4484,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
   return (
     <div className="h-screen bg-[#070707] text-[#e4e4e7] font-sans flex selection:bg-[#262626] overflow-hidden relative">
-      {isElectronApp && (
+      {isDesktopApp && (
         <>
           <div className="fixed top-0 left-0 right-0 h-[38px] z-[9998] [-webkit-app-region:drag] pointer-events-none" />
           <div className="fixed top-0 right-0 h-[38px] flex items-center z-[9999] [-webkit-app-region:no-drag]">
-            <button onClick={() => (window as any).electron?.minimize?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
+            <button onClick={handleMinimize} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
               <Icon icon="ph:minus" className="w-[14px] h-[14px]" />
             </button>
-            <button onClick={() => (window as any).electron?.maximize?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
+            <button onClick={handleMaximize} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
               <Icon icon="ph:square" className="w-[12px] h-[12px]" />
             </button>
-            <button onClick={() => (window as any).electron?.close?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-red-500 transition-colors cursor-pointer flex items-center justify-center">
+            <button onClick={() => setIsExitConfirmOpen(true)} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-red-500 transition-colors cursor-pointer flex items-center justify-center">
               <Icon icon="ph:x" className="w-[14px] h-[14px]" />
             </button>
           </div>
@@ -4832,7 +4982,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
             <div className="flex-1 overflow-y-auto px-3">
               {sidebarView === "files" && (
                 <div className="space-y-2 select-none">
-                  <div className="flex items-center justify-between px-2 mb-1.5">
+                  <div
+                    onDragOver={handleLibraryDragOverRoot}
+                    onDragLeave={() => setDragOverRootLibrary(false)}
+                    onDrop={handleLibraryDropOnRoot}
+                    className={`flex items-center justify-between px-2 mb-1.5 py-1.5 rounded-lg border transition-all ${
+                      dragOverRootLibrary
+                        ? "border-zinc-500 bg-zinc-800/40 text-white"
+                        : "border-transparent"
+                    }`}
+                  >
                     <span className="text-[10px] text-[#71717a] uppercase font-bold tracking-wider">
                       Workspace Folders
                     </span>
@@ -4867,10 +5026,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       <div key={folder.id} className="space-y-0.5">
                         {/* Folder Row */}
                         <div
-                          className={`flex items-center gap-1.5 p-1.5 rounded-lg transition-all group ${
-                            isSelected
-                              ? "bg-[#27272a]/40 text-white"
-                              : "hover:bg-[#161616] text-[#a1a1aa] hover:text-white"
+                          draggable
+                          onDragStart={(e) => handleLibraryDragStart(e, "folder", folder.id)}
+                          onDragOver={(e) => handleLibraryDragOverFolder(e, folder.id)}
+                          onDragLeave={handleFolderDragLeave}
+                          onDrop={(e) => handleLibraryDropOnFolder(e, folder.id)}
+                          className={`flex items-center gap-1.5 p-1.5 rounded-lg transition-all group border ${
+                            dragOverFolderId === folder.id
+                              ? "border-zinc-500 bg-zinc-800/40 text-white"
+                              : isSelected
+                                ? "border-transparent bg-[#27272a]/40 text-white"
+                                : "border-transparent hover:bg-[#161616] text-[#a1a1aa] hover:text-white"
                           }`}
                         >
                           <button
@@ -4943,6 +5109,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               folderFiles.map((file, fIdx) => (
                                 <button
                                   key={fIdx}
+                                  draggable
+                                  onDragStart={(e) => handleLibraryDragStart(e, "paper", file.title, file.title)}
                                   onClick={() => handlePaperClick(file)}
                                   className="w-full flex items-center gap-1.5 pr-1 pl-1 py-1 rounded-[6px] text-[#71717a] hover:text-[#f4f4f5] hover:bg-[#161616]/40 transition-all text-left min-w-0 cursor-pointer group"
                                   title={file.title}
@@ -5466,28 +5634,32 @@ Once you have content, I can help you draft sections, summarize findings, or for
           <div
             className="flex-1 flex items-end h-full ml-1 gap-0 overflow-x-auto custom-scrollbar-h min-w-0 [-webkit-app-region:no-drag]"
             style={{
-              paddingRight: isElectronApp 
+              paddingRight: isDesktopApp 
                 ? (isAssistantOpen ? "150px" : "235px") 
                 : (isAssistantOpen ? "16px" : "96px"),
               WebkitMaskImage: !isAssistantOpen
-                ? (isElectronApp
+                ? (isDesktopApp
                     ? "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 230px), rgba(0,0,0,0) calc(100% - 140px))"
                     : "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 90px), rgba(0,0,0,0) 100%)")
-                : (isElectronApp
+                : (isDesktopApp
                     ? "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 145px), rgba(0,0,0,0) 100%)"
                     : "none"),
               maskImage: !isAssistantOpen
-                ? (isElectronApp
+                ? (isDesktopApp
                     ? "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 230px), rgba(0,0,0,0) calc(100% - 140px))"
                     : "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 90px), rgba(0,0,0,0) 100%)")
-                : (isElectronApp
+                : (isDesktopApp
                     ? "linear-gradient(to right, rgba(0,0,0,1) calc(100% - 145px), rgba(0,0,0,0) 100%)"
                     : "none"),
             }}
           >
-            {tabs.map((tab) => (
+            {tabs.map((tab, index) => (
               <div
                 key={tab.id}
+                draggable={true}
+                onDragStart={(e) => handleDragStart(e, index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDragEnd={handleDragEnd}
                 onClick={() => {
                   setActiveTabId(tab.id);
                   if (tab.type === "tools") setSidebarView("tools");
@@ -5495,7 +5667,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   else if (tab.type === "chat") setSidebarView("chats");
                   else setSidebarView("files");
                 }}
-                className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[8px] transition-colors cursor-pointer text-[13px] chrome-tab ${
+                className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[8px] transition-colors cursor-grab active:cursor-grabbing text-[13px] chrome-tab select-none ${
                   activeTabId === tab.id
                     ? "bg-[#121212] text-[#e4e4e7] chrome-tab-active"
                     : "bg-transparent text-[#a1a1aa] hover:bg-[#121214] border-none"
@@ -5552,7 +5724,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
           {/* Right Header Navigation & Panel Controls */}
           {!isAssistantOpen && (
-            <div className={`absolute bottom-[3px] z-20 flex items-center [-webkit-app-region:no-drag] ${isElectronApp ? "right-[145px]" : "right-2"}`}>
+            <div className={`absolute bottom-[3px] z-20 flex items-center [-webkit-app-region:no-drag] ${isDesktopApp ? "right-[145px]" : "right-2"}`}>
               <button
                 onClick={() => setIsAssistantOpen(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1a1a1a] border border-[#27272a] text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#222222] hover:border-[#3f3f46] transition-all cursor-pointer text-[12px] font-medium font-jakarta active:scale-[0.98] whitespace-nowrap"
@@ -5971,6 +6143,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   isOnline={isOnline}
                   selectedModel={selectedModel}
                   setSelectedModel={setSelectedModel}
+                  thinkingLevel={thinkingLevel}
+                  setThinkingLevel={setThinkingLevel}
                   webSearchEnabled={webSearchEnabled}
                   setWebSearchEnabled={setWebSearchEnabled}
                   attachedFile={attachedFile}
@@ -6430,7 +6604,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 <tr
                                   key={folder.id}
                                   onClick={() => setSelectedFolderId(folder.id)}
-                                  className="hover:bg-[#1a1a1a]/40 transition-colors group cursor-pointer"
+                                  draggable
+                                  onDragStart={(e) => handleLibraryDragStart(e, "folder", folder.id)}
+                                  onDragOver={(e) => handleLibraryDragOverFolder(e, folder.id)}
+                                  onDragLeave={handleFolderDragLeave}
+                                  onDrop={(e) => handleLibraryDropOnFolder(e, folder.id)}
+                                  className={`transition-colors group cursor-pointer ${
+                                    dragOverFolderId === folder.id
+                                      ? "bg-zinc-800/60 border-y border-zinc-500"
+                                      : "hover:bg-[#1a1a1a]/40"
+                                  }`}
                                 >
                                   <td className={`pl-6 pr-3 font-medium ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}>
                                     <div className="flex items-center gap-3">
@@ -6536,7 +6719,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       <div className="flex items-center gap-2 mb-4">
                         <button
                           onClick={() => setSelectedFolderId(null)}
-                          className="flex items-center gap-1 text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                          onDragOver={handleLibraryDragOverRoot}
+                          onDragLeave={() => setDragOverRootLibrary(false)}
+                          onDrop={handleLibraryDropOnRoot}
+                          className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors cursor-pointer border ${
+                            dragOverRootLibrary
+                              ? "border-zinc-500 bg-zinc-800/40 text-white font-semibold"
+                              : "border-transparent text-zinc-400 hover:text-white"
+                          }`}
                         >
                           <Icon icon="ph:caret-left" className="w-3.5 h-3.5" />
                           <span>All Folders</span>
@@ -6671,6 +6861,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     <tr
                                       key={idx}
                                       onClick={() => handlePaperClick(paper)}
+                                      draggable
+                                      onDragStart={(e) => handleLibraryDragStart(e, "paper", paper.title, paper.title)}
                                       className={`hover:bg-[#1a1a1a]/40 transition-colors group cursor-pointer ${isChecked ? "bg-[#1a1a1a]/25" : ""}`}
                                     >
                                       <td
@@ -8403,11 +8595,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
       {/* Right Section - AI Assistant Window Panel */}
       {isAssistantOpen && (
-        <div className={`p-[4px] flex h-full shrink-0 ${isElectronApp ? "pt-[38px]" : ""}`}>
+        <div className={`p-[4px] flex h-full shrink-0 ${isDesktopApp ? "pt-[38px]" : ""}`}>
           <div className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden animate-slide-in relative">
             <div className={`flex flex-col h-full w-full transition-all duration-300 ${!isOnline ? "blur-[6px] select-none pointer-events-none" : ""}`}>
             {/* Assistant Header */}
-            <div className={`h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212] relative ${isElectronApp ? "" : "[-webkit-app-region:drag]"}`}>
+            <div className={`h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212] relative ${isDesktopApp ? "" : "[-webkit-app-region:drag]"}`}>
               <div className="relative flex-1 min-w-0 pr-4 [-webkit-app-region:no-drag]">
                 <button
                   onClick={() =>
@@ -8720,35 +8912,169 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </button>
                   </div>
 
-                  {isAiTyping ? (
-                    <button
-                      onClick={() => {
-                        abortControllerRef.current?.abort();
-                        setIsAiTyping(false);
-                        updateChatMessages((prev) => prev, false);
-                      }}
-                      className="text-[#ef4444] hover:bg-[#2d2d30] transition-colors p-[6px] rounded-md cursor-pointer relative"
-                    >
-                      <Icon
-                        icon="ph:spinner-gap"
-                        className="w-5 h-5 animate-spin"
-                      />
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() =>
-                        handleSendMessage(undefined, { fromSidePanel: true })
-                      }
-                      disabled={!assistantInput.trim()}
-                      className={`transition-colors p-[6px] rounded-md cursor-pointer ${
-                        assistantInput.trim()
-                          ? "text-[#f4f4f5] hover:bg-[#2d2d30]"
-                          : "text-[#52525b] cursor-not-allowed"
-                      }`}
-                    >
-                      <Icon icon="ph:paper-plane-right" className="w-5 h-5" />
-                    </button>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {/* Model Choosing Dropdown */}
+                    <div className="relative">
+                      <button
+                        onClick={() => {
+                          if (isAgentModelMenuOpen) {
+                            setIsAgentThinkingMenuOpen(false);
+                          }
+                          setIsAgentModelMenuOpen(!isAgentModelMenuOpen);
+                        }}
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] transition-colors text-[11px] font-semibold cursor-pointer bg-transparent hover:bg-[#2d2d30] font-jakarta ${
+                          isAgentModelMenuOpen ? "text-[#e4e4e7]" : "text-[#71717a]"
+                        }`}
+                        title="Choose AI Model"
+                      >
+                        <span className="flex items-center gap-1">
+                          <span className="text-white">{modelsList.find(m => m.id === selectedModel)?.label || 'Composition I'}</span>
+                          {thinkingLevel !== 'Standard' && (
+                            <span className="text-[#71717a]">
+                              {thinkingLevel}
+                            </span>
+                          )}
+                        </span>
+                        <Icon icon="ph:caret-down-bold" className="w-3 h-3 text-zinc-500" />
+                      </button>
+
+                      {isAgentModelMenuOpen && (
+                        <>
+                          <div 
+                            className="fixed inset-0 z-[99] bg-transparent" 
+                            onClick={() => {
+                              setIsAgentModelMenuOpen(false);
+                              setIsAgentThinkingMenuOpen(false);
+                            }}
+                          />
+                          <div className="absolute bottom-full right-0 mb-2 w-[280px] bg-[#1e1e22] border border-zinc-800/80 rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
+                            {modelsList.map((m) => {
+                              const isSelected = selectedModel === m.id;
+                              return (
+                                <button
+                                  key={m.id}
+                                  onClick={() => {
+                                    setSelectedModel(m.id);
+                                    setIsAgentModelMenuOpen(false);
+                                    setIsAgentThinkingMenuOpen(false);
+                                  }}
+                                  className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                    isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
+                                  }`}
+                                >
+                                  <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
+                                    {isSelected ? (
+                                      <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
+                                    ) : (
+                                      <div className="w-3.5" />
+                                    )}
+                                  </div>
+                                  <div className="flex flex-col gap-0.5 text-left min-w-0">
+                                    <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
+                                      {m.label}
+                                    </span>
+                                    <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
+                                      {m.desc}
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+
+                            <div className="border-t border-[#2d2d30]/60 my-1" />
+
+                            <div 
+                              onClick={() => {
+                                setIsAgentThinkingMenuOpen(!isAgentThinkingMenuOpen);
+                              }}
+                              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                isAgentThinkingMenuOpen ? 'bg-zinc-800/30' : ''
+                              }`}
+                            >
+                              <div className="flex items-start gap-2.5">
+                                <div className="w-4 shrink-0" />
+                                <div className="flex flex-col gap-0.5 text-left">
+                                  <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">Thinking level</span>
+                                  <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">{thinkingLevel}</span>
+                                </div>
+                              </div>
+                              <Icon icon="ph:caret-right-bold" className="w-3 h-3 text-zinc-500 mr-1.5 shrink-0" />
+                            </div>
+
+                            {isAgentThinkingMenuOpen && (
+                              <div className="absolute right-full bottom-0 mr-2 w-[260px] bg-[#1e1e22] border border-zinc-800/80 rounded-2xl p-1.5 shadow-2xl z-[101] flex flex-col gap-0.5">
+                                {[
+                                  { id: 'Standard', label: 'Standard', desc: 'Balanced intelligence & speed' },
+                                  { id: 'Deep', label: 'Deep thinking', desc: 'Extensive reasoning for complex queries' },
+                                  { id: 'Instant', label: 'Instant', desc: 'Direct responses without deep reasoning' }
+                                ].map((opt) => {
+                                  const isSelected = thinkingLevel === opt.id;
+                                  return (
+                                    <button
+                                      key={opt.id}
+                                      onClick={() => {
+                                        setThinkingLevel(opt.id as any);
+                                        setIsAgentThinkingMenuOpen(false);
+                                      }}
+                                      className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                        isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
+                                      }`}
+                                    >
+                                      <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
+                                        {isSelected ? (
+                                          <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
+                                        ) : (
+                                          <div className="w-3.5" />
+                                        )}
+                                      </div>
+                                      <div className="flex flex-col gap-0.5 text-left min-w-0">
+                                        <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
+                                          {opt.label}
+                                        </span>
+                                        <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
+                                          {opt.desc}
+                                        </span>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {isAiTyping ? (
+                      <button
+                        onClick={() => {
+                          abortControllerRef.current?.abort();
+                          setIsAiTyping(false);
+                          updateChatMessages((prev) => prev, false);
+                        }}
+                        className="text-[#ef4444] hover:bg-[#2d2d30] transition-colors p-[6px] rounded-md cursor-pointer relative"
+                      >
+                        <Icon
+                          icon="ph:spinner-gap"
+                          className="w-5 h-5 animate-spin"
+                        />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() =>
+                          handleSendMessage(undefined, { fromSidePanel: true })
+                        }
+                        disabled={!assistantInput.trim()}
+                        className={`transition-colors p-[6px] rounded-md cursor-pointer ${
+                          assistantInput.trim()
+                            ? "text-[#f4f4f5] hover:bg-[#2d2d30]"
+                            : "text-[#52525b] cursor-not-allowed"
+                        }`}
+                      >
+                        <Icon icon="ph:paper-plane-right" className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -10438,6 +10764,54 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 text-white text-[13px] font-bold rounded-xl cursor-pointer transition-colors"
                   >
                     Close Tab
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+
+          {isExitConfirmOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              role="dialog"
+              aria-modal="true"
+              className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm px-4"
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-[#121212] border border-[#2d2d30] rounded-2xl w-full max-w-sm p-6 relative text-zinc-300 shadow-2xl"
+              >
+                <div className="mb-6 text-center">
+                  <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-4">
+                    <Icon icon="ph:warning-circle-bold" className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-[#f4f4f5] mb-2">Exit Application?</h3>
+                  <p className="text-[13px] text-zinc-500 leading-relaxed font-jakarta">
+                    Are you sure you want to exit the application? Unsaved workspace states might be lost.
+                  </p>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setIsExitConfirmOpen(false);
+                    }}
+                    className="flex-1 py-2.5 bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-white text-[13px] font-bold rounded-xl cursor-pointer transition-colors border border-[#2d2d30]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsExitConfirmOpen(false);
+                      handleCloseApp();
+                    }}
+                    className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 text-white text-[13px] font-bold rounded-xl cursor-pointer transition-colors"
+                  >
+                    Exit App
                   </button>
                 </div>
               </motion.div>
