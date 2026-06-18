@@ -5450,7 +5450,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
           {/* Tabs Container */}
           <div
-            className="flex-1 flex items-end h-full ml-1 gap-[2px] overflow-x-auto custom-scrollbar-h min-w-0 [-webkit-app-region:no-drag]"
+            className="flex-1 flex items-end h-full ml-1 gap-0 overflow-x-auto custom-scrollbar-h min-w-0 [-webkit-app-region:no-drag]"
             style={{
               paddingRight: isElectronApp 
                 ? (isAssistantOpen ? "150px" : "235px") 
@@ -5481,10 +5481,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   else if (tab.type === "chat") setSidebarView("chats");
                   else setSidebarView("files");
                 }}
-                className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[8px] transition-colors cursor-pointer text-[13px] ${
+                className={`flex items-center gap-2 px-4 h-[32px] rounded-t-[8px] transition-colors cursor-pointer text-[13px] chrome-tab ${
                   activeTabId === tab.id
-                    ? "bg-[#121212] text-[#e4e4e7] border-t border-x border-[#27272a]"
-                    : "bg-transparent text-[#a1a1aa] hover:bg-[#121214] border-t border-x border-transparent"
+                    ? "bg-[#121212] text-[#e4e4e7] chrome-tab-active"
+                    : "bg-transparent text-[#a1a1aa] hover:bg-[#121214] border-none"
                 }`}
               >
                 {tab.type === "home" ? (

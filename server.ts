@@ -3413,8 +3413,8 @@ ${textToAnalyze}
     }
   });
 
-  // Serve static UI assets and delegate routing
-  if (process.env.NODE_ENV !== "production") {
+   // serve static UI assets and delegate routing
+   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },

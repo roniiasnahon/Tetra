@@ -303,6 +303,34 @@ input[type="number"] {
   box-shadow: none !important;
 }
 
+/* Chrome-style Tab Curves */
+.chrome-tab {
+  position: relative;
+}
+
+.chrome-tab-active::before,
+.chrome-tab-active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  background-color: #121212;
+  pointer-events: none;
+}
+
+.chrome-tab-active::before {
+  left: -12px;
+  mask: radial-gradient(circle at 0% 0%, transparent 12px, black 12px);
+  -webkit-mask: radial-gradient(circle at 0% 0%, transparent 12px, black 12px);
+}
+
+.chrome-tab-active::after {
+  right: -12px;
+  mask: radial-gradient(circle at 100% 0%, transparent 12px, black 12px);
+  -webkit-mask: radial-gradient(circle at 100% 0%, transparent 12px, black 12px);
+}
+
 
 
 
