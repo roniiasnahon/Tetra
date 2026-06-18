@@ -42,7 +42,7 @@ const renderLinkifiedText = (text: string) => {
   return parts.map((part, index) => {
     if (part.match(urlPattern)) {
       const href = part.toLowerCase().startsWith('www.') ? `http://${part}` : part;
-      return <a key={index} href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{part}</a>;
+      return <a key={index} href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline decoration-dashed decoration-skip-ink underline-offset-[3px] hover:text-blue-300 transition-colors">{part}</a>;
     }
     return part;
   });

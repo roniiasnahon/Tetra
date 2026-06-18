@@ -176,14 +176,18 @@ input[type="number"] {
 
 .markdown-body a {
   color: inherit;
-  text-decoration: underline;
+  text-decoration: underline dashed;
+  text-decoration-skip-ink: auto;
+  text-underline-offset: 3px;
   cursor: pointer;
   transition: color 0.15s ease-in-out;
 }
 
 .markdown-body a:hover {
   color: #f4f4f5;
-  text-decoration: underline;
+  text-decoration: underline dashed;
+  text-decoration-skip-ink: auto;
+  text-underline-offset: 3px;
 }
 
 .markdown-body a.citation-card-link {

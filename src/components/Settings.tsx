@@ -17,6 +17,10 @@ interface SettingsProps {
   onClose: () => void;
   webSearchEnabled: boolean;
   setWebSearchEnabled: (val: boolean) => void;
+  latexEnabled: boolean;
+  setLatexEnabled: (val: boolean) => void;
+  autoDraftEnabled: boolean;
+  setAutoDraftEnabled: (val: boolean) => void;
   editorFont: string;
   setEditorFont: (val: string) => void;
   editorFontSize: number;
@@ -34,6 +38,10 @@ export const Settings = ({
   onClose,
   webSearchEnabled,
   setWebSearchEnabled,
+  latexEnabled,
+  setLatexEnabled,
+  autoDraftEnabled,
+  setAutoDraftEnabled,
   editorFont,
   setEditorFont,
   editorFontSize,
@@ -65,9 +73,21 @@ export const Settings = ({
   const [instructions, setInstructions] = useState(() => {
     return localStorage.getItem("cosmi_settings_system_instructions") || "";
   });
+  const [explainStyle, setExplainStyle] = useState(() => {
+    return localStorage.getItem("cosmi_settings_explain_style") || "Standard";
+  });
+  const [writeStyle, setWriteStyle] = useState(() => {
+    return localStorage.getItem("cosmi_settings_write_style") || "Standard";
+  });
+  const [personality, setPersonality] = useState(() => {
+    return localStorage.getItem("cosmi_settings_personality") || "Success Student Mentor";
+  });
 
   // Custom Dropdown Open States
   const [isWorkDropdownOpen, setIsWorkDropdownOpen] = useState(false);
+  const [isExplainDropdownOpen, setIsExplainDropdownOpen] = useState(false);
+  const [isWriteDropdownOpen, setIsWriteDropdownOpen] = useState(false);
+  const [isPersonalityDropdownOpen, setIsPersonalityDropdownOpen] = useState(false);
   const [isFontDropdownOpen, setIsFontDropdownOpen] = useState(false);
   
   // Desktop Dropdown Open States
@@ -164,9 +184,16 @@ export const Settings = ({
       localStorage.setItem("cosmi_settings_call_me", callMe);
       localStorage.setItem("cosmi_settings_work_desc", workType);
       localStorage.setItem("cosmi_settings_system_instructions", instructions);
+      localStorage.setItem("cosmi_settings_explain_style", explainStyle);
+      localStorage.setItem("cosmi_settings_write_style", writeStyle);
+      localStorage.setItem("cosmi_settings_personality", personality);
       localStorage.setItem("cosmi_settings_appearance", appearanceTheme);
       localStorage.setItem("cosmi_settings_save_history", saveHistory.toString());
       localStorage.setItem("cosmi_settings_allow_training", allowTraining.toString());
+      
+      localStorage.setItem("cosmi_settings_web_search", webSearchEnabled.toString());
+      localStorage.setItem("cosmi_settings_latex", latexEnabled.toString());
+      localStorage.setItem("cosmi_settings_auto_draft", autoDraftEnabled.toString());
 
       localStorage.setItem("cosmi_desktop_start_on_login", startOnLogin.toString());
       localStorage.setItem("cosmi_desktop_enable_shortcuts", enableShortcuts.toString());
@@ -481,6 +508,141 @@ export const Settings = ({
                                 >
                                   <span>{option}</span>
                                   {workType === option && <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100" />}
+                                </button>
+                              ))}
+                            </motion.div>
+                          </>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+
+                  {/* Explain like I am... option */}
+                  <div className="flex items-center justify-between border-b border-[#3f3f3f]/60 pb-6 relative">
+                    <span className="text-[13px] font-medium text-[#e1e1e0]">Explain like I am...</span>
+                    <div className="relative">
+                      <button 
+                        onClick={() => setIsExplainDropdownOpen(!isExplainDropdownOpen)}
+                        className="flex items-center gap-2 bg-[#3a3a3a] border border-[#4a4a4a] rounded-lg px-3 py-2 text-[13px] text-[#e1e1e0] focus:outline-none hover:border-[#666663] transition-colors shadow-sm min-w-[200px] justify-between cursor-pointer"
+                      >
+                        <span>{explainStyle}</span>
+                        <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 transition-transform duration-200 ${isExplainDropdownOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      
+                      <AnimatePresence>
+                        {isExplainDropdownOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setIsExplainDropdownOpen(false)} />
+                            <motion.div 
+                              initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                              transition={{ duration: 0.12 }}
+                              className="absolute right-0 top-full mt-1 w-[220px] bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1.5 flex flex-col gap-0.5 shadow-xl"
+                            >
+                              {["Standard", "A 5-year-old (ELI5)", "A High Schooler", "A College Student", "A PhD Peer", "An Industry Expert"].map((option) => (
+                                <button
+                                  key={option}
+                                  onClick={() => {
+                                    setExplainStyle(option);
+                                    setIsExplainDropdownOpen(false);
+                                  }}
+                                  className={`w-full flex items-center justify-between px-2.5 py-1.5 text-[13px] rounded-lg text-left transition-colors cursor-pointer ${
+                                    explainStyle === option ? "bg-[#27272a] text-white font-medium" : "text-zinc-300 hover:text-white hover:bg-[#222222]"
+                                  }`}
+                                >
+                                  <span>{option}</span>
+                                  {explainStyle === option && <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100" />}
+                                </button>
+                              ))}
+                            </motion.div>
+                          </>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+
+                  {/* Write like I am... option */}
+                  <div className="flex items-center justify-between border-b border-[#3f3f3f]/60 pb-6 relative">
+                    <span className="text-[13px] font-medium text-[#e1e1e0]">Write it like I am...</span>
+                    <div className="relative">
+                      <button 
+                        onClick={() => setIsWriteDropdownOpen(!isWriteDropdownOpen)}
+                        className="flex items-center gap-2 bg-[#3a3a3a] border border-[#4a4a4a] rounded-lg px-3 py-2 text-[13px] text-[#e1e1e0] focus:outline-none hover:border-[#666663] transition-colors shadow-sm min-w-[200px] justify-between cursor-pointer"
+                      >
+                        <span>{writeStyle}</span>
+                        <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 transition-transform duration-200 ${isWriteDropdownOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      
+                      <AnimatePresence>
+                        {isWriteDropdownOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setIsWriteDropdownOpen(false)} />
+                            <motion.div 
+                              initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                              transition={{ duration: 0.12 }}
+                              className="absolute right-0 top-full mt-1 w-[220px] bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1.5 flex flex-col gap-0.5 shadow-xl"
+                            >
+                              {["Standard", "Academic Author", "Concise Editor", "Novel Writer", "Technical Author", "Casual Blogger"].map((option) => (
+                                <button
+                                  key={option}
+                                  onClick={() => {
+                                    setWriteStyle(option);
+                                    setIsWriteDropdownOpen(false);
+                                  }}
+                                  className={`w-full flex items-center justify-between px-2.5 py-1.5 text-[13px] rounded-lg text-left transition-colors cursor-pointer ${
+                                    writeStyle === option ? "bg-[#27272a] text-white font-medium" : "text-zinc-300 hover:text-white hover:bg-[#222222]"
+                                  }`}
+                                >
+                                  <span>{option}</span>
+                                  {writeStyle === option && <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100" />}
+                                </button>
+                              ))}
+                            </motion.div>
+                          </>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+
+                  {/* AI Personality Profile option */}
+                  <div className="flex items-center justify-between border-b border-[#3f3f3f]/60 pb-6 relative">
+                    <span className="text-[13px] font-medium text-[#e1e1e0]">Cosmi's Personality Profile</span>
+                    <div className="relative">
+                      <button 
+                        onClick={() => setIsPersonalityDropdownOpen(!isPersonalityDropdownOpen)}
+                        className="flex items-center gap-2 bg-[#3a3a3a] border border-[#4a4a4a] rounded-lg px-3 py-2 text-[13px] text-[#e1e1e0] focus:outline-none hover:border-[#666663] transition-colors shadow-sm min-w-[200px] justify-between cursor-pointer"
+                      >
+                        <span>{personality}</span>
+                        <Icon icon="ph:caret-down" className={`w-3.5 h-3.5 transition-transform duration-200 ${isPersonalityDropdownOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      
+                      <AnimatePresence>
+                        {isPersonalityDropdownOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setIsPersonalityDropdownOpen(false)} />
+                            <motion.div 
+                              initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                              transition={{ duration: 0.12 }}
+                              className="absolute right-0 top-full mt-1 w-[240px] bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1.5 flex flex-col gap-0.5 shadow-xl"
+                            >
+                              {["Success Student Mentor", "Rigorous Peer Scholar", "Socratic Guide", "Supportive Coach"].map((option) => (
+                                <button
+                                  key={option}
+                                  onClick={() => {
+                                    setPersonality(option);
+                                    setIsPersonalityDropdownOpen(false);
+                                  }}
+                                  className={`w-full flex items-center justify-between px-2.5 py-1.5 text-[13px] rounded-lg text-left transition-colors cursor-pointer ${
+                                    personality === option ? "bg-[#27272a] text-white font-medium" : "text-zinc-300 hover:text-white hover:bg-[#222222]"
+                                  }`}
+                                >
+                                  <span>{option}</span>
+                                  {personality === option && <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100" />}
                                 </button>
                               ))}
                             </motion.div>
@@ -863,11 +1025,14 @@ export const Settings = ({
                         Compile statistical formulas and expressions natively in document formats using KaTeX block math layouts.
                       </p>
                     </div>
-                    <div className="w-11 h-6 bg-[#a1a1aa] rounded-full p-0.5 flex items-center select-none opacity-50 cursor-not-allowed">
-                      <div className="w-5 h-5 bg-black rounded-full translate-x-5 flex items-center justify-center">
-                        <Icon icon="ph:check" className="w-3 h-3 text-white" />
+                    <button 
+                      onClick={() => setLatexEnabled(!latexEnabled)}
+                      className={`w-11 h-6 transition-colors duration-200 rounded-full p-0.5 outline-none flex items-center cursor-pointer ${latexEnabled ? "bg-[#a1a1aa]" : "bg-zinc-700"}`}
+                    >
+                      <div className={`w-5 h-5 bg-black rounded-full transition-transform duration-200 flex items-center justify-center ${latexEnabled ? "translate-x-5" : "translate-x-0"}`}>
+                        {latexEnabled && <Icon icon="ph:check" className="w-3 h-3 text-white" />}
                       </div>
-                    </div>
+                    </button>
                   </div>
 
                   {/* Switch 3: auto draft */}
@@ -878,11 +1043,14 @@ export const Settings = ({
                         Instantly sync document content and highlighted workspace annotations every 3 seconds to avoid layout loss.
                       </p>
                     </div>
-                    <div className="w-11 h-6 bg-[#a1a1aa] rounded-full p-0.5 flex items-center select-none opacity-50 cursor-not-allowed">
-                      <div className="w-5 h-5 bg-black rounded-full translate-x-5 flex items-center justify-center">
-                        <Icon icon="ph:check" className="w-3 h-3 text-white" />
+                    <button 
+                      onClick={() => setAutoDraftEnabled(!autoDraftEnabled)}
+                      className={`w-11 h-6 transition-colors duration-200 rounded-full p-0.5 outline-none flex items-center cursor-pointer ${autoDraftEnabled ? "bg-[#a1a1aa]" : "bg-zinc-700"}`}
+                    >
+                      <div className={`w-5 h-5 bg-black rounded-full transition-transform duration-200 flex items-center justify-center ${autoDraftEnabled ? "translate-x-5" : "translate-x-0"}`}>
+                        {autoDraftEnabled && <Icon icon="ph:check" className="w-3 h-3 text-white" />}
                       </div>
-                    </div>
+                    </button>
                   </div>
                 </div>
               </section>

@@ -182,7 +182,7 @@ const CitationLink = ({
           href={href} 
           target="_blank" 
           rel="noopener noreferrer" 
-          className="underline text-inherit cursor-pointer hover:text-[#f4f4f5] transition-colors inline" 
+          className="underline decoration-dashed decoration-skip-ink underline-offset-[3px] text-inherit cursor-pointer hover:text-[#f4f4f5] transition-colors inline" 
           title={text ? `${text} (${href})` : href}
         >
           {children || text || href}
@@ -439,7 +439,7 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
           href={href} 
           target="_blank" 
           rel="noopener noreferrer" 
-          className="underline text-inherit cursor-pointer hover:text-[#f4f4f5] transition-colors inline" 
+          className="underline decoration-dashed decoration-skip-ink underline-offset-[3px] text-inherit cursor-pointer hover:text-[#f4f4f5] transition-colors inline" 
           {...props}
         >
           {children}

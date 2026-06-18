@@ -3,7 +3,9 @@ import React, { useState, useEffect, useRef } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { marked } from "marked";
+import { marked, Marked } from "marked";
+import markedKatex from "marked-katex-extension";
+import "katex/dist/katex.min.css";
 import { MainChat, modelsList } from "./components/MainChat";
 import { TypewriterMarkdown } from "./components/TypewriterMarkdown";
 import { DynamicShimmer } from "./components/DynamicShimmer";
@@ -975,7 +977,7 @@ export default function App() {
   const [activeAssistantTabId, setActiveAssistantTabId] = useState<
     string | null
   >(null);
-  const ignoreNextTabSyncRef = useRef(false);
+  const ignoreNextTabSyncRef = useRef<string | null>(null);
   const loadedTabIdRef = useRef<string>("initial-home");
   const activeTabIdRef = useRef(activeTabId);
   const activeAssistantTabIdRef = useRef(activeAssistantTabId);
@@ -3024,7 +3026,15 @@ export default function App() {
   const [thinkingLevel, setThinkingLevel] = useState<'Standard' | 'Deep' | 'Instant'>('Standard');
   const [isAgentModelMenuOpen, setIsAgentModelMenuOpen] = useState(false);
   const [isAgentThinkingMenuOpen, setIsAgentThinkingMenuOpen] = useState(false);
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(() => {
+    return localStorage.getItem("cosmi_settings_web_search") === "true";
+  });
+  const [latexEnabled, setLatexEnabled] = useState(() => {
+    return localStorage.getItem("cosmi_settings_latex") === "true";
+  });
+  const [autoDraftEnabled, setAutoDraftEnabled] = useState(() => {
+    return localStorage.getItem("cosmi_settings_auto_draft") !== "false";
+  });
   const [callMe, setCallMe] = useState(() => {
     try {
       const cachedRef = localStorage.getItem("cosmi_user_snapshot");
@@ -3464,11 +3474,16 @@ export default function App() {
 
   // When activeTabId, tabs, or isSessionLoaded changes, pull the corresponding tab's values and title into states and the editor
   useEffect(() => {
-    if (ignoreNextTabSyncRef.current) {
-      ignoreNextTabSyncRef.current = false;
+    if (ignoreNextTabSyncRef.current === activeTabId) {
+      ignoreNextTabSyncRef.current = null;
       loadedTabIdRef.current = activeTabId;
       return;
     }
+    // Always clear if we didn't match, so it doesn't leak to future unrelated tabs
+    if (ignoreNextTabSyncRef.current !== null) {
+      ignoreNextTabSyncRef.current = null;
+    }
+    
     const targetTab = tabs.find((t) => t.id === activeTabId);
     const isDocNotPdf =
       targetTab &&
@@ -3484,7 +3499,7 @@ export default function App() {
       setDocumentContent(targetTab.content || "");
       setDocSaveStatus("saved");
       setChatInput("");
-      if (editorRef.current && document.activeElement !== editorRef.current) {
+      if (editorRef.current && (document.activeElement !== editorRef.current || loadedTabIdRef.current !== activeTabId)) {
         editorRef.current.innerHTML = targetTab.content || "";
         lastContentRef.current = targetTab.content || "";
       }
@@ -3497,7 +3512,7 @@ export default function App() {
       if (activeTabId !== "initial-home") {
         setDocumentTitle("Untitled");
         setDocumentContent("");
-        if (editorRef.current && document.activeElement !== editorRef.current) {
+        if (editorRef.current && (document.activeElement !== editorRef.current || loadedTabIdRef.current !== activeTabId)) {
           editorRef.current.innerHTML = "";
           lastContentRef.current = "";
         }
@@ -3509,6 +3524,12 @@ export default function App() {
   // Debounced auto-save of active document draft to Firestore/LocalStorage
   useEffect(() => {
     if (docSaveStatus !== "saving") return;
+
+    if (!autoDraftEnabled) {
+      // If auto-draft is disabled, we just show "saved" locally since we wait for blur events
+      setDocSaveStatus("saved");
+      return;
+    }
 
     const timer = setTimeout(async () => {
       const currentTab = tabs.find((t) => t.id === activeTabId);
@@ -3552,7 +3573,12 @@ export default function App() {
       // Trim outer whitespace so that heading tags (like ## Introduction)
       // placed at the start/ends are parsed as actual headings, not inline text.
       const trimmedMarkdown = formattedMarkdown.trim();
-      const htmlText = marked.parse(trimmedMarkdown, {
+
+      const markedInstance = new Marked();
+      if (latexEnabled) {
+        markedInstance.use(markedKatex({ throwOnError: false, displayMode: true }));
+      }
+      const htmlText = markedInstance.parse(trimmedMarkdown, {
         gfm: true,
         breaks: false,
       }) as string;
@@ -3828,6 +3854,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
     }
 
     try {
+      // Load user customized styles/instructions from localStorage dynamically
+      const localInstructions = localStorage.getItem("cosmi_settings_system_instructions") || "";
+      const localExplainStyle = localStorage.getItem("cosmi_settings_explain_style") || "Standard";
+      const localWriteStyle = localStorage.getItem("cosmi_settings_write_style") || "Standard";
+      const localPersonality = localStorage.getItem("cosmi_settings_personality") || "Success Student Mentor";
+      const localFullName = localStorage.getItem("cosmi_settings_full_name") || "";
+      const localWorkType = localStorage.getItem("cosmi_settings_work_desc") || "Other";
+
       // Try hitting our real server-side Gemini research chat endpoint!
       const currentAttachment = attachedFile ? {
         fileId: attachedFile.fileId,
@@ -3853,6 +3887,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
           thinkingLevel: thinkingLevel,
           webSearch: webSearchEnabled,
           attachment: currentAttachment,
+          explainStyle: localExplainStyle,
+          writeStyle: localWriteStyle,
+          personalityProfile: localPersonality,
+          customInstructions: localInstructions,
+          userFullName: localFullName,
+          userWorkType: localWorkType,
           context: {
             notes: [
               `Document Title: ${documentTitle}`,
@@ -4128,8 +4168,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             if (newTabs.length > 0) {
                               setTabs((prev) => [...prev, ...newTabs]);
                               setTimeout(() => {
-                                ignoreNextTabSyncRef.current = true;
-                                setActiveTabId(newTabs[0].id);
+                                // Only switch if the AI is not actively streaming into a document tab
+                                if (!aiWritingTabIdRef.current) {
+                                  setActiveTabId(newTabs[0].id);
+                                }
                               }, 100);
                             }
                           }
@@ -4201,7 +4243,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       // Set active tab ID outside of the setTabs functional update
                       setTimeout(() => {
                         if (targetTabIdForAi) {
-                          ignoreNextTabSyncRef.current = true;
+                          ignoreNextTabSyncRef.current = targetTabIdForAi;
                           setActiveTabId(targetTabIdForAi);
                         }
                       }, 0);
@@ -7762,24 +7804,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <div
                   className={`absolute top-3.5 z-30 transition-all duration-200 ${isSidePanelOpen ? "right-4" : "right-12"} flex items-center gap-2.5`}
                 >
-                  {docSaveStatus === "saving" ? (
-                    <span className="flex items-center gap-1.5 text-zinc-400 bg-[#121212]/80 px-2.5 py-1.5 rounded-lg backdrop-blur-sm select-none text-[11px] font-mono h-8">
-                      <Icon
-                        icon="ph:spinner-gap"
-                        className="w-3.5 h-3.5 animate-spin text-zinc-400"
-                      />
-                      <span>Saving...</span>
-                    </span>
-                  ) : docSaveStatus === "saved" ? (
-                    <span className="flex items-center gap-1.5 text-emerald-500 font-medium bg-[#121212]/80 px-2.5 py-1.5 rounded-lg backdrop-blur-sm select-none text-[11px] font-mono h-8">
-                      <Icon
-                        icon="ph:cloud-check"
-                        className="w-4 h-4 text-emerald-500"
-                      />
-                      <span>Saved to Cloud Workers</span>
-                    </span>
-                  ) : null}
-
                   {/* Share button removed */}
                 </div>
                 {!isSidePanelOpen && (
@@ -9941,6 +9965,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
             onClose={() => setIsSettingsModalOpen(false)} 
             webSearchEnabled={webSearchEnabled}
             setWebSearchEnabled={setWebSearchEnabled}
+            latexEnabled={latexEnabled}
+            setLatexEnabled={setLatexEnabled}
+            autoDraftEnabled={autoDraftEnabled}
+            setAutoDraftEnabled={setAutoDraftEnabled}
             editorFont={editorFont}
             setEditorFont={setEditorFont}
             editorFontSize={editorFontSize}
@@ -10785,22 +10813,19 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 exit={{ scale: 0.95, opacity: 0 }}
                 className="bg-[#121212] border border-[#2d2d30] rounded-2xl w-full max-w-sm p-6 relative text-zinc-300 shadow-2xl"
               >
-                <div className="mb-6 text-center">
-                  <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-4">
-                    <Icon icon="ph:warning-circle-bold" className="w-6 h-6" />
-                  </div>
+                <div className="mb-6 text-left">
                   <h3 className="text-lg font-bold text-[#f4f4f5] mb-2">Exit Application?</h3>
                   <p className="text-[13px] text-zinc-500 leading-relaxed font-jakarta">
                     Are you sure you want to exit the application? Unsaved workspace states might be lost.
                   </p>
                 </div>
 
-                <div className="flex gap-3">
+                <div className="flex gap-3 text-[13px] font-semibold">
                   <button
                     onClick={() => {
                       setIsExitConfirmOpen(false);
                     }}
-                    className="flex-1 py-2.5 bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-white text-[13px] font-bold rounded-xl cursor-pointer transition-colors border border-[#2d2d30]"
+                    className="flex-1 py-1.5 px-4 bg-[#232326] hover:bg-[#2d2d30] text-zinc-300 hover:text-white rounded-full cursor-pointer transition-colors border border-[#3e3e42]"
                   >
                     Cancel
                   </button>
@@ -10809,7 +10834,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       setIsExitConfirmOpen(false);
                       handleCloseApp();
                     }}
-                    className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 text-white text-[13px] font-bold rounded-xl cursor-pointer transition-colors"
+                    className="flex-1 py-1.5 px-4 bg-red-600 hover:bg-red-500 text-white rounded-full cursor-pointer transition-colors"
                   >
                     Exit App
                   </button>

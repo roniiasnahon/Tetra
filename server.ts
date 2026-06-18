@@ -2399,10 +2399,58 @@ CRITICAL RULES:
   }
 
 
+  async function getContextualQuery(messages: any[], lastMessage: string): Promise<string> {
+    if (!messages || messages.length <= 1) {
+      return lastMessage;
+    }
+    try {
+      const prompt = `You are an expert helper that extracts a single focused Search Query based on conversation context.
+We need to run a Google search to answer the user's latest query, but the latest query might use pronouns (like "it", "them", "that", "this") referring to previous topics.
+Analyze the past conversation history and output ONLY a 2-5 word highly optimized search query to retrieve precise facts on the web.
+Do NOT include any extra text, punctuation, quotes, or explanations. Only the raw query string.
+
+CONVERSATION HISTORY:
+${messages.slice(-5).map(m => `${m.role}: ${m.content}`).join("\n")}
+
+USER'S LATEST QUERY: "${lastMessage}"
+OPTIMIZED SEARCH QUERY:`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          temperature: 0.1,
+          maxOutputTokens: 20
+        }
+      });
+
+      const extracted = response.text?.trim().replace(/^["']|["']$/g, "") || lastMessage;
+      console.log(`[CONTEXTUAL SEARCH] Formulated search query: "${extracted}" (original query: "${lastMessage}")`);
+      return extracted;
+    } catch (err: any) {
+      console.warn("[CONTEXTUAL SEARCH] Could not generate contextual query, falling back to original:", err.message || err);
+      return lastMessage;
+    }
+  }
+
+
   // Research Chat & Academic Draft Optimizer Route
   app.post("/api/research/chat", async (req, res) => {
     try {
-      const { messages, context, model, thinkingLevel, webSearch, attachment } = req.body;
+      const { 
+        messages, 
+        context, 
+        model, 
+        thinkingLevel, 
+        webSearch, 
+        attachment,
+        explainStyle,
+        writeStyle,
+        personalityProfile,
+        customInstructions,
+        userFullName,
+        userWorkType
+      } = req.body;
 
       if (!messages || !Array.isArray(messages)) {
         res.status(400).json({ error: "Invalid request payload. Messages are required." });
@@ -2457,11 +2505,12 @@ CRITICAL RULES:
       }
 
       if (webSearchEnabled) {
-        console.log(`[REAL-TIME SEARCH] Fetching web results for query: "${lastMessage}"`);
-        const searchResults = await searchWeb(lastMessage);
+        const resolvedQuery = await getContextualQuery(messages, lastMessage);
+        console.log(`[REAL-TIME SEARCH] Fetching web results for query: "${resolvedQuery}" (original: "${lastMessage}")`);
+        const searchResults = await searchWeb(resolvedQuery);
         researchContext = `
 --- GOOGLE / DUCKDUCKGO WEB SEARCH GROUNDING RESULTS ---
-We retrieved these current live web results for "${lastMessage}":
+We retrieved these current live web results for "${resolvedQuery}":
 
 ${searchResults}
 
@@ -2728,6 +2777,36 @@ ${researchContext}
       console.log(`[LLM] Preparing completion request with ${openaiMessages.length + 1} messages.`);
       
       let activeSystemInstruction = systemInstruction;
+
+      // Inject Custom Persona, Profile, Styles, and Guidelines dynamically
+      if (personalityProfile) {
+        if (personalityProfile === "Success Student Mentor") {
+          activeSystemInstruction += `\n\nAI PERSONA: You are an AI Student Success Mentor. Be enthusiastic, relatable, warm, and highly encouraging. Use phrases like "Let's crush this!", "Great progress!", or "Brilliant angle!"`;
+        } else if (personalityProfile === "Rigorous Peer Scholar") {
+          activeSystemInstruction += `\n\nAI PERSONA: You are a Rigorous Peer Scholar. Be incredibly precise, highly formal, analytical, objective, and deeply scholarly. Focus entirely on academic rigor and precision. Avoid informal slang or cheering catchphrases.`;
+        } else if (personalityProfile === "Socratic Guide") {
+          activeSystemInstruction += `\n\nAI PERSONA: You are a Socratic Guide. Guide the user by challenging them with deep, guiding, reflective, open-ended questions. Prompt self-discovery and deeper intellectual analysis rather than giving answers directly.`;
+        } else if (personalityProfile === "Supportive Coach") {
+          activeSystemInstruction += `\n\nAI PERSONA: You are a Supportive Coach. Be friendly, motivating, focus on action plans, study schedules, and offer positive reinforcement to keep the user focused and moving forward.`;
+        }
+      }
+
+      if (explainStyle && explainStyle !== "Standard") {
+        activeSystemInstruction += `\n\nEXPLANATION STYLE OPTION: Explain all concepts and facts so that a ${explainStyle} can fully grasp them. Tailor your complexity, metaphors, terms and depth perfectly to this style.`;
+      }
+
+      if (writeStyle && writeStyle !== "Standard") {
+        activeSystemInstruction += `\n\nWRITING STYLE OPTION: Synthesize and draft any written work in the exact style of a ${writeStyle}. Match their sentence structure, complexity, and vocabulary level perfectly.`;
+      }
+
+      if (customInstructions && customInstructions.trim()) {
+        activeSystemInstruction += `\n\nADDITIONAL CUSTOM USER GUIDELINES: You must strictly adhere to the following instructions: "${customInstructions}"`;
+      }
+
+      if (userFullName || userWorkType) {
+        activeSystemInstruction += `\n\nUSER PROFILE: You are currently aiding ${userFullName || "the user"}${userWorkType ? ` (who works/studies as a ${userWorkType})` : ""}. Remember this when framing your help.`;
+      }
+
       if (webSearchEnabled) {
         activeSystemInstruction += "\n\nCRITICAL REAL-TIME GROUNDING INLINE CITATIONS INSTRUCTIONS:\nWhen answering using the DuckDuckGo / You.com / Internet Web Grounding Results context, you MUST use inline markdown links for citations, formatted exactly as `[[1] Source Title](URL)`. DO NOT output a '### References' section at the end. Place these inline citation links right next to the facts inside your text to anchor your assertions firmly (e.g. `apples are red [[1] Apple Wiki](https://example.com/apple)`).";
       }
