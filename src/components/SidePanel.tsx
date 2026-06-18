@@ -1224,18 +1224,18 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     <span className="text-[10px] text-zinc-600 block">Determining applicability and styling key insights...</span>
                   </div>
                 ) : (
-                  <div className="flex flex-col gap-2 w-full px-6">
+                  <div className="flex flex-row gap-2 w-full px-6">
                     <button 
                       onClick={handleGenerateQuiz}
-                      className="w-full py-2 rounded-xl bg-zinc-200 hover:bg-white text-zinc-950 font-bold text-xs transition-all cursor-pointer shadow-sm"
+                      className="flex-1 py-2 rounded-full bg-zinc-200 hover:bg-white text-zinc-950 font-bold text-xs transition-all cursor-pointer whitespace-nowrap"
                     >
-                      Draft comprehension quiz
+                      Draft Questions
                     </button>
                     <button 
                       onClick={loadFallbackQuiz}
-                      className="w-full py-1.5 rounded-lg bg-[#18181b] border border-zinc-800 text-zinc-400 hover:text-white font-medium text-[10.5px] transition-colors cursor-pointer"
+                      className="flex-1 py-2 rounded-full bg-[#18181b] border border-zinc-800 text-zinc-400 hover:text-white font-medium text-[10.5px] transition-colors cursor-pointer whitespace-nowrap"
                     >
-                      Load standard drafting check
+                      Load Standard
                     </button>
                   </div>
                 )}
@@ -1454,7 +1454,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 <span className="text-[11.5px] text-zinc-500 max-w-[220px] leading-relaxed font-medium">
                   No attachments yet. Link audio recordings, images, templates, or spreadsheets.
                 </span>
-                <label className="mt-5 px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white rounded-lg cursor-pointer transition-colors font-semibold">
+                <label className="mt-5 px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white rounded-full cursor-pointer transition-colors font-semibold">
                   <input 
                     type="file" 
                     onChange={handleAttachmentUpload} 

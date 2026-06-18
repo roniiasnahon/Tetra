@@ -6045,10 +6045,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             className="fixed inset-0 z-40"
                             onClick={() => setIsChatDropdownOpen(false)}
                           />
-                          <div className="absolute top-full left-0 mt-1.5 w-64 bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1.5 flex flex-col gap-0.5 max-h-72 overflow-y-auto shadow-2xl">
-                            <div className="px-2.5 py-1.5 text-[10px] text-zinc-500 font-bold uppercase tracking-wider select-none">
-                              All Chats
-                            </div>
+                          <div className="absolute top-full left-0 mt-1.5 w-[200px] bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1.5 flex flex-col gap-0.5 max-h-72 overflow-y-auto shadow-2xl">
                             {tabs
                               .filter((t) => t.type === "chat")
                               .map((chatTab) => (
@@ -8657,10 +8654,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       className="fixed inset-0 z-40"
                       onClick={() => setIsAssistantChatDropdownOpen(false)}
                     />
-                    <div className="absolute top-full left-0 mt-1.5 w-[280px] bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1.5 flex flex-col gap-0.5 max-h-72 overflow-y-auto">
-                      <div className="px-2.5 py-1.5 text-[10px] text-zinc-500 font-bold uppercase tracking-wider select-none">
-                        All Conversations
-                      </div>
+                    <div className="absolute top-full left-0 mt-1.5 w-[200px] bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1.5 flex flex-col gap-0.5 max-h-72 overflow-y-auto shadow-2xl">
                       {allChats.map((chatTab) => (
                         <button
                           key={chatTab.id}

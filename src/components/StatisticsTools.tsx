@@ -1535,7 +1535,7 @@ export function StatisticsTools({
            <button
              onClick={() => fileInputRef.current?.click()}
              disabled={isAnalyzing}
-             className="py-2 px-5 bg-[#27272a] hover:bg-[#333336] text-[#f4f4f5] text-[12px] font-medium rounded-lg transition-colors flex items-center gap-2 mb-2 disabled:opacity-50 cursor-pointer"
+             className="py-2 px-5 bg-[#27272a] hover:bg-[#333336] text-[#f4f4f5] text-[12px] font-medium rounded-full transition-colors flex items-center gap-2 mb-2 disabled:opacity-50 cursor-pointer"
            >
              {isAnalyzing ? "Processing..." : "Select File"}
            </button>
