@@ -989,6 +989,10 @@ export default function App() {
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
+  // Tab deletion confirmation modal state
+  const [tabIdToDelete, setTabIdToDelete] = useState<string | null>(null);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+
   // Link and Table context menu and rename modal state
   const [linkContextMenu, setLinkContextMenu] = useState<{
     x: number;
@@ -1049,6 +1053,16 @@ export default function App() {
         showToast(`Chat renamed to "${newTitle}"`, "success");
       }
       setIsRenamingChat(null);
+    }
+  };
+
+  const requestDeleteTab = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isElectronApp) {
+      setTabIdToDelete(id);
+      setIsDeleteConfirmOpen(true);
+    } else {
+      deleteTab(id);
     }
   };
 
@@ -5514,14 +5528,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                 {tabs.length > 1 && (
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const newTabs = tabs.filter((t) => t.id !== tab.id);
-                      setTabs(newTabs);
-                      if (activeTabId === tab.id) {
-                        setActiveTabId(newTabs[0].id);
-                      }
-                    }}
+                    onClick={(e) => requestDeleteTab(tab.id, e)}
                     className="ml-2 hover:text-white p-0.5 rounded-sm hover:bg-white/10"
                   >
                     <Icon icon="ph:x" className="w-3 h-3" />
@@ -10383,6 +10390,60 @@ Once you have content, I can help you draft sections, summarize findings, or for
             </motion.div>
           </motion.div>
         )}
+
+        <AnimatePresence>
+          {isDeleteConfirmOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              role="dialog"
+              aria-modal="true"
+              className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm px-4"
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-[#121212] border border-[#2d2d30] rounded-2xl w-full max-w-sm p-6 relative text-zinc-300 shadow-2xl"
+              >
+                <div className="mb-6 text-center">
+                  <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-4">
+                    <Icon icon="ph:warning-circle-bold" className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-[#f4f4f5] mb-2">Close Tab?</h3>
+                  <p className="text-[13px] text-zinc-500 leading-relaxed font-jakarta">
+                    Are you sure you want to close this tab? Any unsaved changes might be lost.
+                  </p>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setIsDeleteConfirmOpen(false);
+                      setTabIdToDelete(null);
+                    }}
+                    className="flex-1 py-2.5 bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-white text-[13px] font-bold rounded-xl cursor-pointer transition-colors border border-[#2d2d30]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (tabIdToDelete) {
+                        deleteTab(tabIdToDelete);
+                      }
+                      setIsDeleteConfirmOpen(false);
+                      setTabIdToDelete(null);
+                    }}
+                    className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 text-white text-[13px] font-bold rounded-xl cursor-pointer transition-colors"
+                  >
+                    Close Tab
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {addModalOpen && (
           <motion.div
