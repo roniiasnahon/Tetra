@@ -147,6 +147,23 @@ function processMathInChildren(children: any): any {
   return children;
 }
 
+function MathLaTex({ math, displayMode = false }: { math: string; displayMode?: boolean }) {
+  try {
+    const html = katex.renderToString(math, {
+      displayMode,
+      throwOnError: false,
+    });
+    return (
+      <span 
+        className={displayMode ? "block my-4 text-center overflow-visible" : "inline mx-0.5"}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+  } catch (e) {
+    return <span className="font-mono text-[10px] text-red-500">{math}</span>;
+  }
+}
+
 export function StatisticsTools({
   onAddHistory,
   selectedHistoryItem,
@@ -168,10 +185,12 @@ export function StatisticsTools({
   // Slovin State
   const [population, setPopulation] = useState('1000');
   const [marginOfError, setMarginOfError] = useState('0.05');
+  const [showSlovinInterpretation, setShowSlovinInterpretation] = useState(false);
 
   // Percentage State
   const [part, setPart] = useState('75');
   const [total, setTotal] = useState('250');
+  const [showPercentageInterpretation, setShowPercentageInterpretation] = useState(false);
 
   // Weighted Mean State
   const [entries, setEntries] = useState([
@@ -179,6 +198,7 @@ export function StatisticsTools({
     { value: '88', weight: '4' },
     { value: '92', weight: '2' }
   ]);
+  const [showWeightedMeanInterpretation, setShowWeightedMeanInterpretation] = useState(false);
   
   // Likert State
   const [likertChoices, setLikertChoices] = useState([
@@ -188,6 +208,7 @@ export function StatisticsTools({
     { label: 'Disagree', weight: 2, count: '10' },
     { label: 'Strongly Disagree', weight: 1, count: '5' }
   ]);
+  const [showLikertInterpretation, setShowLikertInterpretation] = useState(false);
 
   // Citation Generator State
   const [citationSourceType, setCitationSourceType] = useState<'book' | 'journal' | 'website'>('book');
@@ -1031,19 +1052,84 @@ export function StatisticsTools({
             </button>
           )}
         </div>
-        <div className="px-8 pt-6 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
+        <div className="px-8 pt-6 pb-8 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
           {valid ? (
             <div className="space-y-4 font-mono text-[11.5px] text-[#a1a1aa]">
-              <div className="py-2.5 flex items-center justify-center gap-3 text-[#f4f4f5] font-serif text-[17px] select-none">
-                <span className="italic">n</span>
-                <span className="text-[#a1a1aa] font-sans font-normal text-base">=</span>
-                <div className="flex flex-col items-center">
-                  <span className="italic pb-1 border-b border-[#27272a] w-full text-center leading-none px-2">N</span>
-                  <span className="pt-1.5 leading-none text-[#d4d4d8] font-serif px-2">
-                    1 + <span className="italic">N</span> · <span className="italic">e</span>²
-                  </span>
-                </div>
+              <div className="py-12 flex items-center justify-center select-none scale-[1.75] origin-center">
+                <MathLaTex math="n = \frac{N}{1 + N e^2}" displayMode={true} />
               </div>
+
+              {/* Interpretation Accordion Moved Up */}
+              <div className="relative z-10 rounded-xl overflow-hidden mt-2">
+                <button 
+                  onClick={() => setShowSlovinInterpretation(!showSlovinInterpretation)}
+                  className="w-fit px-0 py-3 flex items-center gap-2 hover:opacity-80 transition-opacity group cursor-pointer border-none bg-transparent outline-none"
+                >
+                  <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest group-hover:text-zinc-200 transition-colors">Interpretation Guide</span>
+                  <Icon 
+                    icon="ph:caret-down-bold" 
+                    className={`w-3 h-3 text-zinc-500 transition-transform duration-300 ${showSlovinInterpretation ? 'rotate-180' : ''}`} 
+                  />
+                </button>
+                <AnimatePresence>
+                  {showSlovinInterpretation && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.3, ease: 'easeInOut' }}
+                    >
+                      <div className="px-0 pb-10 space-y-8 pt-4 border-t border-zinc-800/20">
+                        {/* Primary Interpretation */}
+                        <div className="space-y-4">
+                          <div className="space-y-1.5">
+                            <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-tighter">1. Statistical Meaning</div>
+                            <p className="text-[13px] text-zinc-300 leading-relaxed font-sans">
+                              To represent your population of <span className="text-zinc-100 font-bold border-b border-zinc-700/50">{N.toLocaleString()}</span> with a <span className="text-zinc-100 font-bold">{(e * 100).toFixed(1)}%</span> margin of error, you must survey at least <span className="text-zinc-100 font-bold">{Math.ceil(n)}</span> unique subjects.
+                            </p>
+                          </div>
+                          <div className="space-y-1.5">
+                            <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-tighter">2. Confidence Interval</div>
+                            <p className="text-[13px] text-zinc-300 leading-relaxed font-sans">
+                              This result assumes a standard <span className="font-bold text-zinc-100">95% Confidence Level</span>. This means if you repeated the study 100 times, 95 of those times the population's true behavior would fall within your calculated error range.
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Manual Calculation Steps */}
+                        <div className="space-y-4 pt-4 border-t border-zinc-800/10">
+                          <div className="grid grid-cols-1 gap-4">
+                            {[
+                              { step: "1", title: "Square the Error", desc: <>Square the Margin of Error (<MathLaTex math="e^2" />): <span className="text-zinc-400">{e} × {e} = </span> <span className="text-zinc-200 font-mono">{eSq.toFixed(5)}</span></> },
+                              { step: "2", title: "Scale by Population", desc: <>Multiply the result by the total population (<MathLaTex math="N \cdot e^2" />): <span className="text-zinc-400">{N} × {eSq.toFixed(5)} = </span> <span className="text-zinc-200 font-mono">{product.toFixed(4)}</span></> },
+                              { step: "3", title: "Calculate Denominator", desc: <>Add 1 to the product to complete the divisor: <span className="text-zinc-400">1 + {product.toFixed(4)} = </span> <span className="text-zinc-200 font-mono">{denom.toFixed(4)}</span></> },
+                              { step: "4", title: "Final Division", desc: <>Divide the total population by the divisor: <span className="text-zinc-400">{N} / {denom.toFixed(4)} = </span> <span className="text-zinc-200 font-mono">{n.toFixed(4)}</span></> },
+                              { step: "5", title: "The 'Ceiling' Rule", desc: <>Always round up to the nearest whole integer. Since you cannot survey a partial person/unit, <span className="text-zinc-200 font-bold">{n.toFixed(4)}</span> becomes <span className="text-zinc-100 font-bold underline decoration-zinc-600">{Math.ceil(n)}</span>.</> },
+                            ].map((s) => (
+                              <div key={s.step} className="flex gap-3">
+                                <div className="shrink-0 text-[10px] font-bold text-zinc-500 pt-0.5">
+                                  {s.step}.
+                                </div>
+                                <div className="space-y-1">
+                                  <div className="text-[11px] font-bold text-zinc-200 uppercase tracking-tight">{s.title}</div>
+                                  <p className="text-[12px] text-zinc-400 leading-relaxed font-sans">{s.desc}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="pt-2">
+                          <p className="text-[11px] text-zinc-500 font-sans italic">
+                            Note: Slovin's formula is a general approximation. For more rigorous research, consider stratified sampling or specialized Power Analysis.
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
               <div className="space-y-2 pt-2">
                 <div className="flex justify-between border-b border-[#1b1b1d] pb-2">
                   <span>1. Slope of Error (e²)</span>
@@ -1146,16 +1232,61 @@ export function StatisticsTools({
         </div>
         <div className="px-8 pt-6 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
           {isValid ? (
-            <div className="space-y-4 text-xs">
-              <div className="space-y-2">
-                <div className="flex justify-between font-mono text-[11px] text-[#a1a1aa]">
-                  <span>Formula</span>
-                  <span className="text-zinc-400">(Part / Total) · 100 %</span>
-                </div>
-                <div className="flex justify-between font-mono text-[11px] text-[#a1a1aa]">
-                  <span>Subgroup fraction</span>
-                  <span className="text-[#e4e4e7]">{p} / {t} = {(p / t).toFixed(4)}</span>
-                </div>
+            <div className="space-y-4">
+              <div className="py-12 flex items-center justify-center select-none scale-[1.75] origin-center">
+                <MathLaTex math="P = \left( \frac{\text{Part}}{\text{Total}} \right) \times 100" displayMode={true} />
+              </div>
+
+              {/* Interpretation Accordion */}
+              <div className="relative z-10 rounded-xl overflow-hidden mt-2">
+                <button 
+                  onClick={() => setShowPercentageInterpretation(!showPercentageInterpretation)}
+                  className="w-fit px-0 py-3 flex items-center gap-2 hover:opacity-80 transition-opacity group cursor-pointer border-none bg-transparent outline-none"
+                >
+                  <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest group-hover:text-zinc-200 transition-colors">Interpretation Guide</span>
+                  <Icon 
+                    icon="ph:caret-down-bold" 
+                    className={`w-3 h-3 text-zinc-500 transition-transform duration-300 ${showPercentageInterpretation ? 'rotate-180' : ''}`} 
+                  />
+                </button>
+                <AnimatePresence>
+                  {showPercentageInterpretation && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.3, ease: 'easeInOut' }}
+                    >
+                      <div className="px-0 pb-10 space-y-8 pt-4 border-t border-zinc-800/20">
+                        <div className="space-y-4">
+                          <div className="space-y-1.5">
+                            <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-tighter">Proportional Analysis</div>
+                            <p className="text-[13px] text-zinc-300 leading-relaxed font-sans">
+                              The value <span className="text-zinc-100 font-bold border-b border-zinc-700/50">{p}</span> represents <span className="text-zinc-100 font-bold">{pct.toFixed(2)}%</span> of the entire dataset or group (<span className="text-zinc-200">{t}</span>).
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 pt-4 border-t border-zinc-800/10">
+                          <div className="grid grid-cols-1 gap-4">
+                            {[
+                              { step: "1", title: "Divide Values", desc: <>Divide the part by the total to find the decimal ratio: <span className="text-zinc-400">{p} / {t} = </span> <span className="text-zinc-200 font-mono">{(p/t).toFixed(5)}</span></> },
+                              { step: "2", title: "Convert to Percentage", desc: <>Multiply by 100 to convert the decimal into a percent: <span className="text-zinc-400">{(p/t).toFixed(5)} × 100 = </span> <span className="text-zinc-100 font-bold border-b border-zinc-700/50">{pct.toFixed(2)}%</span></> },
+                            ].map((s) => (
+                              <div key={s.step} className="flex gap-3">
+                                <div className="shrink-0 text-[10px] font-bold text-zinc-500 pt-0.5">{s.step}.</div>
+                                <div className="space-y-1">
+                                  <div className="text-[11px] font-bold text-zinc-200 uppercase tracking-tight">{s.title}</div>
+                                  <p className="text-[12px] text-zinc-400 leading-relaxed font-sans">{s.desc}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
               {/* Dynamic Stacked Bar Progress Representation */}
@@ -1286,8 +1417,65 @@ export function StatisticsTools({
         </div>
         <div className="px-8 pt-6 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
           {isValid && validatedRows.length > 0 ? (
-            <div className="space-y-3.5">
-              <div className="overflow-x-auto rounded-lg max-h-[160px] overflow-y-auto">
+            <div className="space-y-4">
+              <div className="py-12 flex items-center justify-center select-none scale-[1.75] origin-center">
+                <MathLaTex math="\bar{x}_w = \frac{\sum_{i=1}^n w_i x_i}{\sum_{i=1}^n w_i}" displayMode={true} />
+              </div>
+
+              {/* Interpretation Accordion */}
+              <div className="relative z-10 rounded-xl overflow-hidden mt-2">
+                <button 
+                  onClick={() => setShowWeightedMeanInterpretation(!showWeightedMeanInterpretation)}
+                  className="w-fit px-0 py-3 flex items-center gap-2 hover:opacity-80 transition-opacity group cursor-pointer border-none bg-transparent outline-none"
+                >
+                  <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest group-hover:text-zinc-200 transition-colors">Interpretation Guide</span>
+                  <Icon 
+                    icon="ph:caret-down-bold" 
+                    className={`w-3 h-3 text-zinc-500 transition-transform duration-300 ${showWeightedMeanInterpretation ? 'rotate-180' : ''}`} 
+                  />
+                </button>
+                <AnimatePresence>
+                  {showWeightedMeanInterpretation && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.3, ease: 'easeInOut' }}
+                    >
+                      <div className="px-0 pb-10 space-y-8 pt-4 border-t border-zinc-800/20">
+                        <div className="space-y-4">
+                          <div className="space-y-1.5">
+                            <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-tighter">Significance</div>
+                            <p className="text-[13px] text-zinc-300 leading-relaxed font-sans">
+                              The weighted mean of <span className="text-zinc-100 font-bold border-b border-zinc-700/50">{mean.toFixed(4)}</span> accounts for the varying importance (weights) assigned to each individual value.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 pt-4 border-t border-zinc-800/10">
+                          <div className="grid grid-cols-1 gap-4">
+                            {[
+                              { step: "1", title: "Calculate Products", desc: <>Multiply each individual value (<MathLaTex math="x" />) by its corresponding weight (<MathLaTex math="w" />). Current sum of products: <span className="text-zinc-100 font-mono">{sumValueWeight.toFixed(2)}</span></> },
+                              { step: "2", title: "Sum the Weights", desc: <>Total the sum of all weights entered: <span className="text-zinc-100 font-mono">{sumWeight}</span></> },
+                              { step: "3", title: "Final Division", desc: <>Divide the sum of products by the total weight: <span className="text-zinc-400">{sumValueWeight.toFixed(2)} / {sumWeight} = </span> <span className="text-zinc-100 font-bold border-b border-zinc-700/50">{mean.toFixed(4)}</span></> },
+                            ].map((s) => (
+                              <div key={s.step} className="flex gap-3">
+                                <div className="shrink-0 text-[10px] font-bold text-zinc-500 pt-0.5">{s.step}.</div>
+                                <div className="space-y-1">
+                                  <div className="text-[11px] font-bold text-zinc-200 uppercase tracking-tight">{s.title}</div>
+                                  <p className="text-[12px] text-zinc-400 leading-relaxed font-sans">{s.desc}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              <div className="overflow-x-auto rounded-lg max-h-[220px] overflow-y-auto border border-zinc-900">
                 <table className="w-full text-left text-[10.5px] border-collapse">
                   <thead>
                     <tr className="bg-[#161618] border-b border-[#1e1e20] text-[#71717a] font-mono">
@@ -1311,10 +1499,6 @@ export function StatisticsTools({
                     </tr>
                   </tbody>
                 </table>
-              </div>
-              <div className="p-2.5 bg-[#161618] rounded-lg font-mono text-[10px] text-[#71717a] space-y-1">
-                 <div>Weighted Mean = Σ(x · w) / Σw</div>
-                 <div className="text-[#a1a1aa]">Mean = {sumValueWeight.toFixed(2)} / {sumWeight}</div>
               </div>
             </div>
           ) : (
@@ -1508,8 +1692,65 @@ export function StatisticsTools({
         </div>
         <div className="px-8 pt-6 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
           {isValid && sumWeight > 0 ? (
-            <div className="space-y-3">
-              <div className="space-y-2">
+            <div className="space-y-4">
+              <div className="py-12 flex items-center justify-center select-none scale-[1.75] origin-center">
+                <MathLaTex math="\bar{x} = \frac{\sum (f \cdot w)}{\sum f}" displayMode={true} />
+              </div>
+
+              {/* Interpretation Accordion */}
+              <div className="relative z-10 rounded-xl overflow-hidden mt-2">
+                <button 
+                  onClick={() => setShowLikertInterpretation(!showLikertInterpretation)}
+                  className="w-fit px-0 py-3 flex items-center gap-2 hover:opacity-80 transition-opacity group cursor-pointer border-none bg-transparent outline-none"
+                >
+                  <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest group-hover:text-zinc-200 transition-colors">Interpretation Guide</span>
+                  <Icon 
+                    icon="ph:caret-down-bold" 
+                    className={`w-3 h-3 text-zinc-500 transition-transform duration-300 ${showLikertInterpretation ? 'rotate-180' : ''}`} 
+                  />
+                </button>
+                <AnimatePresence>
+                  {showLikertInterpretation && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.3, ease: 'easeInOut' }}
+                    >
+                      <div className="px-0 pb-10 space-y-8 pt-4 border-t border-zinc-800/20">
+                        <div className="space-y-4">
+                          <div className="space-y-1.5">
+                            <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-tighter">Current Sentiment</div>
+                            <p className="text-[13px] text-zinc-300 leading-relaxed font-sans">
+                              The mean score of <span className="text-zinc-100 font-bold border-b border-zinc-700/50">{mean.toFixed(3)}</span> signifies a <span className={colorClass}>{interpretation}</span> stance based on your custom weight scaling (<span className="text-zinc-400">{wMin} to {wMax}</span>).
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 pt-4 border-t border-zinc-800/10">
+                          <div className="grid grid-cols-1 gap-4">
+                            {[
+                              { step: "1", title: "Calculate Frequencies", desc: <>Multiply each point weight (<MathLaTex math="w" />) by the number of responses (<MathLaTex math="f" />) for that category. Total sum: <span className="text-zinc-100 font-mono">{sumValueWeight}</span></> },
+                              { step: "2", title: "Sum Respondents", desc: <>Total the number of people who participated in the survey: <span className="text-zinc-100 font-mono">{sumWeight}</span></> },
+                              { step: "3", title: "Divide for Index", desc: <>Divide the total weighted sum by the number of respondents: <span className="text-zinc-400">{sumValueWeight} / {sumWeight} = </span> <span className="text-zinc-100 font-bold border-b border-zinc-700/50">{mean.toFixed(3)}</span></> },
+                            ].map((s) => (
+                              <div key={s.step} className="flex gap-3">
+                                <div className="shrink-0 text-[10px] font-bold text-zinc-500 pt-0.5">{s.step}.</div>
+                                <div className="space-y-1">
+                                  <div className="text-[11px] font-bold text-zinc-200 uppercase tracking-tight">{s.title}</div>
+                                  <p className="text-[12px] text-zinc-400 leading-relaxed font-sans">{s.desc}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              <div className="space-y-2 pt-2">
                 {likertChoices.map((c, idx) => {
                   const count = itemCounts[idx] || 0;
                   const ratio = sumWeight > 0 ? count / sumWeight : 0;
