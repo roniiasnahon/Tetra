@@ -111,13 +111,18 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     return tabId || 'default-doc';
   }, [activeTab?.title, tabId]);
 
+  const annoStorageKey = useMemo(() => {
+    return activeTab?.fileId || activeTab?.id || tabId || 'default-doc';
+  }, [activeTab?.fileId, activeTab?.id, tabId]);
+
   const [activeSubTab, setActiveSubTab] = useState<'notes' | 'details' | 'sources' | 'quizzes' | 'attachments' | 'comments'>('notes');
 
   // Annotations / Comments state
   const [annotations, setAnnotations] = useState<any[]>([]);
+  const [annoToDelete, setAnnoToDelete] = useState<any | null>(null);
 
   const loadAnnotations = () => {
-    const saved = localStorage.getItem(`annotations_${docStorageKey}`);
+    const saved = localStorage.getItem(`annotations_${annoStorageKey}`);
     if (saved) {
       try {
         setAnnotations(JSON.parse(saved));
@@ -140,7 +145,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     return () => {
       window.removeEventListener('annotationsUpdated', handleUpdate);
     };
-  }, [docStorageKey, isOpen]);
+  }, [annoStorageKey, isOpen]);
 
   // Default to comments for PDFs and notes for normal docs
   useEffect(() => {
@@ -749,6 +754,35 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     document.body.style.cursor = 'col-resize';
   }, [panelWidth]);
 
+  const handleConfirmDeleteAnno = async () => {
+    if (!annoToDelete) return;
+    const anno = annoToDelete;
+    const updated = annotations.filter(a => a.id !== anno.id);
+    localStorage.setItem(`annotations_${annoStorageKey}`, JSON.stringify(updated));
+    window.dispatchEvent(new Event('annotationsUpdated'));
+    
+    // Delete from firestore if possible
+    try {
+      const { auth: firebaseAuth, db: firestoreDb } = await import('../firebase');
+      const user = firebaseAuth.currentUser;
+      const params = new URLSearchParams(window.location.search);
+      const workspaceId = params.get('workspace');
+      
+      if (workspaceId) {
+        const { deleteDoc, doc: fDoc } = await import('firebase/firestore');
+        await deleteDoc(fDoc(firestoreDb, 'shared_workspaces', workspaceId, 'annotations', anno.id));
+      } else if (user) {
+        const { deleteDoc, doc: fDoc } = await import('firebase/firestore');
+        await deleteDoc(fDoc(firestoreDb, 'users', user.uid, 'annotations', anno.id));
+      }
+    } catch (e) {
+      console.error("Firestore annotation delete failed", e);
+    }
+    setAnnotations(updated);
+    setAnnoToDelete(null);
+    showToast("Annotation deleted successfully", "success");
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -842,29 +876,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                         <Icon icon="ph:bookmark-simple" className="w-3.5 h-3.5" />
                         <span>Page {anno.page}</span>
                       </button>
-                      <button
-                        onClick={async () => {
-                          const updated = annotations.filter(a => a.id !== anno.id);
-                          localStorage.setItem(`annotations_${docStorageKey}`, JSON.stringify(updated));
-                          window.dispatchEvent(new Event('annotationsUpdated'));
-                          
-                          // Delete from firestore if possible
-                          try {
-                            const { auth: firebaseAuth, db: firestoreDb } = await import('../firebase');
-                            const user = firebaseAuth.currentUser;
-                            const params = new URLSearchParams(window.location.search);
-                            const workspaceId = params.get('workspace');
-                            
-                            if (workspaceId) {
-                              const { deleteDoc, doc: fDoc } = await import('firebase/firestore');
-                              await deleteDoc(fDoc(firestoreDb, 'shared_workspaces', workspaceId, 'annotations', anno.id));
-                            } else if (user) {
-                              const { deleteDoc, doc: fDoc } = await import('firebase/firestore');
-                              await deleteDoc(fDoc(firestoreDb, 'users', user.uid, 'annotations', anno.id));
-                            }
-                          } catch (e) {
-                            console.error("Firestore annotation delete failed", e);
-                          }
+                       <button
+                        onClick={() => {
+                          setAnnoToDelete(anno);
                         }}
                         className="text-zinc-500 hover:text-red-400 cursor-pointer p-0.5"
                         title="Delete Annotation"
@@ -1662,6 +1676,41 @@ export const SidePanel: React.FC<SidePanelProps> = ({
               <span className="text-xs text-zinc-400 font-medium tracking-wide">
                 {activeLightboxImage.name}
               </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {annoToDelete && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/85 p-4 animate-fade-in"
+          onClick={() => setAnnoToDelete(null)}
+        >
+          <div
+            className="bg-[#1c1c1e] border border-zinc-800 rounded-[20px] w-full max-w-[320px] overflow-hidden animate-scale-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <h3 className="text-lg font-bold text-white mb-2 text-left">
+                Delete Annotation?
+              </h3>
+              <p className="text-zinc-400 text-[13px] leading-normal mb-6 text-left font-jakarta">
+                Are you sure you want to delete this annotation and comment? This action cannot be undone.
+              </p>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setAnnoToDelete(null)}
+                  className="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-full text-xs font-semibold cursor-pointer transition-colors border border-zinc-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmDeleteAnno}
+                  className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-full text-xs font-semibold transition-all cursor-pointer"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
         </div>

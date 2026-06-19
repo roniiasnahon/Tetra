@@ -4,6 +4,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { pdfjs } from 'react-pdf';
 import { motion, AnimatePresence } from 'motion/react';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
 
 // Custom, highly polished minimalist number input
 function CustomNumberInput({
@@ -52,6 +54,97 @@ function CustomNumberInput({
       )}
     </div>
   );
+}
+
+// Function to parse a raw string and split/render subsegments of LaTeX equations
+function processStringForMath(str: string) {
+  if (!str) return str;
+
+  // Broad and extremely resilient regex that handles:
+  // 1. $$ ... $$ (display)
+  // 2. \\\[ ... \\\] (display)
+  // 3. \\\( ... \\\) (inline)
+  // 4. \$ ... \$ (inline)
+  // 5. \[ ... \] or [ ... ] (brackets that enclose structured math symbols)
+  const regex = /(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$[^\$\s](?:[^\$]*?[^\$\s])?\$|\\\[[\s\S]+?\\\]|\[\s*(?:\\text|\\frac|\\times|\\sum|\\alpha|\\beta|\\mu|\\sigma|\\partial|\\int|\\Delta|\\lambda|\\theta|\\pm|\\neq|\\cdot)[\s\S]+?\])/g;
+
+  const parts = str.split(regex);
+  if (parts.length === 1) return str;
+
+  return parts.map((part, i) => {
+    if (i % 2 === 0) {
+      return part;
+    }
+
+    let displayMode = false;
+    let mathText = part;
+
+    if (mathText.startsWith('$$') && mathText.endsWith('$$')) {
+      displayMode = true;
+      mathText = mathText.slice(2, -2);
+    } else if (mathText.startsWith('\\[') && mathText.endsWith('\\]')) {
+      displayMode = true;
+      mathText = mathText.slice(2, -2);
+    } else if (mathText.startsWith('\\(') && mathText.endsWith('\\)')) {
+      displayMode = false;
+      mathText = mathText.slice(2, -2);
+    } else if (mathText.startsWith('$') && mathText.endsWith('$')) {
+      displayMode = false;
+      mathText = mathText.slice(1, -1);
+    } else if (mathText.startsWith('[') && mathText.endsWith(']')) {
+      displayMode = true;
+      mathText = mathText.slice(1, -1);
+    }
+
+    try {
+      const html = katex.renderToString(mathText, {
+        displayMode,
+        throwOnError: false,
+      });
+
+      if (displayMode) {
+        return (
+          <span 
+            key={i} 
+            className="block my-4 overflow-x-auto text-center" 
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        );
+      } else {
+        return (
+          <span 
+            key={i} 
+            className="inline mx-0.5" 
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        );
+      }
+    } catch (e) {
+      console.error("KaTeX parse error in Cosmi AI Analyst:", e);
+      return <span key={i} className="font-mono text-[10px] text-red-500">{part}</span>;
+    }
+  });
+}
+
+// Function to recursively process React children for embedded LaTeX patterns
+function processMathInChildren(children: any): any {
+  if (!children) return children;
+  if (typeof children === 'string') {
+    return processStringForMath(children);
+  }
+  if (Array.isArray(children)) {
+    return children.map((item, index) => {
+      if (typeof item === 'string') {
+        const processed = processStringForMath(item);
+        if (Array.isArray(processed)) {
+          return <React.Fragment key={index}>{processed}</React.Fragment>;
+        }
+        return processed;
+      }
+      return item;
+    });
+  }
+  return children;
 }
 
 export function StatisticsTools({
@@ -161,6 +254,7 @@ export function StatisticsTools({
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [libraryFormatFilter, setLibraryFormatFilter] = useState<'apa' | 'mla' | 'chicago' | 'harvard' | 'ieee'>('apa');
   const [librarySearchType, setLibrarySearchType] = useState<'all' | 'book' | 'journal' | 'website'>('all');
+  const [citationIdToDelete, setCitationIdToDelete] = useState<string | null>(null);
   const [isFormatDropdownOpen, setIsFormatDropdownOpen] = useState(false);
   const formatDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -839,22 +933,22 @@ export function StatisticsTools({
     ),
     th: ({ children }: any) => (
       <th className="px-4 py-3 font-semibold tracking-wide text-[#f4f4f5] border-r border-[#27272a] last:border-r-0 uppercase text-[9.5px]">
-        {children}
+        {processMathInChildren(children)}
       </th>
     ),
     td: ({ children }: any) => (
       <td className="px-4 py-2.5 text-[#d4d4d8] leading-relaxed border-r border-[#1e1e20] last:border-r-0 font-jakarta">
-        {children}
+        {processMathInChildren(children)}
       </td>
     ),
-    h1: ({ children }: any) => <h1 className="text-base font-bold text-[#f4f4f5] mt-6 mb-3 border-b border-[#27272a] pb-2 flex items-center gap-1.5">{children}</h1>,
-    h2: ({ children }: any) => <h2 className="text-sm font-semibold text-[#f4f4f5] mt-5 mb-2.5">{children}</h2>,
-    h3: ({ children }: any) => <h3 className="text-xs font-semibold text-[#e4e4e7] mt-4 mb-2">{children}</h3>,
-    p: ({ children }: any) => <p className="leading-relaxed mb-3.5 text-[#d4d4d8] text-[12px]">{children}</p>,
+    h1: ({ children }: any) => <h1 className="text-base font-bold text-[#f4f4f5] mt-6 mb-3 border-b border-[#27272a] pb-2 flex items-center gap-1.5">{processMathInChildren(children)}</h1>,
+    h2: ({ children }: any) => <h2 className="text-sm font-semibold text-[#f4f4f5] mt-5 mb-2.5">{processMathInChildren(children)}</h2>,
+    h3: ({ children }: any) => <h3 className="text-xs font-semibold text-[#e4e4e7] mt-4 mb-2">{processMathInChildren(children)}</h3>,
+    p: ({ children }: any) => <p className="leading-relaxed mb-3.5 text-[#d4d4d8] text-[12px]">{processMathInChildren(children)}</p>,
     ul: ({ children }: any) => <ul className="list-disc pl-5 mb-3.5 space-y-1">{children}</ul>,
     ol: ({ children }: any) => <ol className="list-decimal pl-5 mb-3.5 space-y-1">{children}</ol>,
-    li: ({ children }: any) => <li className="text-[12px] text-[#d4d4d8]">{children}</li>,
-    blockquote: ({ children }: any) => <blockquote className="border-l-2 border-zinc-500 pl-3 italic my-4 text-zinc-400 bg-zinc-900/20 py-1 rounded-r">{children}</blockquote>,
+    li: ({ children }: any) => <li className="pl-1 leading-relaxed text-[12px] text-[#d4d4d8]">{processMathInChildren(children)}</li>,
+    blockquote: ({ children }: any) => <blockquote className="border-l-2 border-zinc-500 pl-3 italic my-4 text-zinc-400 bg-zinc-900/20 py-1 rounded-r">{processMathInChildren(children)}</blockquote>,
     code: ({ node, inline, className, children, ...props }: any) => (
       <code className="bg-[#1a1a1c] border border-[#27272a] text-[#f4f4f5] rounded px-1 py-0.5 text-[10.5px] font-mono" {...props}>
         {children}
@@ -2118,7 +2212,7 @@ export function StatisticsTools({
                   return (
                     <div key={citation.id} className="p-4 bg-[#161616]/60 hover:bg-[#1c1c1e]/60 border border-[#222225] rounded-xl transition-all space-y-3 relative group">
                       <button
-                        onClick={() => deleteCitationFromLibrary(citation.id)}
+                        onClick={() => setCitationIdToDelete(citation.id)}
                         className="absolute top-4 right-4 text-zinc-500 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 cursor-pointer bg-transparent border-none outline-none"
                         title="Delete Citation"
                       >
@@ -2273,7 +2367,7 @@ export function StatisticsTools({
   };
 
   return (
-    <div className="h-full flex flex-col min-h-0">
+    <div className="h-full flex flex-col min-h-0 relative">
       <div className="flex flex-col md:flex-row overflow-hidden items-stretch h-full md:divide-x divide-[#222225] min-h-0">
          {/* Left Side: Parameters / Files */}
          <div className="w-full md:w-4/12 flex flex-col justify-start overflow-hidden mb-8 md:mb-0 border-b md:border-b-0 border-[#222225] h-full">
@@ -2300,6 +2394,44 @@ export function StatisticsTools({
             {activeTab === 'citation' && renderCitationRight()}
          </div>
       </div>
+
+      {citationIdToDelete && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/85 p-4 animate-fade-in"
+          onClick={() => setCitationIdToDelete(null)}
+        >
+          <div
+            className="bg-[#1c1c1e] border border-zinc-800 rounded-[20px] w-full max-w-[320px] overflow-hidden animate-scale-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <h3 className="text-lg font-bold text-white mb-2 text-left">
+                Delete Citation?
+              </h3>
+              <p className="text-zinc-400 text-[13px] leading-normal mb-6 text-left font-sans">
+                Are you sure you want to delete this citation? This action cannot be undone.
+              </p>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setCitationIdToDelete(null)}
+                  className="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-full text-xs font-semibold transition-colors cursor-pointer border border-zinc-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    deleteCitationFromLibrary(citationIdToDelete);
+                    setCitationIdToDelete(null);
+                  }}
+                  className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-full text-xs font-semibold transition-all cursor-pointer"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

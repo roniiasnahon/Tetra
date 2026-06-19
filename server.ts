@@ -1167,31 +1167,40 @@ async function startServer() {
       // 2a. You.com fallback - Extremely fast and bypasses direct anti-scraping blocks
       const youApiKey = process.env.YOU_API_KEY;
       if (youApiKey && youApiKey.trim() !== "") {
-        try {
-          console.log("[PREVIEW] Resolving preview with You.com api for:", url);
-          const trimmedKey = youApiKey.trim();
-          const youUrl = `https://api.ydc-index.io/search?query=${encodeURIComponent(url)}`;
-          const response = await axios.get(youUrl, {
-            headers: {
-              "X-API-KEY": trimmedKey,
-              "Accept": "application/json"
-            },
-            timeout: 3000
-          });
-          
-          if (response.status === 200 && response.data && response.data.hits) {
-            const hits = response.data.hits;
-            if (hits.length > 0) {
-              const bestHit = hits[0];
-              title = bestHit.title || title;
-              description = bestHit.snippet || bestHit.description || description;
-              image = bestHit.thumbnail?.original || image;
-              resolved = true;
-              console.log("[PREVIEW] Successfully resolved from You.com API hits:", url);
+        const previewEndpoints = [
+          `https://api.ydc-index.io/v1/search?query=${encodeURIComponent(url)}`,
+          `https://api.ydc-index.io/search?query=${encodeURIComponent(url)}`
+        ];
+        for (const endpoint of previewEndpoints) {
+          try {
+            console.log("[PREVIEW] Resolving preview with You.com api for:", url, "at endpoint:", endpoint);
+            const trimmedKey = youApiKey.trim();
+            const response = await axios.get(endpoint, {
+              headers: {
+                "X-API-KEY": trimmedKey,
+                "Accept": "application/json"
+              },
+              timeout: 3000
+            });
+            
+            if (response.status === 200 && response.data && (response.data.hits || response.data.results)) {
+              const hits = response.data.hits || response.data.results || [];
+              if (hits.length > 0) {
+                const bestHit = hits[0];
+                title = bestHit.title || title;
+                description = bestHit.snippet || bestHit.description || description;
+                image = bestHit.thumbnail?.original || image;
+                resolved = true;
+                console.log("[PREVIEW] Successfully resolved from You.com API at:", endpoint);
+                break;
+              }
+            }
+          } catch (youErr: any) {
+            console.warn(`[PREVIEW] You.com endpoint ${endpoint} failed:`, youErr.message || youErr);
+            if (youErr.response?.status === 401) {
+              break; // Invalid key, stop
             }
           }
-        } catch (youErr: any) {
-          // Silent fallback
         }
       }
 
@@ -2220,6 +2229,16 @@ CRITICAL RULES:
       
       const attempts = [
         {
+          url: `https://api.ydc-index.io/v1/search?query=${encodeURIComponent(query)}`,
+          method: "GET" as const,
+          data: null
+        },
+        {
+          url: `https://ydc-index.io/v1/search?query=${encodeURIComponent(query)}`,
+          method: "GET" as const,
+          data: null
+        },
+        {
           url: `https://api.ydc-index.io/search?query=${encodeURIComponent(query)}`,
           method: "GET" as const,
           data: null
@@ -2303,8 +2322,15 @@ CRITICAL RULES:
         } catch (err: any) {
           console.warn(`[YOU.COM SEARCH TRY FAILED] ${attempt.url} failed:`, err.message || err);
           if (err.response) {
-            console.warn(`[YOU.COM SEARCH ERROR DETAIL] Status: ${err.response.status}, Data:`, JSON.stringify(err.response.data || {}).substring(0, 500));
-            lastErrorStatus = err.response.status.toString();
+            const status = err.response.status;
+            console.warn(`[YOU.COM SEARCH ERROR DETAIL] Status: ${status}, Data:`, JSON.stringify(err.response.data || {}).substring(0, 500));
+            lastErrorStatus = status.toString();
+            
+            // If the key is outright invalid (401 Unauthorized), do not spam remaining endpoints
+            if (status === 401) {
+              console.warn(`[YOU.COM SEARCH] Received 401 Unauthorized. Stopping further retry endpoints.`);
+              break;
+            }
           }
         }
       }
@@ -2398,11 +2424,48 @@ CRITICAL RULES:
     }
   }
 
+  // Helper to fetch educational or scientific images related to the web search query via Wikipedia
+  async function searchImages(query: string): Promise<Array<{ url: string; title: string }>> {
+    try {
+      const url = `https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&generator=search&gsrsearch=${encodeURIComponent(query)}&format=json&piprop=original&origin=*&gsrlimit=6`;
+      const response = await axios.get(url, { headers: { "User-Agent": "Mozilla/5.0" }, timeout: 5000 });
+      const pages = response.data?.query?.pages || {};
+      const images: Array<{ url: string; title: string }> = [];
+      for (const key of Object.keys(pages)) {
+        const page = pages[key];
+        if (page.original?.source) {
+          const imgUrl = page.original.source;
+          if (imgUrl.match(/\.(jpg|jpeg|png|gif|svg|webp)/i)) {
+            images.push({
+              url: imgUrl,
+              title: page.title || query
+            });
+          }
+        }
+      }
+      return images;
+    } catch (err: any) {
+      console.warn("Wikipedia image search helper failed:", err.message || err);
+      return [];
+    }
+  }
+
 
   async function getContextualQuery(messages: any[], lastMessage: string): Promise<string> {
     if (!messages || messages.length <= 1) {
       return lastMessage;
     }
+    
+    // Check if we should use Mistral or fallback to Gemini
+    let useMistral = false;
+    let mistralAppClient: any = null;
+    try {
+      mistralAppClient = getMistralClient();
+      useMistral = !!mistralAppClient;
+    } catch (e) {
+      // Mistral API key might not be available
+    }
+
     try {
       const prompt = `You are an expert helper that extracts a single focused Search Query based on conversation context.
 We need to run a Google search to answer the user's latest query, but the latest query might use pronouns (like "it", "them", "that", "this") referring to previous topics.
@@ -2415,16 +2478,31 @@ ${messages.slice(-5).map(m => `${m.role}: ${m.content}`).join("\n")}
 USER'S LATEST QUERY: "${lastMessage}"
 OPTIMIZED SEARCH QUERY:`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          temperature: 0.1,
-          maxOutputTokens: 20
-        }
-      });
+      let extracted = "";
 
-      const extracted = response.text?.trim().replace(/^["']|["']$/g, "") || lastMessage;
+      if (useMistral) {
+        // Use Mistral for contextual search
+        const mistralResponse = await mistralAppClient.chat.completions.create({
+          model: "mistral-large-latest",
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.1,
+          max_tokens: 20
+        });
+        extracted = mistralResponse.choices[0]?.message?.content?.trim() || "";
+      } else {
+        // Fallback to Gemini
+        const response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: {
+            temperature: 0.1,
+            maxOutputTokens: 20
+          }
+        });
+        extracted = response.text?.trim() || "";
+      }
+
+      extracted = extracted.replace(/^["']|["']$/g, "") || lastMessage;
       console.log(`[CONTEXTUAL SEARCH] Formulated search query: "${extracted}" (original query: "${lastMessage}")`);
       return extracted;
     } catch (err: any) {
@@ -2508,6 +2586,7 @@ OPTIMIZED SEARCH QUERY:`;
         const resolvedQuery = await getContextualQuery(messages, lastMessage);
         console.log(`[REAL-TIME SEARCH] Fetching web results for query: "${resolvedQuery}" (original: "${lastMessage}")`);
         const searchResults = await searchWeb(resolvedQuery);
+        
         researchContext = `
 --- GOOGLE / DUCKDUCKGO WEB SEARCH GROUNDING RESULTS ---
 We retrieved these current live web results for "${resolvedQuery}":

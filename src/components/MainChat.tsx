@@ -75,10 +75,46 @@ export const MainChat: React.FC<MainChatProps> = ({
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isThinkingMenuOpen, setIsThinkingMenuOpen] = useState(false);
   const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
+  const chatScrollContainerRef = useRef<HTMLDivElement>(null);
+  const chatScrollPositionsRef = useRef<Record<string, number>>({});
+  const lastTabIdRef = useRef<string | null>(tab.id);
+  const previousMessageCountRef = useRef<number>(messages?.length || 0);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isAiTyping, researchStatus]);
+  const scrollToBottom = React.useCallback((instant = true) => {
+    const fn = () => {
+      if (chatScrollContainerRef.current) {
+        chatScrollContainerRef.current.scrollTop = chatScrollContainerRef.current.scrollHeight;
+      }
+      messagesEndRef.current?.scrollIntoView({ behavior: instant ? 'auto' : 'smooth' });
+    };
+    fn();
+    // Safety check sequence for asynchronous layouts/markdown parsing
+    setTimeout(fn, 10);
+    setTimeout(fn, 50);
+    setTimeout(fn, 150);
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (tab.id !== lastTabIdRef.current) {
+      // Tab switched
+      lastTabIdRef.current = tab.id;
+      if (tab.id && chatScrollPositionsRef.current[tab.id] !== undefined) {
+        if (chatScrollContainerRef.current) {
+          chatScrollContainerRef.current.scrollTop = chatScrollPositionsRef.current[tab.id];
+        }
+      } else {
+        scrollToBottom(true);
+      }
+    } else {
+      const length = messages?.length || 0;
+      if (length > previousMessageCountRef.current) {
+        scrollToBottom(false);
+      } else if (isAiTyping || researchStatus) {
+        scrollToBottom(true);
+      }
+    }
+    previousMessageCountRef.current = messages?.length || 0;
+  }, [messages, isAiTyping, researchStatus, tab.id, scrollToBottom]);
 
   const onSend = () => {
     if (!chatInput.trim() || isAiTyping) return;
@@ -88,7 +124,15 @@ export const MainChat: React.FC<MainChatProps> = ({
   return (
     <div className="flex-1 overflow-hidden flex flex-col h-full bg-[#121212] relative">
       <div className={`flex-grow flex flex-col h-full overflow-hidden transition-all duration-300 ${!isOnline ? "blur-[6px] select-none pointer-events-none" : ""}`}>
-        <div className="flex-1 flex flex-col items-center pt-2 pb-6 px-4 md:px-6 h-full overflow-y-auto custom-scrollbar-h">
+        <div 
+          ref={chatScrollContainerRef}
+          onScroll={(e) => {
+            if (tab.id) {
+              chatScrollPositionsRef.current[tab.id] = e.currentTarget.scrollTop;
+            }
+          }}
+          className="flex-1 flex flex-col items-center pt-2 pb-6 px-4 md:px-6 h-full overflow-y-auto custom-scrollbar-h"
+        >
           {messages.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center w-full max-w-3xl">
               <img src="/cosmi.png" alt="Cosmi Logo" className="w-48 h-48 md:w-64 md:h-64 opacity-40 select-none grayscale invert" />

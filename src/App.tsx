@@ -999,6 +999,19 @@ export default function App() {
     tabsRef.current = tabs;
   }, [tabs]);
 
+  const [isLightMode, setIsLightMode] = useState<boolean>(() => {
+    return localStorage.getItem("cosmi_light_mode") === "true";
+  });
+
+  useEffect(() => {
+    if (isLightMode) {
+      document.documentElement.classList.add("light-mode");
+    } else {
+      document.documentElement.classList.remove("light-mode");
+    }
+    localStorage.setItem("cosmi_light_mode", isLightMode.toString());
+  }, [isLightMode]);
+
   // Editor Styles and Customizations
   const [editorFont, setEditorFont] = useState("font-jakarta");
   const [editorFontSize, setEditorFontSize] = useState(18);
@@ -1028,6 +1041,10 @@ export default function App() {
   // Tab deletion confirmation modal state
   const [tabIdToDelete, setTabIdToDelete] = useState<string | null>(null);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+
+  // Chat deletion confirmation modal state
+  const [chatIdToDelete, setChatIdToDelete] = useState<string | null>(null);
+  const [isDeleteSelectionConfirmOpen, setIsDeleteSelectionConfirmOpen] = useState(false);
 
   // Desktop app exit confirmation modal state
   const [isExitConfirmOpen, setIsExitConfirmOpen] = useState(false);
@@ -3222,11 +3239,47 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const assistantMessageIdRef = useRef<string | null>(null);
+  const chatScrollContainerRef = useRef<HTMLDivElement>(null);
+  const chatScrollPositionsRef = useRef<Record<string, number>>({});
+  const lastActiveAssistantTabIdRef = useRef<string | null>(activeAssistantTabId);
+  const previousMessageCountRef = useRef<number>(messages?.length || 0);
 
-  // Auto Scroll Chat
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
-  }, [messages, isAiTyping]);
+  const scrollToBottom = React.useCallback((instant = true) => {
+    const fn = () => {
+      if (chatScrollContainerRef.current) {
+        chatScrollContainerRef.current.scrollTop = chatScrollContainerRef.current.scrollHeight;
+      }
+      messagesEndRef.current?.scrollIntoView({ behavior: instant ? 'auto' : 'smooth' });
+    };
+    fn();
+    // Safety check sequence for asynchronous layouts/markdown parsing
+    setTimeout(fn, 10);
+    setTimeout(fn, 50);
+    setTimeout(fn, 150);
+  }, []);
+
+  // Auto Scroll Chat & Preserve Position over Tabs
+  React.useLayoutEffect(() => {
+    if (activeAssistantTabId !== lastActiveAssistantTabIdRef.current) {
+      // Tab switched: restore scroll position or go to bottom
+      lastActiveAssistantTabIdRef.current = activeAssistantTabId;
+      if (activeAssistantTabId && chatScrollPositionsRef.current[activeAssistantTabId] !== undefined) {
+        if (chatScrollContainerRef.current) {
+          chatScrollContainerRef.current.scrollTop = chatScrollPositionsRef.current[activeAssistantTabId];
+        }
+      } else {
+        scrollToBottom(true);
+      }
+    } else {
+      const length = messages?.length || 0;
+      if (length > previousMessageCountRef.current) {
+        scrollToBottom(false);
+      } else if (isAiTyping) {
+        scrollToBottom(true);
+      }
+    }
+    previousMessageCountRef.current = messages?.length || 0;
+  }, [messages, activeAssistantTabId, isAiTyping, scrollToBottom]);
 
   // Presence reporting loop has been removed
 
@@ -3416,7 +3469,11 @@ export default function App() {
       setSelectedPageNum(pageNum);
     } else {
       const target = e.target as HTMLElement;
-      if (target && !target.closest(".pdf-annotation-popover")) {
+      if (
+        target &&
+        !target.closest(".pdf-annotation-popover") &&
+        !target.closest(".pdf-context-menu-popover")
+      ) {
         setSelectionText("");
         setSelectionPos(null);
         setSelectedPageNum(null);
@@ -4921,7 +4978,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
                     animate={{ opacity: 1, y: 5, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    className="absolute top-full left-3 w-48 bg-[#18181b] border border-[#27272a] rounded-xl py-1.5 z-[70]"
+                    className="absolute top-full left-3 w-48 bg-[#18181b] border border-[#27272a] rounded-xl p-1.5 flex flex-col gap-0.5 z-[70]"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button
@@ -4929,7 +4986,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         createNewDocument();
                         setIsCreateDropdownOpen(false);
                       }}
-                      className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                      className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                     >
                       <Icon
                         icon="ph:file-text"
@@ -4947,7 +5004,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         setActiveTabId(newId);
                         setIsCreateDropdownOpen(false);
                       }}
-                      className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                      className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                     >
                       <Icon
                         icon="ph:chat-circle"
@@ -4980,7 +5037,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         }
                         setIsCreateDropdownOpen(false);
                       }}
-                      className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                      className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                     >
                       <Icon
                         icon="ph:folder-simple-plus"
@@ -4990,7 +5047,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </button>
                     <button
                       onClick={() => fileInputRef.current?.click()}
-                      className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                      className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                     >
                       <Icon
                         icon="ph:upload-simple"
@@ -5242,13 +5299,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (
-                                  window.confirm(
-                                    "Are you sure you want to delete this chat permanently?",
-                                  )
-                                ) {
-                                  deleteTab(chatTab.id);
-                                }
+                                setChatIdToDelete(chatTab.id);
                               }}
                               className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#27272a] hover:text-[#ef4444] rounded transition-all cursor-pointer"
                               title="Delete Chat"
@@ -5596,9 +5647,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 setIsProfileDropdownOpen(false);
                                 setIsSettingsModalOpen(true);
                               }}
-                              className="w-full text-left px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7] transition-colors flex items-center gap-2">
+                              className="w-full text-left px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7] transition-colors flex items-center gap-2 cursor-pointer">
                               <Icon icon="ph:gear" className="w-3.5 h-3.5" />
                               Settings
+                            </button>
+                            <button 
+                              onClick={() => {
+                                setIsLightMode((prev) => !prev);
+                              }}
+                              className="w-full text-left px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7] transition-colors flex items-center gap-2 cursor-pointer">
+                              <Icon icon={isLightMode ? "ph:moon" : "ph:sun"} className="w-3.5 h-3.5" />
+                              {isLightMode ? "Dark Mode" : "Light Mode"}
                             </button>
                             <button
                               onClick={async () => {
@@ -5871,7 +5930,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             initial={{ opacity: 0, y: 10, scale: 0.95 }}
                             animate={{ opacity: 1, y: 8, scale: 1 }}
                             exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                            className="absolute top-full left-0 w-56 bg-[#18181b] border border-[#27272a] rounded-2xl py-2 z-[70] overflow-hidden"
+                            className="absolute top-full left-0 w-56 bg-[#18181b] border border-[#27272a] rounded-2xl p-1.5 flex flex-col gap-0.5 z-[70]"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <button
@@ -5879,7 +5938,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 createNewDocument();
                                 setIsHomeCreateDropdownOpen(false);
                               }}
-                              className="w-full flex items-center gap-3 px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                              className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-xl text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-all cursor-pointer group"
                             >
                               <Icon
                                 icon="ph:file-text"
@@ -5904,7 +5963,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 setActiveTabId(newId);
                                 setIsHomeCreateDropdownOpen(false);
                               }}
-                              className="w-full flex items-center gap-3 px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                              className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-xl text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-all cursor-pointer group"
                             >
                               <Icon
                                 icon="ph:chat-circle"
@@ -5915,7 +5974,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               </span>
                             </button>
 
-                            <div className="h-[1px] bg-[#27272a] mx-4 my-1" />
+                            <div className="h-[1px] bg-[#27272a] mx-2 my-0.5" />
 
                             <button
                               onClick={() => {
@@ -5927,7 +5986,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 });
                                 setIsHomeCreateDropdownOpen(false);
                               }}
-                              className="w-full flex items-center gap-3 px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                              className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-xl text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-all cursor-pointer group"
                             >
                               <Icon
                                 icon="ph:folder-simple-plus"
@@ -6152,7 +6211,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               </span>
                             </button>
                             <button
-                              onClick={() => deleteTab(activeTab.id)}
+                              onClick={() => {
+                                setChatIdToDelete(activeTab.id);
+                                setIsChatMenuOpen(false);
+                              }}
                               className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-red-400/80 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
                             >
                               <Icon icon="ph:trash" className="w-4 h-4" />
@@ -6241,7 +6303,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             setIsSortDropdownOpen(false);
                             setIsFilterDropdownOpen(false);
                           }}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                          className={`flex items-center gap-1.5 px-3.5 py-1.5 border rounded-full text-[11px] font-medium transition-all cursor-pointer ${
                             isDisplayDropdownOpen
                               ? "bg-[#27272a] text-white border-zinc-500"
                               : "bg-[#1a1a1a] hover:bg-[#222222] border-[#27272a] text-[#e4e4e7]"
@@ -6251,8 +6313,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           <span>Display</span>
                         </button>
                         {isDisplayDropdownOpen && (
-                          <div className="absolute left-0 mt-1.5 w-44 bg-[#121212] border border-[#27272a] rounded-lg py-1 shadow-xl z-50 text-xs text-zinc-300">
-                            <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+                          <div className="absolute left-0 mt-1.5 w-44 bg-[#121212] border border-[#27272a] rounded-xl p-1.5 flex flex-col gap-0.5 shadow-xl z-50 text-xs text-zinc-300">
+                            <div className="px-2.5 py-1 text-[9.5px] uppercase font-bold text-[#71717a] tracking-wider mb-0.5">
                               Density
                             </div>
                             <button
@@ -6260,7 +6322,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 setDisplayDensity("comfortable");
                                 setIsDisplayDropdownOpen(false);
                               }}
-                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                             >
                               <span>Comfortable</span>
                               {displayDensity === "comfortable" && (
@@ -6272,7 +6334,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 setDisplayDensity("compact");
                                 setIsDisplayDropdownOpen(false);
                               }}
-                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                             >
                               <span>Compact</span>
                               {displayDensity === "compact" && (
@@ -6291,7 +6353,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             setIsDisplayDropdownOpen(false);
                             setIsFilterDropdownOpen(false);
                           }}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                          className={`flex items-center gap-1.5 px-3.5 py-1.5 border rounded-full text-[11px] font-medium transition-all cursor-pointer ${
                             isSortDropdownOpen
                               ? "bg-[#27272a] text-white border-zinc-500"
                               : "bg-[#1a1a1a] hover:bg-[#222222] border-[#27272a] text-[#e4e4e7]"
@@ -6301,13 +6363,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           <span>Sort</span>
                         </button>
                         {isSortDropdownOpen && (
-                          <div className="absolute left-0 mt-1.5 w-48 bg-[#121212] border border-[#27272a] rounded-lg py-1 shadow-xl z-50 text-xs text-zinc-300">
-                            <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+                          <div className="absolute left-0 mt-1.5 w-48 bg-[#121212] border border-[#27272a] rounded-xl p-1.5 flex flex-col gap-0.5 shadow-xl z-50 text-xs text-zinc-300">
+                            <div className="px-2.5 py-1 text-[9.5px] uppercase font-bold text-[#71717a] tracking-wider mb-0.5">
                               Sort By
                             </div>
                             <button
                               onClick={() => setSortBy("title")}
-                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                             >
                               <span>Title</span>
                               {sortBy === "title" && (
@@ -6316,7 +6378,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             </button>
                             <button
                               onClick={() => setSortBy("added")}
-                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                             >
                               <span>Date Added</span>
                               {sortBy === "added" && (
@@ -6325,7 +6387,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             </button>
                             <button
                               onClick={() => setSortBy("viewed")}
-                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                             >
                               <span>Last Viewed</span>
                               {sortBy === "viewed" && (
@@ -6333,14 +6395,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               )}
                             </button>
 
-                            <div className="my-1 border-t border-[#27272a]" />
+                            <div className="h-[1px] bg-[#27272a] my-1 mx-1" />
 
-                            <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+                            <div className="px-2.5 py-1 text-[9.5px] uppercase font-bold text-[#71717a] tracking-wider mb-0.5">
                               Direction
                             </div>
                             <button
                               onClick={() => setSortOrder("asc")}
-                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                             >
                               <span>Ascending</span>
                               {sortOrder === "asc" && (
@@ -6349,7 +6411,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             </button>
                             <button
                               onClick={() => setSortOrder("desc")}
-                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-all cursor-pointer"
                             >
                               <span>Descending</span>
                               {sortOrder === "desc" && (
@@ -6368,7 +6430,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             setIsDisplayDropdownOpen(false);
                             setIsSortDropdownOpen(false);
                           }}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                          className={`flex items-center gap-1.5 px-3.5 py-1.5 border rounded-full text-[11px] font-medium transition-all cursor-pointer ${
                             isFilterDropdownOpen
                               ? "bg-[#27272a] text-white border-zinc-500"
                               : "bg-[#1a1a1a] hover:bg-[#222222] border-[#27272a] text-[#e4e4e7]"
@@ -6378,8 +6440,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           <span>Filter</span>
                         </button>
                         {isFilterDropdownOpen && (
-                          <div className="absolute left-0 mt-1.5 w-44 bg-[#121212] border border-[#27272a] rounded-lg py-1 shadow-xl z-50 text-xs text-zinc-300">
-                            <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+                          <div className="absolute left-0 mt-1.5 w-44 bg-[#121212] border border-[#27272a] rounded-xl p-1.5 flex flex-col gap-0.5 shadow-xl z-50 text-xs text-zinc-300">
+                            <div className="px-2.5 py-1 text-[9.5px] uppercase font-bold text-[#71717a] tracking-wider mb-0.5">
                               File Type
                             </div>
                             <button
@@ -6387,7 +6449,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 setFilterType("all");
                                 setIsFilterDropdownOpen(false);
                               }}
-                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                             >
                               <span>All Files</span>
                               {filterType === "all" && (
@@ -6399,7 +6461,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 setFilterType("Note");
                                 setIsFilterDropdownOpen(false);
                               }}
-                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                             >
                               <span>Notes</span>
                               {filterType === "Note" && (
@@ -6411,7 +6473,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 setFilterType("Document");
                                 setIsFilterDropdownOpen(false);
                               }}
-                              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800 text-left transition-colors cursor-pointer"
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                             >
                               <span>Documents</span>
                               {filterType === "Document" && (
@@ -6448,14 +6510,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               initial={{ opacity: 0, y: 8, scale: 0.95 }}
                               animate={{ opacity: 1, y: 0, scale: 1 }}
                               exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                              className="absolute right-0 mt-2 w-52 bg-[#18181b] border border-[#27272a] rounded-xl py-1.5 z-[60]"
+                              className="absolute right-0 mt-2 w-52 bg-[#18181b] border border-[#27272a] rounded-xl p-1.5 flex flex-col gap-0.5 z-[60]"
                             >
                               <button
                                 onClick={() => {
                                   createNewDocument();
                                   setIsAddDropdownOpen(false);
                                 }}
-                                className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                                className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                               >
                                 <Icon
                                   icon="ph:file-plus"
@@ -6471,7 +6533,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                   handlePaperclipClick();
                                   setIsAddDropdownOpen(false);
                                 }}
-                                className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                                className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                               >
                                 <Icon
                                   icon="ph:upload-simple"
@@ -6490,7 +6552,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                   });
                                   setIsAddDropdownOpen(false);
                                 }}
-                                className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                                className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                               >
                                 <Icon
                                   icon="ph:folder-plus"
@@ -6499,14 +6561,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 <span className="font-medium">New folder</span>
                               </button>
 
-                              <div className="h-[1px] bg-[#27272a] my-1 mx-2" />
+                              <div className="h-[1px] bg-[#27272a] my-0.5 mx-1" />
 
                               <div className="relative">
                                 <button
                                   onMouseEnter={() =>
                                     setAddDropdownNested("import")
                                   }
-                                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group ${addDropdownNested === "import" ? "bg-[#27272a] text-white" : ""}`}
+                                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group ${addDropdownNested === "import" ? "bg-[#27272a] text-white" : ""}`}
                                 >
                                   <div className="flex items-center gap-3">
                                     <Icon
@@ -6527,7 +6589,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                       initial={{ opacity: 0, x: -8 }}
                                       animate={{ opacity: 1, x: 0 }}
                                       exit={{ opacity: 0, x: -8 }}
-                                      className="absolute right-full top-0 mr-1 w-48 bg-[#18181b] border border-[#27272a] rounded-xl py-1.5 z-[70]"
+                                      className="absolute right-full top-0 mr-1.5 w-48 bg-[#18181b] border border-[#27272a] rounded-xl p-1.5 flex flex-col gap-0.5 z-[70]"
                                       onMouseLeave={() =>
                                         setAddDropdownNested(null)
                                       }
@@ -6542,7 +6604,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                           setIsAddDropdownOpen(false);
                                           setAddDropdownNested(null);
                                         }}
-                                        className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                                        className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                                       >
                                         <Icon
                                           icon="ph:link"
@@ -6562,7 +6624,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                           setIsAddDropdownOpen(false);
                                           setAddDropdownNested(null);
                                         }}
-                                        className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                                        className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                                       >
                                         <img
                                           src="https://www.gstatic.com/images/branding/product/1x/docs_2020q4_48dp.png"
@@ -6584,7 +6646,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                           setIsAddDropdownOpen(false);
                                           setAddDropdownNested(null);
                                         }}
-                                        className="w-full flex items-center gap-3 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                                        className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                                       >
                                         <img
                                           src="https://www.gstatic.com/images/branding/product/1x/youtube_64dp.png"
@@ -7148,10 +7210,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                           <button
                             onClick={() => {
-                              selectedPapers.forEach((title) =>
-                                dbDeletePaper(title),
-                              );
-                              setSelectedPapers([]);
+                              setIsDeleteSelectionConfirmOpen(true);
                             }}
                             className="flex items-center gap-2 px-3 py-1.5 hover:bg-[#1a1a1a] rounded-lg text-white text-[13px] transition-colors cursor-pointer"
                           >
@@ -7431,7 +7490,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             timestamp: Date.now(),
                           };
 
-                          const storageKey = `annotations_${activeTab.id || activeTab.fileId}`;
+                          const storageKey = `annotations_${activeTab.fileId || activeTab.id}`;
                           const currentAnnosStr =
                             localStorage.getItem(storageKey) || "[]";
                           let currentAnnos = [];
@@ -7486,7 +7545,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                   {pdfContextMenu && (
                     <div
-                      className="fixed z-[100] bg-[#161618] border border-[#2d2d30] rounded-xl py-1.5 shadow-2xl min-w-[200px] select-none"
+                      className="fixed z-[100] bg-[#161618] border border-[#2d2d30] rounded-xl p-1.5 shadow-2xl min-w-[200px] select-none pdf-context-menu-popover flex flex-col gap-0.5"
                       style={{
                         left: `${pdfContextMenu.x}px`,
                         top: `${pdfContextMenu.y}px`,
@@ -7501,7 +7560,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setPdfContextMenu(null);
                         }}
                         disabled={!selectionText}
-                        className="w-full flex items-center justify-between px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group mt-0.5"
+                        className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[12px] text-zinc-300 hover:bg-[#27272a] hover:text-white transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
                         <div className="flex items-center gap-2.5">
                           <Icon
@@ -7547,7 +7606,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setPdfContextMenu(null);
                         }}
                         disabled={!selectionText}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12px] text-zinc-300 hover:bg-[#27272a] hover:text-white transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
                         <Icon
                           icon="ph:note-pencil"
@@ -7568,7 +7627,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             color: activeHighlightColor,
                             timestamp: Date.now(),
                           };
-                          const storageKey = `annotations_${activeTab.id || activeTab.fileId}`;
+                          const storageKey = `annotations_${activeTab.fileId || activeTab.id}`;
                           const currentAnnosStr =
                             localStorage.getItem(storageKey) || "[]";
                           let currentAnnos = [];
@@ -7603,7 +7662,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setTimeout(highlightPDFSpans, 100);
                         }}
                         disabled={!selectionText}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12px] text-zinc-300 hover:bg-[#27272a] hover:text-white transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
                         <Icon
                           icon="ph:highlighter"
@@ -7625,7 +7684,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setPdfContextMenu(null);
                         }}
                         disabled={!selectionText}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12px] text-zinc-300 hover:bg-[#27272a] hover:text-white transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
                         <Icon
                           icon="logos:google-icon"
@@ -7645,7 +7704,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setPdfContextMenu(null);
                         }}
                         disabled={!selectionText}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12px] text-zinc-300 hover:bg-[#27272a] hover:text-white transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
                         <Icon
                           icon="ph:text-align-left"
@@ -7665,7 +7724,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setPdfContextMenu(null);
                         }}
                         disabled={!selectionText}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12px] text-zinc-300 hover:bg-[#27272a] hover:text-white transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
                         <Icon
                           icon="ph:sparkle"
@@ -7687,7 +7746,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setPdfContextMenu(null);
                         }}
                         disabled={!selectionText}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12px] text-zinc-300 hover:bg-[#27272a] hover:text-white transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
                         <Icon
                           icon="ph:translate"
@@ -7707,7 +7766,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setPdfContextMenu(null);
                         }}
                         disabled={!selectionText}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12px] text-zinc-300 hover:bg-[#27272a] hover:text-white transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
                         <Icon
                           icon="simple-icons:wikipedia"
@@ -7727,7 +7786,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setPdfContextMenu(null);
                         }}
                         disabled={!selectionText}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12px] text-zinc-300 hover:bg-[#27272a] hover:text-white transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
                         <Icon
                           icon="ph:book-open"
@@ -7749,7 +7808,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setPdfContextMenu(null);
                         }}
                         disabled={!selectionText}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12px] text-zinc-300 hover:bg-[#27272a] hover:text-white transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
                         <Icon
                           icon="ph:speaker-high"
@@ -7769,7 +7828,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setPdfContextMenu(null);
                         }}
                         disabled={!selectionText}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-[#2c2c2e] hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent group"
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12px] text-zinc-300 hover:bg-[#27272a] hover:text-white transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
                         <Icon
                           icon="ph:cards"
@@ -8729,7 +8788,15 @@ Once you have content, I can help you draft sections, summarize findings, or for
             </div>
 
             {/* Scrollable Conversation Stream Pane (Scrollable completely independently from Left Editor view) */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#121212] flex flex-col min-h-0">
+            <div 
+              ref={chatScrollContainerRef}
+              onScroll={(e) => {
+                if (activeAssistantTabId) {
+                  chatScrollPositionsRef.current[activeAssistantTabId] = e.currentTarget.scrollTop;
+                }
+              }}
+              className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#121212] flex flex-col min-h-0"
+            >
               {messages.length === 0 ? (
                 <div className="flex-grow flex flex-col items-center justify-center py-12">
                   <img
@@ -10748,45 +10815,46 @@ Once you have content, I can help you draft sections, summarize findings, or for
               role="dialog"
               aria-modal="true"
               className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm px-4"
+              onClick={() => {
+                setIsDeleteConfirmOpen(false);
+                setTabIdToDelete(null);
+              }}
             >
               <motion.div
                 initial={{ scale: 0.95, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.95, opacity: 0 }}
-                className="bg-[#121212] border border-[#2d2d30] rounded-2xl w-full max-w-sm p-6 relative text-zinc-300 shadow-2xl"
+                className="bg-[#1c1c1e] border border-zinc-800 rounded-[20px] w-full max-w-[320px] overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
               >
-                <div className="mb-6 text-center">
-                  <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-4">
-                    <Icon icon="ph:warning-circle-bold" className="w-6 h-6" />
-                  </div>
-                  <h3 className="text-lg font-bold text-[#f4f4f5] mb-2">Close Tab?</h3>
-                  <p className="text-[13px] text-zinc-500 leading-relaxed font-jakarta">
+                <div className="p-6">
+                  <h3 className="text-lg font-bold text-white mb-2 text-left">Close Tab?</h3>
+                  <p className="text-zinc-400 text-[13px] leading-normal mb-6 text-left font-sans">
                     Are you sure you want to close this tab? Any unsaved changes might be lost.
                   </p>
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => {
-                      setIsDeleteConfirmOpen(false);
-                      setTabIdToDelete(null);
-                    }}
-                    className="flex-1 py-2.5 bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-white text-[13px] font-bold rounded-xl cursor-pointer transition-colors border border-[#2d2d30]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (tabIdToDelete) {
-                        deleteTab(tabIdToDelete);
-                      }
-                      setIsDeleteConfirmOpen(false);
-                      setTabIdToDelete(null);
-                    }}
-                    className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 text-white text-[13px] font-bold rounded-xl cursor-pointer transition-colors"
-                  >
-                    Close Tab
-                  </button>
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => {
+                        setIsDeleteConfirmOpen(false);
+                        setTabIdToDelete(null);
+                      }}
+                      className="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-full text-xs font-semibold cursor-pointer transition-colors border border-zinc-700"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (tabIdToDelete) {
+                          deleteTab(tabIdToDelete);
+                        }
+                        setIsDeleteConfirmOpen(false);
+                        setTabIdToDelete(null);
+                      }}
+                      className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-full text-xs font-semibold transition-all cursor-pointer"
+                    >
+                      Close Tab
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             </motion.div>
@@ -10800,38 +10868,130 @@ Once you have content, I can help you draft sections, summarize findings, or for
               role="dialog"
               aria-modal="true"
               className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm px-4"
+              onClick={() => setIsExitConfirmOpen(false)}
             >
               <motion.div
                 initial={{ scale: 0.95, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.95, opacity: 0 }}
-                className="bg-[#121212] border border-[#2d2d30] rounded-2xl w-full max-w-sm p-6 relative text-zinc-300 shadow-2xl"
+                className="bg-[#1c1c1e] border border-zinc-800 rounded-[20px] w-full max-w-[320px] overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
               >
-                <div className="mb-6 text-left">
-                  <h3 className="text-lg font-bold text-[#f4f4f5] mb-2">Exit Application?</h3>
-                  <p className="text-[13px] text-zinc-500 leading-relaxed font-jakarta">
-                    Are you sure you want to exit the application? Unsaved workspace states might be lost.
+                <div className="p-6">
+                  <h3 className="text-lg font-bold text-white mb-2 text-left">Exit Cosmi?</h3>
+                  <p className="text-zinc-400 text-[13px] leading-normal mb-6 text-left font-sans">
+                    Are you sure you want to exit Cosmi? Unsaved workspace states might be lost.
                   </p>
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => setIsExitConfirmOpen(false)}
+                      className="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-full text-xs font-semibold cursor-pointer transition-colors border border-zinc-700"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsExitConfirmOpen(false);
+                        handleCloseApp();
+                      }}
+                      className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-full text-xs font-semibold transition-all cursor-pointer"
+                    >
+                      Exit App
+                    </button>
+                  </div>
                 </div>
+              </motion.div>
+            </motion.div>
+          )}
 
-                <div className="flex gap-3 text-[13px] font-semibold">
-                  <button
-                    onClick={() => {
-                      setIsExitConfirmOpen(false);
-                    }}
-                    className="flex-1 py-1.5 px-4 bg-[#232326] hover:bg-[#2d2d30] text-zinc-300 hover:text-white rounded-full cursor-pointer transition-colors border border-[#3e3e42]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsExitConfirmOpen(false);
-                      handleCloseApp();
-                    }}
-                    className="flex-1 py-1.5 px-4 bg-red-600 hover:bg-red-500 text-white rounded-full cursor-pointer transition-colors"
-                  >
-                    Exit App
-                  </button>
+          {chatIdToDelete && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              role="dialog"
+              aria-modal="true"
+              className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm px-4"
+              onClick={() => setChatIdToDelete(null)}
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-[#1c1c1e] border border-zinc-800 rounded-[20px] w-full max-w-[320px] overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-6">
+                  <h3 className="text-lg font-bold text-white mb-2 text-left">
+                    Delete Chat?
+                  </h3>
+                  <p className="text-zinc-400 text-[13px] leading-normal mb-6 text-left font-sans">
+                    Are you sure you want to delete this chat permanently? This action cannot be undone.
+                  </p>
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => setChatIdToDelete(null)}
+                      className="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-full text-xs font-semibold cursor-pointer transition-colors border border-zinc-700"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        deleteTab(chatIdToDelete);
+                        setChatIdToDelete(null);
+                      }}
+                      className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-full text-xs font-semibold transition-all cursor-pointer"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+
+          {isDeleteSelectionConfirmOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              role="dialog"
+              aria-modal="true"
+              className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4 backdrop-blur-sm px-4"
+              onClick={() => setIsDeleteSelectionConfirmOpen(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-[#1c1c1e] border border-zinc-800 rounded-[20px] w-full max-w-[320px] overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-6">
+                  <h3 className="text-lg font-bold text-white mb-2 text-left">
+                    Delete Selection?
+                  </h3>
+                  <p className="text-zinc-400 text-[13px] leading-normal mb-6 text-left font-sans">
+                    Are you sure you want to delete the selected {selectedPapers.length === 1 ? "document" : "documents"}? This will permanently remove them from your library.
+                  </p>
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => setIsDeleteSelectionConfirmOpen(false)}
+                      className="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-full text-xs font-semibold cursor-pointer transition-colors border border-zinc-700"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        selectedPapers.forEach((title) => dbDeletePaper(title));
+                        setSelectedPapers([]);
+                        setIsDeleteSelectionConfirmOpen(false);
+                      }}
+                      className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-full text-xs font-semibold transition-all cursor-pointer"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             </motion.div>

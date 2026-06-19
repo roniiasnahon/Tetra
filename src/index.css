@@ -1,6 +1,37 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lora:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap');
 @import "tailwindcss";
 
+html.light-mode {
+  filter: invert(1) hue-rotate(180deg) brightness(1.05);
+  background-color: #000;
+  -webkit-font-smoothing: auto !important;
+  -moz-osx-font-smoothing: auto !important;
+}
+
+/* Restore font weight and fix jagged edges from inverted subpixel rendering */
+html.light-mode * {
+  -webkit-font-smoothing: auto !important;
+  -moz-osx-font-smoothing: auto !important;
+}
+
+/* Apply the exact #FAF6EE warm tint to the entire layout */
+html.light-mode body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-color: #FAF6EE;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  z-index: 2147483647;
+}
+
+html.light-mode img,
+html.light-mode video,
+html.light-mode iframe,
+html.light-mode canvas {
+  filter: invert(1) hue-rotate(180deg) brightness(0.95) !important;
+}
+
 @theme {
   --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "DM Sans", sans-serif;

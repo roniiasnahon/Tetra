@@ -54,6 +54,7 @@ export const Settings = ({
   // Navigation & Search State
   const [activeTab, setActiveTab ] = useState<TabType>("general");
   const [searchQuery, setSearchQuery] = useState("");
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   // Storage Persistence Mode selection state
   const [localStorageMode, setLocalStorageMode] = useState<"local" | "database">(() => {
@@ -242,21 +243,24 @@ export const Settings = ({
     }
   })();
 
-  // Clear workspace data handler
+  // Clear workspace data handlers
   const handleClearWorkspace = () => {
-    if (confirm("Are you absolutely sure you want to clear all workspace documents, chats, and citations? This cannot be undone.")) {
-      setClearStatus("Clearing all cache...");
+    setShowClearConfirm(true);
+  };
+
+  const handleConfirmClearWorkspace = () => {
+    setShowClearConfirm(false);
+    setClearStatus("Clearing all cache...");
+    setTimeout(() => {
+      const uid = currentUser?.uid || "guest";
+      localStorage.removeItem(`cosmi_tabs_${uid}`);
+      localStorage.removeItem(`cosmi_activeTabId_${uid}`);
+      localStorage.removeItem(`cosmi_messages_${uid}`);
+      setClearStatus("Workspace cleared successfully! Reloading...");
       setTimeout(() => {
-        const uid = currentUser?.uid || "guest";
-        localStorage.removeItem(`cosmi_tabs_${uid}`);
-        localStorage.removeItem(`cosmi_activeTabId_${uid}`);
-        localStorage.removeItem(`cosmi_messages_${uid}`);
-        setClearStatus("Workspace cleared successfully! Reloading...");
-        setTimeout(() => {
-          window.location.reload();
-        }, 1000);
-      }, 1500);
-    }
+        window.location.reload();
+      }, 1000);
+    }, 1500);
   };
 
   // Genuine Auth Profile updates
@@ -1508,6 +1512,41 @@ export const Settings = ({
           </div> {/* scroll container */}
         </div>
       </motion.div>
+
+      {showClearConfirm && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/85 p-4"
+          onClick={() => setShowClearConfirm(false)}
+        >
+          <div
+            className="bg-[#1c1c1e] border border-zinc-800 rounded-[20px] w-full max-w-[320px] overflow-hidden animate-scale-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6 text-zinc-300 text-left">
+              <h3 className="text-lg font-bold text-white mb-2">
+                Clear Workspace?
+              </h3>
+              <p className="text-zinc-400 text-[13px] leading-normal mb-6 font-sans">
+                Are you absolutely sure you want to clear all workspace documents, chats, and citations? This action cannot be undone.
+              </p>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setShowClearConfirm(false)}
+                  className="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-full text-xs font-semibold cursor-pointer transition-colors border border-zinc-750"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmClearWorkspace}
+                  className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-full text-xs font-semibold transition-all cursor-pointer"
+                >
+                  Clear All
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 };

@@ -37,7 +37,7 @@ const CitationLink = ({
     if (!href) return;
     
     // Check cache
-    if (previewCache.has(href)) {
+    if (isHovered && !previewData && previewCache.has(href)) {
       setPreviewData(previewCache.get(href));
       return;
     }
@@ -274,15 +274,180 @@ const CitationLink = ({
   );
 };
 
+const ImageCarousel = ({ images }: { images: Array<{ url: string; alt: string }> }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [showLeftBtn, setShowLeftBtn] = useState(false);
+  const [showRightBtn, setShowRightBtn] = useState(false);
+
+  const checkScroll = () => {
+    const el = containerRef.current;
+    if (el) {
+      setShowLeftBtn(el.scrollLeft > 5);
+      setShowRightBtn(el.scrollLeft < el.scrollWidth - el.clientWidth - 5);
+    }
+  };
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (el) {
+      checkScroll();
+      el.addEventListener('scroll', checkScroll);
+      window.addEventListener('resize', checkScroll);
+      
+      const ob = new ResizeObserver(checkScroll);
+      ob.observe(el);
+      
+      return () => {
+        el.removeEventListener('scroll', checkScroll);
+        window.removeEventListener('resize', checkScroll);
+        ob.disconnect();
+      };
+    }
+  }, []);
+
+  const scroll = (direction: 'left' | 'right') => {
+    const el = containerRef.current;
+    if (el) {
+      const scrollAmount = el.clientWidth * 0.75;
+      el.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+    }
+  };
+
+  if (!images || images.length === 0) return null;
+
+  return (
+    <div className="relative group w-full my-4" id="web-search-image-carousel">
+      {/* Scrollable Container */}
+      <div
+        ref={containerRef}
+        className="flex overflow-x-auto gap-3.5 scroll-smooth snap-x snap-mandatory py-1 pb-3 scrollbar-none"
+        style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}
+      >
+        {images.map((img, idx) => (
+          <div
+            key={idx}
+            className="w-[210px] md:w-[250px] shrink-0 snap-align-start flex flex-col transition-all"
+          >
+            {/* Image Border/Canvas Box */}
+            <div className="aspect-square w-full rounded-[14px] overflow-hidden flex items-center justify-center relative">
+              <img
+                src={img.url}
+                alt={img.alt || "Search result image"}
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = 'none';
+                }}
+              />
+            </div>
+            
+            {/* Description/Caption text */}
+            {img.alt && (
+              <div className="mt-2 flex-1 flex flex-col justify-start">
+                <p className="text-[12px] font-medium leading-relaxed text-[#c3c3c9] line-clamp-2 md:line-clamp-3 font-sans tracking-tight">
+                  {img.alt}
+                </p>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Elegant Nav Scroll Buttons (No glows, flat style) */}
+      {showLeftBtn && (
+        <button
+          onClick={() => scroll('left')}
+          className="absolute left-2 top-12 md:top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-[#1e1e21] border border-[#2e2e33] text-zinc-300 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10"
+          title="Scroll Left"
+        >
+          <Icon icon="ph:caret-left-bold" className="w-4 h-4" />
+        </button>
+      )}
+      {showRightBtn && (
+        <button
+          onClick={() => scroll('right')}
+          className="absolute right-2 top-12 md:top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-[#1e1e21] border border-[#2e2e33] text-zinc-300 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10"
+          title="Scroll Right"
+        >
+          <Icon icon="ph:caret-right-bold" className="w-4 h-4" />
+        </button>
+      )}
+    </div>
+  );
+};
+
+function groupImagesIntoCarousel(content: string): string {
+  if (!content) return content;
+  
+  // Regex to match markdown images
+  const imageRegex = /!\[([^\]]*?)\]\((https?:\/\/[^\s\)]+)\)/g;
+  
+  const matches: Array<{ full: string; alt: string; url: string; index: number }> = [];
+  let match;
+  while ((match = imageRegex.exec(content)) !== null) {
+    matches.push({
+      full: match[0],
+      alt: match[1],
+      url: match[2],
+      index: match.index
+    });
+  }
+
+  if (matches.length === 0) return content;
+
+  let result = "";
+  let lastIdx = 0;
+  
+  let i = 0;
+  while (i < matches.length) {
+    let j = i;
+    while (j + 1 < matches.length) {
+      const currentEnd = matches[j].index + matches[j].full.length;
+      const nextStart = matches[j+1].index;
+      const interText = content.substring(currentEnd, nextStart).trim();
+      if (interText === "" || interText === "\\n" || interText === "*" || interText.replace(/[\s\n\-\*]/g, "") === "") {
+        j++;
+      } else {
+        break;
+      }
+    }
+
+    const startIdx = matches[i].index;
+    const endIdx = matches[j].index + matches[j].full.length;
+    const groupedImages = matches.slice(i, j + 1).map(m => ({ url: m.url, alt: m.alt }));
+
+    result += content.substring(lastIdx, startIdx);
+
+    if (groupedImages.length > 1) {
+      const dataStr = encodeURIComponent(JSON.stringify(groupedImages));
+      result += `[ImageCarousel](https://carousel.local?data=${dataStr})`;
+    } else {
+      // Just emit the original single image markdown
+      result += content.substring(startIdx, endIdx);
+    }
+
+    lastIdx = endIdx;
+    i = j + 1;
+  }
+  
+  result += content.substring(lastIdx);
+  return result;
+}
+
 export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationClick, isStreaming }: { content: string, timestamp: number, onCitationClick?: (page: number, title: string) => void, isStreaming?: boolean }) => {
   
   // Transform custom syntax [[page:N|Title]] into markdown links with special prefix
   // We use encodeURIComponent for the title to handle spaces and special chars in the hash URL
-  const processedContent = (content || '').replace(/\[\[page:(\d+)\|(.+?)\]\]/g, (_, p, t) => {
-    // Escape potentially breaking characters in title label for markdown
-    const safeTitle = t.replace(/\]/g, '\\]');
-    return `[${safeTitle} (p. ${p})](#cite-page-${p}-${encodeURIComponent(t)})`;
-  });
+  const processedContent = groupImagesIntoCarousel(
+    (content || '').replace(/\[\[page:(\d+)\|(.+?)\]\]/g, (_, p, t) => {
+      // Escape potentially breaking characters in title label for markdown
+      const safeTitle = t.replace(/\]/g, '\\]');
+      return `[${safeTitle} (p. ${p})](#cite-page-${p}-${encodeURIComponent(t)})`;
+    })
+  );
 
   const components = {
     p: ({children}: any) => <div className="mb-4 last:mb-0 leading-relaxed text-[#d4d4d8] text-[15px]">{children}</div>,
@@ -365,6 +530,17 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
       );
     },
     a: ({children, href, ...props}: any) => {
+      if (href?.startsWith('https://carousel.local?data=')) {
+        try {
+          const jsonStr = decodeURIComponent(href.substring('https://carousel.local?data='.length));
+          const images = JSON.parse(jsonStr);
+          return <ImageCarousel images={images} />;
+        } catch (e) {
+          console.error("Failed to parse carousel images:", e);
+          return null;
+        }
+      }
+
       if (href?.startsWith('#cite-page-')) {
         const dataStr = href.replace('#cite-page-', '');
         const firstHyphen = dataStr.indexOf('-');
@@ -447,6 +623,24 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
       );
     },
     strong: ({children}: any) => <strong className="font-semibold text-white">{children}</strong>,
+    img: ({ src, alt }: any) => {
+      return (
+        <span className="block my-5 max-w-full overflow-hidden">
+          <img 
+            src={src} 
+            alt={alt || "Search result image"} 
+            className="w-full max-h-[380px] object-cover rounded-[14px] block" 
+            referrerPolicy="no-referrer"
+            onError={(e) => {
+              (e.target as HTMLElement).style.display = 'none';
+            }}
+          />
+          {alt && (
+            <span className="block text-[12px] text-[#c3c3c9] mt-2 font-sans font-medium leading-relaxed tracking-tight">{alt}</span>
+          )}
+        </span>
+      );
+    },
     table: ({ children }: any) => (
       <div className="overflow-x-auto my-4 custom-scrollbar-h">
         <table className="w-full border-collapse border border-zinc-800 text-[12px] leading-snug">
