@@ -120,7 +120,7 @@ function processStringForMath(str: string) {
         );
       }
     } catch (e) {
-      console.error("KaTeX parse error in Cosmi AI Analyst:", e);
+      console.error("KaTeX parse error in Data Analysis Analyst:", e);
       return <span key={i} className="font-mono text-[10px] text-red-500">{part}</span>;
     }
   });
@@ -873,9 +873,9 @@ export function StatisticsTools({
       // Save to Tools history!
       onAddHistory?.({
         type: 'ai',
-        title: `Cosmi Audit (${file.name})`,
+        title: `Data Analysis (${file.name})`,
         parameters: { fileName: file.name, analysisResult: resultText },
-        result: `Cosmi AI Data analysis complete`
+        result: `Data analysis complete`
       });
     } catch (err: any) {
       console.error(err);
@@ -1615,7 +1615,7 @@ export function StatisticsTools({
           {isAnalyzing ? (
               <div className="h-full flex flex-col items-center justify-center text-center space-y-3 pt-12">
                 <Icon icon="ph:spinner-gap" className="animate-spin text-zinc-400 w-8 h-8" />
-                <p className="text-xs text-[#a1a1aa]">Cosmi is evaluating the context claim patterns...</p>
+                <p className="text-xs text-[#a1a1aa]">Analysis engine is evaluating the context claim patterns...</p>
                 <span className="text-[9.5px] font-mono text-[#52525b]">This may take 10-15 seconds depending on file length.</span>
               </div>
             ) : analysisResult ? (

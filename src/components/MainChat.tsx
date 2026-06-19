@@ -383,11 +383,13 @@ export const MainChat: React.FC<MainChatProps> = ({
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors text-xs font-semibold cursor-pointer bg-transparent hover:bg-[#222222] font-jakarta text-[#71717a]"
                   title="Choose AI Model"
                 >
-                  <span className="flex items-center gap-1">
-                    <span className="text-white">{modelsList.find(m => m.id === selectedModel)?.label || 'Composition I'}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-white">
+                      {modelsList.find(m => m.id === selectedModel)?.label || 'Composition I'}
+                    </span>
                     {thinkingLevel !== 'Standard' && (
-                      <span className="text-[#515155] text-[10.5px] font-normal">
-                        ({thinkingLevel})
+                      <span className="text-zinc-400 opacity-50 font-normal text-[10.5px] ml-1">
+                        {thinkingLevel}
                       </span>
                     )}
                   </span>

@@ -4938,7 +4938,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   active: sidebarView === "library",
                 },
                 {
-                  icon: "ph:squares-four",
+                  icon: "ph:wrench",
                   label: "Tools",
                   onClick: () => {
                     let toolsTab = tabs.find((t) => t.type === "tools");
@@ -5415,13 +5415,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           },
                           {
                             id: "ai",
-                            label: "Cosmi Audit",
+                            label: "Data Analysis",
                             icon: "cosmi.png",
                             color: "",
                           },
                           {
                             id: "citation",
-                            label: "Citation Generator",
+                            label: "Citations",
                             icon: "ph:article-fill",
                             color: "text-[#fb7185]",
                           },
@@ -5781,7 +5781,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 ) : tab.type === "chat" ? (
                   <Icon icon="ph:chat-circle" className="w-3.5 h-3.5" />
                 ) : tab.type === "tools" ? (
-                  <Icon icon="ph:squares-four" className="w-3.5 h-3.5" />
+                  <Icon icon="ph:wrench" className="w-3.5 h-3.5" />
                 ) : (
                   <Icon icon="ph:pencil-line" className="w-3.5 h-3.5" />
                 )}
@@ -6560,108 +6560,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 />
                                 <span className="font-medium">New folder</span>
                               </button>
-
-                              <div className="h-[1px] bg-[#27272a] my-0.5 mx-1" />
-
-                              <div className="relative">
-                                <button
-                                  onMouseEnter={() =>
-                                    setAddDropdownNested("import")
-                                  }
-                                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group ${addDropdownNested === "import" ? "bg-[#27272a] text-white" : ""}`}
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <Icon
-                                      icon="ph:download-simple"
-                                      className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300"
-                                    />
-                                    <span className="font-medium">Import</span>
-                                  </div>
-                                  <Icon
-                                    icon="ph:caret-right"
-                                    className="w-3 h-3 text-zinc-500"
-                                  />
-                                </button>
-
-                                <AnimatePresence>
-                                  {addDropdownNested === "import" && (
-                                    <motion.div
-                                      initial={{ opacity: 0, x: -8 }}
-                                      animate={{ opacity: 1, x: 0 }}
-                                      exit={{ opacity: 0, x: -8 }}
-                                      className="absolute right-full top-0 mr-1.5 w-48 bg-[#18181b] border border-[#27272a] rounded-xl p-1.5 flex flex-col gap-0.5 z-[70]"
-                                      onMouseLeave={() =>
-                                        setAddDropdownNested(null)
-                                      }
-                                    >
-                                      <button
-                                        onClick={() => {
-                                          setImportType("url");
-                                          setImportModalOpen(true);
-                                          setImportUrl("");
-                                          setLinkAnalyzeError("");
-                                          setLinkAnalyzeStatus("");
-                                          setIsAddDropdownOpen(false);
-                                          setAddDropdownNested(null);
-                                        }}
-                                        className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
-                                      >
-                                        <Icon
-                                          icon="ph:link"
-                                          className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300"
-                                        />
-                                        <span className="font-medium">
-                                          Public URL
-                                        </span>
-                                      </button>
-                                      <button
-                                        onClick={() => {
-                                          setImportType("gdoc");
-                                          setImportModalOpen(true);
-                                          setImportUrl("");
-                                          setLinkAnalyzeError("");
-                                          setLinkAnalyzeStatus("");
-                                          setIsAddDropdownOpen(false);
-                                          setAddDropdownNested(null);
-                                        }}
-                                        className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
-                                      >
-                                        <img
-                                          src="https://www.gstatic.com/images/branding/product/1x/docs_2020q4_48dp.png"
-                                          alt="Google Docs"
-                                          className="w-4 h-4 object-contain"
-                                          referrerPolicy="no-referrer"
-                                        />
-                                        <span className="font-medium">
-                                          Google Docs
-                                        </span>
-                                      </button>
-                                      <button
-                                        onClick={() => {
-                                          setImportType("youtube");
-                                          setImportModalOpen(true);
-                                          setImportUrl("");
-                                          setLinkAnalyzeError("");
-                                          setLinkAnalyzeStatus("");
-                                          setIsAddDropdownOpen(false);
-                                          setAddDropdownNested(null);
-                                        }}
-                                        className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
-                                      >
-                                        <img
-                                          src="https://www.gstatic.com/images/branding/product/1x/youtube_64dp.png"
-                                          alt="YouTube"
-                                          className="w-4 h-4 object-contain"
-                                          referrerPolicy="no-referrer"
-                                        />
-                                        <span className="font-medium">
-                                          YouTube
-                                        </span>
-                                      </button>
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
-                              </div>
                             </motion.div>
                           )}
                         </AnimatePresence>
@@ -7244,10 +7142,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         : activeToolsTab === "weighted"
                           ? "Weighted Arithmetic Mean"
                           : activeToolsTab === "likert"
-                            ? "Likert Scale Response Indexer"
+                            ? "Likert Scale"
                             : activeToolsTab === "citation"
-                              ? "Academic Citation Generator"
-                              : "Cosmi AI Data Analyst"}
+                              ? "Citations"
+                              : "Data Analysis"}
                   </h1>
                   <div className="flex-1 min-h-0 flex flex-col">
                     <StatisticsTools
@@ -9012,10 +8910,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         }`}
                         title="Choose AI Model"
                       >
-                        <span className="flex items-center gap-1">
-                          <span className="text-white">{modelsList.find(m => m.id === selectedModel)?.label || 'Composition I'}</span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-white font-semibold">
+                            {modelsList.find(m => m.id === selectedModel)?.label || 'Composition I'}
+                          </span>
                           {thinkingLevel !== 'Standard' && (
-                            <span className="text-[#71717a]">
+                            <span className="text-zinc-400 opacity-50 font-normal text-[10.5px] ml-1">
                               {thinkingLevel}
                             </span>
                           )}

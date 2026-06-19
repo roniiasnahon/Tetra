@@ -3025,7 +3025,7 @@ ${researchContext}
         if (thinkingLevel === "Deep") {
           geminiConfig.thinkingConfig = { thinkingLevel: "HIGH" };
         } else if (thinkingLevel === "Instant") {
-          geminiConfig.thinkingConfig = { thinkingLevel: "MINIMAL" };
+          geminiConfig.thinkingConfig = { thinkingLevel: "OFF" };
         }
 
         if (webSearchEnabled) {

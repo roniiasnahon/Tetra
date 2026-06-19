@@ -19,7 +19,7 @@ content = content.replace(
 
 content = content.replace(
   "{ icon: 'ph:magnifying-glass', label: 'Search', onClick: () => setSidebarView('search'), active: sidebarView === 'search' }",
-  "{ icon: 'ph:calculator', label: 'Tools', onClick: () => setSidebarView('tools'), active: sidebarView === 'tools' }"
+  "{ icon: 'ph:wrench', label: 'Tools', onClick: () => setSidebarView('tools'), active: sidebarView === 'tools' }"
 );
 
 const searchStart = content.indexOf("{sidebarView === 'search' && (");
