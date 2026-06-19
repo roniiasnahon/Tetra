@@ -1230,7 +1230,7 @@ export function StatisticsTools({
             </button>
           )}
         </div>
-        <div className="px-8 pt-6 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
+        <div className="px-8 pt-6 pb-8 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
           {isValid ? (
             <div className="space-y-4">
               <div className="py-12 flex items-center justify-center select-none scale-[1.75] origin-center">
@@ -1415,7 +1415,7 @@ export function StatisticsTools({
             </button>
           )}
         </div>
-        <div className="px-8 pt-6 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
+        <div className="px-8 pt-6 pb-8 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
           {isValid && validatedRows.length > 0 ? (
             <div className="space-y-4">
               <div className="py-12 flex items-center justify-center select-none scale-[1.75] origin-center">
@@ -1690,7 +1690,7 @@ export function StatisticsTools({
             </button>
           )}
         </div>
-        <div className="px-8 pt-6 pb-8 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
+        <div className="px-8 pt-6 pb-8 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
           {isValid && sumWeight > 0 ? (
             <div className="space-y-4">
               <div className="py-12 flex items-center justify-center select-none scale-[1.75] origin-center">

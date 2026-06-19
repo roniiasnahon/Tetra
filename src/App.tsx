@@ -9744,10 +9744,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 </span>
                 ? All documents indexed within this folder will be removed.
               </p>
-              <div className="flex gap-2">
+              <div className="flex gap-2 justify-end">
                 <button
                   onClick={() => setIsDeleteFolderModalOpen(false)}
-                  className="flex-1 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg text-[13px] font-semibold transition-colors cursor-pointer"
+                  className="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-full text-xs font-semibold cursor-pointer transition-colors border border-zinc-700"
                 >
                   Cancel
                 </button>
@@ -9757,7 +9757,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     setIsDeleteFolderModalOpen(false);
                     setFolderToDelete(null);
                   }}
-                  className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[13px] font-semibold transition-all cursor-pointer"
+                  className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-full text-xs font-semibold transition-all cursor-pointer"
                 >
                   Delete
                 </button>
