@@ -4938,7 +4938,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   active: sidebarView === "library",
                 },
                 {
-                  icon: "ph:wrench",
+                  icon: "ph:wrench-fill",
                   label: "Tools",
                   onClick: () => {
                     let toolsTab = tabs.find((t) => t.type === "tools");
@@ -5393,37 +5393,37 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             id: "slovin",
                             label: "Slovin's Formula",
                             icon: "ph:calculator-fill",
-                            color: "text-[#38bdf8]",
+                            color: "!text-zinc-500",
                           },
                           {
                             id: "percentage",
                             label: "Percentage Calc",
                             icon: "ph:percent-fill",
-                            color: "text-[#10b981]",
+                            color: "!text-zinc-500",
                           },
                           {
                             id: "weighted",
                             label: "Weighted Mean",
                             icon: "ph:scales-fill",
-                            color: "text-[#60a5fa]",
+                            color: "!text-zinc-500",
                           },
                           {
                             id: "likert",
                             label: "Likert Scale",
                             icon: "ph:check-square-fill",
-                            color: "text-[#f59e0b]",
+                            color: "!text-zinc-500",
                           },
                           {
                             id: "ai",
                             label: "Data Analysis",
-                            icon: "cosmi.png",
-                            color: "",
+                            icon: "ph:chart-pie-slice-fill",
+                            color: "!text-zinc-500",
                           },
                           {
                             id: "citation",
                             label: "Citations",
                             icon: "ph:article-fill",
-                            color: "text-[#fb7185]",
+                            color: "!text-zinc-500",
                           },
                         ].map((item) => {
                           const isCurrentlySelected =
@@ -5506,22 +5506,22 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
                             {toolsHistory.map((item) => {
                               let iconName = "ph:calculator-fill";
-                              let colorClass = "text-zinc-400";
+                              let colorClass = "!text-zinc-500";
                               if (item.type === "percentage") {
                                 iconName = "ph:percent-fill";
-                                colorClass = "text-[#10b981]";
+                                colorClass = "!text-zinc-500";
                               } else if (item.type === "weighted") {
                                 iconName = "ph:scales-fill";
-                                colorClass = "text-[#38bdf8]";
+                                colorClass = "!text-zinc-500";
                               } else if (item.type === "likert") {
                                 iconName = "ph:check-square-fill";
-                                colorClass = "text-[#f59e0b]";
+                                colorClass = "!text-zinc-500";
                               } else if (item.type === "ai") {
-                                iconName = "cosmi.png";
-                                colorClass = "";
+                                iconName = "ph:chart-pie-slice-fill";
+                                colorClass = "!text-zinc-500";
                               } else if (item.type === "citation") {
                                 iconName = "ph:article-fill";
-                                colorClass = "text-[#fb7185]";
+                                colorClass = "!text-zinc-500";
                               }
 
                               return (

@@ -841,29 +841,33 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         
         {/* TAB COMMENTS: Annotations */}
         {activeSubTab === 'comments' && (
-          <div className="flex flex-col flex-1 min-h-0 p-4 space-y-3 bg-transparent text-[13px]">
-            <div className="flex items-center justify-between pb-2 border-b border-[#222225]">
-              <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">PDF Annotations & Comments</span>
-              <span className="text-[10px] text-zinc-500 font-mono">{annotations.length} items</span>
+          <div className="flex flex-col flex-1 min-h-0 bg-transparent text-[13px]">
+            <div className="px-5 py-4 flex items-center justify-between border-b border-zinc-800/50">
+              <span className="text-[11px] font-bold text-zinc-200 uppercase tracking-[0.15em]">Annotations</span>
+              <span className="text-[10px] text-zinc-500 font-mono font-bold tracking-tighter uppercase">{annotations.length} items</span>
             </div>
             
             {annotations.length === 0 ? (
-              <div className="flex-1 py-12 flex flex-col items-center justify-center text-center px-4 space-y-2">
-                <Icon icon="ph:highlighter" className="w-8 h-8 text-zinc-600" />
-                <p className="text-[12px] text-zinc-400 font-medium font-sans">No annotations yet</p>
-                <p className="text-[10.5px] text-zinc-500 leading-relaxed font-sans">
-                  Select text inside the PDF document viewer, then click "Save Annotation" to highlight sections and add persistent comments.
-                </p>
+              <div className="flex-1 py-20 flex flex-col items-center justify-center text-center px-8 space-y-4">
+                <div className="w-16 h-16 rounded-full bg-zinc-900/30 border border-zinc-800/50 flex items-center justify-center mb-2">
+                  <Icon icon="ph:highlighter-circle" className="w-8 h-8 text-zinc-700" />
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-[13px] text-zinc-300 font-semibold tracking-tight">Empty Workspace</p>
+                  <p className="text-[10.5px] text-zinc-500 leading-relaxed font-normal max-w-[220px] mx-auto">
+                    Select text in the PDF to create highlights and attach sophisticated comments.
+                  </p>
+                </div>
               </div>
             ) : (
-              <div className="flex flex-col gap-3 overflow-y-auto pr-1">
-                {annotations.map((anno) => (
+              <div className="flex flex-col overflow-y-auto custom-scrollbar flex-1">
+                {annotations.map((anno, idx) => (
                   <div 
                     key={anno.id} 
-                    className="p-3 bg-[#18181b] border border-[#27272a] rounded-xl flex flex-col gap-2 relative group hover:border-[#38383f] transition-colors"
+                    className={`group relative flex flex-col gap-3.5 p-5 border-b border-zinc-800/40 hover:bg-zinc-900/20 transition-all duration-200 ${idx === annotations.length - 1 ? 'border-b-0' : ''}`}
                   >
-                    {/* Top bar */}
-                    <div className="flex items-center justify-between text-[10px] text-zinc-500 font-mono">
+                    {/* Header: Navigation & Context */}
+                    <div className="flex items-center justify-between">
                       <button 
                         onClick={() => {
                           const pageEl = document.getElementById(`pdf-page-${anno.page}`);
@@ -871,42 +875,48 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                             pageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
                           }
                         }}
-                        className="flex items-center gap-1 text-[#fb7185] hover:underline cursor-pointer bg-transparent border-none p-0 select-none font-semibold text-[10.5px]"
+                        className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900/80 text-zinc-400 border border-zinc-800 rounded-full text-[9px] font-bold uppercase tracking-widest hover:bg-zinc-800 hover:text-zinc-200 transition-all cursor-pointer select-none"
                       >
-                        <Icon icon="ph:bookmark-simple" className="w-3.5 h-3.5" />
+                        <Icon icon="ph:bookmark-fill" className="w-2.5 h-2.5" />
                         <span>Page {anno.page}</span>
                       </button>
-                       <button
+                      
+                      <button
                         onClick={() => {
                           setAnnoToDelete(anno);
                         }}
-                        className="text-zinc-500 hover:text-red-400 cursor-pointer p-0.5"
-                        title="Delete Annotation"
+                        className="p-1 rounded-md text-zinc-600 hover:text-rose-400 hover:bg-rose-400/10 opacity-0 group-hover:opacity-100 transition-opacity duration-200 cursor-pointer"
+                        title="Delete Entry"
                       >
-                        <Icon icon="ph:trash" className="w-3.5 h-3.5" />
+                        <Icon icon="ph:trash-simple" className="w-3.5 h-3.5" />
                       </button>
                     </div>
                     
-                    {/* Highlight text block */}
-                    <div 
-                      className="border-l-2 p-2 text-[11px] italic text-zinc-300 select-text leading-relaxed bg-[#121212]/50 whitespace-pre-wrap break-words"
-                      style={{ borderLeftColor: anno.color }}
-                    >
-                      "{anno.text}"
+                    {/* Quotation / Highlight */}
+                    <div className="relative pl-4">
+                      <div 
+                        className="absolute left-0 top-0 bottom-0 w-[1px] rounded-full opacity-60"
+                        style={{ backgroundColor: anno.color || '#eab308' }}
+                      />
+                      <div className="text-[11.5px] leading-relaxed text-zinc-400 font-sans italic select-text break-words pr-2">
+                        {anno.text}
+                      </div>
                     </div>
                     
-                    {/* Comment text block */}
+                    {/* Comment Block */}
                     {anno.comment ? (
-                      <div className="text-[12px] text-zinc-100 font-sans leading-normal pl-0.5 break-words select-text">
+                      <div className="text-[13px] text-zinc-100 font-medium leading-relaxed break-words select-text tracking-tight px-0.5">
                         {anno.comment}
                       </div>
                     ) : (
-                      <div className="text-[11.5px] text-zinc-500 pl-0.5 italic select-none">
-                        No comment left.
+                      <div className="text-[10px] text-zinc-600 px-0.5 font-medium italic tracking-wide select-none flex items-center gap-1.5 opacity-60">
+                        <Icon icon="ph:info" className="w-3 h-3" />
+                        Quick Highlight
                       </div>
                     )}
                   </div>
                 ))}
+                <div className="h-20" /> {/* Spacer for bottom scroll */}
               </div>
             )}
           </div>
