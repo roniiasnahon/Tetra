@@ -1747,7 +1747,7 @@ export function StatisticsTools({
                 className="hidden"
                 multiple
               />
-              <Icon icon="ph:cloud-arrow-up-fill" className={`mx-auto w-8 h-8 ${isParsingPdf ? 'animate-bounce text-[#fb7185]' : 'text-zinc-500'}`} />
+              <Icon icon="ph:cloud-arrow-up-fill" className={`mx-auto w-8 h-8 ${isParsingPdf ? 'animate-bounce text-zinc-100' : 'text-zinc-500'}`} />
               <div className="text-[11px] text-zinc-300 font-medium">
                 {isParsingPdf ? 'Processing drag/upload index...' : 'Click to Browse or Drag PDFs here'}
               </div>
@@ -1760,7 +1760,7 @@ export function StatisticsTools({
                   <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Upload Queue ({pdfTasks.length})</span>
                   <button 
                     onClick={() => setPdfTasks([])}
-                    className="text-[9px] text-[#fb7185] hover:underline font-bold bg-transparent border-none cursor-pointer select-none bg-none outline-none"
+                    className="text-[9px] text-zinc-400 hover:text-white font-bold bg-transparent border-none cursor-pointer select-none bg-none outline-none"
                   >
                     Clear All
                   </button>
@@ -2024,7 +2024,7 @@ export function StatisticsTools({
             
             <button
               onClick={addCitationToLibrary}
-              className="w-full py-2.5 bg-[#fb7185] hover:bg-[#fda4af] text-[11px] font-bold text-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none border-none animate-none"
+              className="w-full py-2.5 bg-zinc-200 hover:bg-white text-[11px] font-bold text-zinc-950 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none border-none animate-none"
             >
               <Icon icon="ph:bookmark-simple-fill" className="w-4 h-4" />
               Save to Citation Library
@@ -2076,7 +2076,6 @@ export function StatisticsTools({
                 onClick={() => setCitationRightTab('preview')}
                 className="text-zinc-400 hover:text-white transition-colors cursor-pointer select-none py-1 text-xs flex items-center gap-1 border-none bg-transparent"
               >
-                <Icon icon="ph:arrow-left-bold" className="w-3.5 h-3.5" />
                 Preview Mode
               </button>
               <h3 className="text-xs font-semibold text-[#e4e4e7] uppercase tracking-wide">
@@ -2147,7 +2146,7 @@ export function StatisticsTools({
           </div>
 
           {/* Search bar & Type Filters */}
-          <div className="px-8 pt-3 pb-3 border-b border-[#1e1e20] bg-[#121212]/30 flex flex-col sm:flex-row gap-2 shrink-0">
+          <div className="px-8 pt-3 pb-3 bg-[#121212]/30 flex flex-col sm:flex-row gap-2 shrink-0">
             <div className="flex-1 relative">
               <Icon icon="ph:magnifying-glass-bold" className="absolute left-3 top-2.5 text-zinc-500 w-3.5 h-3.5" />
               <input
@@ -2220,7 +2219,7 @@ export function StatisticsTools({
                       </button>
 
                       <div className="flex items-center gap-2">
-                        <span className="text-[9px] text-[#fb7185] bg-[#fb7185]/10 border border-[#fb7185]/20 font-bold px-1.5 py-0.5 rounded uppercase font-mono">
+                        <span className="text-[9px] text-zinc-300 bg-zinc-800/50 border border-zinc-700/50 font-bold px-2 py-0.5 rounded-full uppercase font-mono">
                           {citation.sourceType}
                         </span>
                         {citation.fields.year && (
@@ -2249,13 +2248,13 @@ export function StatisticsTools({
                         <div className="flex items-center gap-1 ml-auto">
                           <button
                             onClick={() => triggerCopy(activeCite.reference.replace(/\*(.*?)\*/g, '$1'), `${citation.id}-ref`)}
-                            className="text-[9px] text-zinc-400 hover:text-white px-2 py-1 bg-zinc-800/40 hover:bg-zinc-800 border border-[#27272a] rounded cursor-pointer transition-colors border-none"
+                            className="text-[9px] text-zinc-400 hover:text-white px-2.5 py-1 bg-zinc-800/40 hover:bg-zinc-800 border border-[#27272a] rounded-full cursor-pointer transition-colors border-none"
                           >
                             {copiedStyleId === `${citation.id}-ref` ? 'Copied Bibli!' : 'Copy Bibliography'}
                           </button>
                           <button
                             onClick={() => triggerCopy(activeCite.inText, `${citation.id}-txt`)}
-                            className="text-[9px] text-zinc-400 hover:text-white px-2 py-1 bg-zinc-800/40 hover:bg-zinc-800 border border-[#27272a] rounded cursor-pointer transition-colors border-none"
+                            className="text-[9px] text-zinc-400 hover:text-white px-2.5 py-1 bg-zinc-800/40 hover:bg-zinc-800 border border-[#27272a] rounded-full cursor-pointer transition-colors border-none"
                           >
                             {copiedStyleId === `${citation.id}-txt` ? 'Copied In-Text!' : 'Copy In-Text'}
                           </button>
@@ -2268,7 +2267,7 @@ export function StatisticsTools({
                               setCitationRightTab('preview');
                               setCitationStatus({ type: 'info', message: 'Populated details back to form editing panel.' });
                             }}
-                            className="text-[9px] text-zinc-400 hover:text-white px-2 py-1 bg-zinc-800/40 hover:bg-zinc-800 border border-[#27272a] rounded cursor-pointer transition-colors border-none"
+                            className="text-[9px] text-zinc-400 hover:text-white px-2.5 py-1 bg-zinc-800/40 hover:bg-zinc-800 border border-[#27272a] rounded-full cursor-pointer transition-colors border-none"
                             title="Load back for manual edits/re-formatting"
                           >
                             Load to Edit
@@ -2303,17 +2302,17 @@ export function StatisticsTools({
                 });
                 setCitationStatus({ type: 'success', message: 'Calculated outputs backed up inside history tabs!' });
               }}
-              className="py-1 px-2.5 hover:bg-zinc-800 border border-zinc-700/60 hover:text-white text-[10px] text-zinc-300 rounded-lg transition-colors font-bold select-none cursor-pointer flex items-center gap-1.5 bg-transparent shadow-none border-none outline-none active:scale-95"
+              className="py-1 px-2.5 hover:bg-zinc-800 border border-zinc-700/60 hover:text-white text-[10px] text-zinc-300 rounded-lg transition-colors font-bold select-none cursor-pointer flex items-center gap-1.5 bg-transparent shadow-none border-none outline-none active:scale-95 group"
             >
-              <Icon icon="ph:bookmark-bold" className="w-3.5 h-3.5" />
+              <Icon icon="ph:bookmark-bold" className="w-3.5 h-3.5 text-zinc-400 group-hover:text-white transition-colors" />
               Save to Tools History
             </button>
             {savedCitations.length > 0 && (
               <button
                 onClick={() => setCitationRightTab('library')}
-                className="py-1 px-2.5 hover:bg-zinc-800 border border-zinc-700/60 hover:text-white text-[10px] text-[#fb7185] rounded-lg transition-colors font-bold select-none cursor-pointer flex items-center gap-1.5 bg-transparent shadow-none border-none outline-none active:scale-95"
+                className="py-1 px-2.5 hover:bg-zinc-800 border border-zinc-700/60 hover:text-white text-[10px] text-zinc-300 rounded-lg transition-colors font-bold select-none cursor-pointer flex items-center gap-1.5 bg-transparent shadow-none border-none outline-none active:scale-95 group"
               >
-                <Icon icon="ph:bookmark-bold" className="w-3.5 h-3.5" />
+                <Icon icon="ph:bookmark-bold" className="w-3.5 h-3.5 text-zinc-400 group-hover:text-white transition-colors" />
                 Open Library ({savedCitations.length})
               </button>
             )}
@@ -2334,13 +2333,13 @@ export function StatisticsTools({
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => triggerCopy(res.reference.replace(/\*(.*?)\*/g, '$1'), `${style.id}-ref`)}
-                        className="py-1 px-2 hover:bg-[#27272a] border border-transparent hover:border-[#3f3f46] text-[10px] text-zinc-300 rounded transition font-medium select-none cursor-pointer border-none bg-transparent shadow-none"
+                        className="py-1 px-3 hover:bg-[#27272a] border border-transparent hover:border-[#3f3f46] text-[10px] text-zinc-300 rounded-full transition font-medium select-none cursor-pointer border-none bg-transparent shadow-none"
                       >
                         {copiedStyleId === `${style.id}-ref` ? 'Copied Reference!' : 'Copy Bibliography'}
                       </button>
                       <button
                         onClick={() => triggerCopy(res.inText, `${style.id}-text`)}
-                        className="py-1 px-2 hover:bg-[#27272a] border border-transparent hover:border-[#3f3f46] text-[10px] text-zinc-300 rounded transition font-medium select-none cursor-pointer border-none bg-transparent shadow-none"
+                        className="py-1 px-3 hover:bg-[#27272a] border border-transparent hover:border-[#3f3f46] text-[10px] text-zinc-300 rounded-full transition font-medium select-none cursor-pointer border-none bg-transparent shadow-none"
                       >
                         {copiedStyleId === `${style.id}-text` ? 'Copied In-Text!' : 'Copy In-Text'}
                       </button>
