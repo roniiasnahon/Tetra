@@ -1007,18 +1007,22 @@ export default function App() {
     tabsRef.current = tabs;
   }, [tabs]);
 
-  const [isLightMode, setIsLightMode] = useState<boolean>(() => {
-    return localStorage.getItem("cosmi_light_mode") === "true";
+  const [appearanceTheme, setAppearanceTheme] = useState<string>(() => {
+    return localStorage.getItem("cosmi_settings_appearance") || "dark";
   });
 
   useEffect(() => {
-    if (isLightMode) {
+    const isLight = appearanceTheme === "light" || 
+      (appearanceTheme === "system" && window.matchMedia("(prefers-color-scheme: light)").matches);
+    
+    if (isLight) {
       document.documentElement.classList.add("light-mode");
     } else {
       document.documentElement.classList.remove("light-mode");
     }
-    localStorage.setItem("cosmi_light_mode", isLightMode.toString());
-  }, [isLightMode]);
+    localStorage.setItem("cosmi_settings_appearance", appearanceTheme);
+    localStorage.setItem("cosmi_light_mode", isLight.toString());
+  }, [appearanceTheme]);
 
   // Editor Styles and Customizations
   const [editorFont, setEditorFont] = useState("font-jakarta");
@@ -5124,7 +5128,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
             animate={{ width: 240, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className="flex flex-col h-full shrink-0 overflow-hidden bg-[#070707] font-jakarta"
+            className={`flex flex-col h-full shrink-0 relative bg-[#070707] font-jakarta z-50 ${isDesktopApp ? "pt-[38px]" : ""}`}
           >
             {/* Primary Navigation Grid */}
             <nav className="px-2 flex items-center justify-between gap-1 mb-4 h-11 relative">
@@ -5140,7 +5144,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     : "text-[#52525b] hover:text-[#a1a1aa]"
                 }`}
               >
-                <Icon icon="ph:pencil-line" className="w-[18px] h-[18px]" />
+                <Icon icon="ph:pencil-line" className="w-[18px] h-[18px] pointer-events-none" />
               </button>
 
               {[
@@ -5203,7 +5207,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       : "text-[#52525b] hover:text-[#a1a1aa] w-9 shrink-0"
                   }`}
                 >
-                  <Icon icon={item.icon} className={`w-[18px] h-[18px] shrink-0 transition-transform ${item.active ? "scale-100" : "scale-110"}`} />
+                  <Icon icon={item.icon} className={`w-[18px] h-[18px] shrink-0 transition-transform pointer-events-none ${item.active ? "scale-100" : "scale-110"}`} />
                   <AnimatePresence initial={false}>
                     {item.active && (
                       <motion.span 
@@ -5211,7 +5215,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         animate={{ width: "auto", opacity: 1 }}
                         exit={{ width: 0, opacity: 0 }}
                         transition={{ duration: 0.2, ease: "easeOut" }}
-                        className="text-[12px] font-bold tracking-tight whitespace-nowrap"
+                        className="text-[12px] font-bold tracking-tight whitespace-nowrap pointer-events-none"
                       >
                         {item.label}
                       </motion.span>
@@ -5903,60 +5907,84 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.95, y: -10 }}
                             transition={{ duration: 0.15 }}
-                            className="absolute left-3 right-3 bottom-full mb-1 z-40 bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 overflow-hidden"
+                            className="absolute left-2 bottom-full mb-2 z-[9999] bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 overflow-hidden w-[280px]"
                           >
-                            <div className="px-3 py-2 border-b border-[#2d2d30] mb-1">
-                              <p className="text-[10px] text-[#52525b] uppercase font-bold tracking-wider">
-                                Account
-                              </p>
-                              <p className="text-[12px] text-[#e4e4e7] truncate">
-                                {currentUser.email}
-                              </p>
-                            </div>
-                            <button 
-                              onClick={() => {
-                                setIsProfileDropdownOpen(false);
-                                setIsSettingsModalOpen(true);
-                              }}
-                              className="w-full text-left px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7] transition-colors flex items-center gap-2 cursor-pointer">
-                              <Icon icon="ph:gear" className="w-3.5 h-3.5" />
-                              Settings
-                            </button>
-                            <button 
-                              onClick={() => {
-                                setIsLightMode((prev) => !prev);
-                              }}
-                              className="w-full text-left px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-[#e4e4e7] transition-colors flex items-center gap-2 cursor-pointer">
-                              <Icon icon={isLightMode ? "ph:moon" : "ph:sun"} className="w-3.5 h-3.5" />
-                              {isLightMode ? "Dark Mode" : "Light Mode"}
-                            </button>
-                            <button
-                              onClick={async () => {
-                                setIsLoggingOut(true);
-                                setIsProfileDropdownOpen(false);
-                                // Hold for 3.5 seconds to show the shimmering "Logging out..." screen
-                                setTimeout(async () => {
-                                  try {
-                                    await signOut(auth);
-                                    setIsLoggingOut(false);
-                                    // Clear local storage for a fresh start
-                                    localStorage.removeItem(
-                                      "cosmi_user_snapshot",
-                                    );
-                                  } catch (err) {
-                                    console.error("Sign out error:", err);
-                                    setIsLoggingOut(false);
+                            <div className="px-3 py-3 flex items-center gap-3 border-b border-[#2d2d30]/50 mb-1">
+                              <div className="w-10 h-10 rounded bg-[#27272a] flex-shrink-0 flex items-center justify-center overflow-hidden border border-[#3f3f46]">
+                                <img
+                                  src={
+                                    localStorage.getItem("cosmi_settings_avatar_url") ||
+                                    currentUser.photoURL ||
+                                    `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(currentUser.email || "Ron")}`
                                   }
-                                }, 3500);
-                              }}
-                              className="w-full text-left px-3 py-1.5 text-[12px] text-red-400 hover:bg-red-950/20 transition-colors flex items-center gap-2 cursor-pointer animate-none"
-                            >
-                              <Icon
-                                icon="ph:sign-out"
-                                className="w-3.5 h-3.5"
-                              />
-                              Log out
-                            </button>
+                                  alt="Avatar"
+                                  className="w-full h-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                />
+                              </div>
+                              <div className="flex flex-col min-w-0">
+                                <p className="text-[14px] text-[#f4f4f5] font-bold truncate">
+                                  {localStorage.getItem(`cosmi_settings_full_name_${currentUser?.uid || "guest"}`) ||
+                                    currentUser.displayName ||
+                                    "Ron Asnahon's"}
+                                </p>
+                                <p className="text-[12px] text-[#71717a] truncate font-medium">
+                                  Free Plan · 1 member
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="px-1.5 pb-2">
+                              <button 
+                                onClick={() => {
+                                  setIsProfileDropdownOpen(false);
+                                  setIsSettingsModalOpen(true);
+                                }}
+                                className="w-full text-left px-2.5 py-2 text-[13px] text-[#e4e4e7] hover:bg-[#27272a]/50 transition-colors rounded-lg flex items-center gap-3 cursor-pointer"
+                              >
+                                <Icon icon="ph:gear" className="w-[18px] h-[18px] text-[#71717a]" />
+                                <span className="font-medium">Settings</span>
+                              </button>
+
+                              <button 
+                                onClick={() => setIsProfileDropdownOpen(false)}
+                                className="w-full text-left px-2.5 py-2 text-[13px] text-[#e4e4e7] hover:bg-[#27272a]/50 transition-colors rounded-lg flex items-center gap-3 cursor-pointer"
+                              >
+                                <Icon icon="ph:envelope-simple" className="w-[18px] h-[18px] text-[#71717a]" />
+                                <span className="font-medium">Invite members</span>
+                              </button>
+
+                              <button 
+                                onClick={() => setIsProfileDropdownOpen(false)}
+                                className="w-full text-left px-2.5 py-2 text-[13px] text-[#e4e4e7] hover:bg-[#27272a]/50 transition-colors rounded-lg flex items-center gap-3 cursor-pointer"
+                              >
+                                <Icon icon="ph:user-plus" className="w-[18px] h-[18px] text-[#71717a]" />
+                                <span className="font-medium">Add account</span>
+                              </button>
+                            </div>
+
+                            <div className="px-1.5 pt-1 border-t border-[#2d2d30]/50">
+                              <button
+                                onClick={async () => {
+                                  setIsLoggingOut(true);
+                                  setIsProfileDropdownOpen(false);
+                                  setTimeout(async () => {
+                                    try {
+                                      await signOut(auth);
+                                      setIsLoggingOut(false);
+                                      localStorage.removeItem("cosmi_user_snapshot");
+                                    } catch (err) {
+                                      console.error("Sign out error:", err);
+                                      setIsLoggingOut(false);
+                                    }
+                                  }, 3500);
+                                }}
+                                className="w-full text-left px-2.5 py-2 text-[13px] text-[#e4e4e7] hover:bg-[#27272a]/50 transition-colors rounded-lg flex items-center gap-3 cursor-pointer"
+                              >
+                                <Icon icon="ph:sign-out" className="w-[18px] h-[18px] text-[#71717a]" />
+                                <span className="font-medium">Log out</span>
+                              </button>
+                            </div>
                           </motion.div>
                         </>
                       )}
@@ -10229,6 +10257,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
             setCallMe={setCallMe}
             storageMode={storageMode}
             setStorageMode={setStorageMode}
+            appearanceTheme={appearanceTheme}
+            setAppearanceTheme={setAppearanceTheme}
           />
         )}
       </AnimatePresence>

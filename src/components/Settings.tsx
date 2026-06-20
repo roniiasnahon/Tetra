@@ -29,6 +29,8 @@ interface SettingsProps {
   setCallMe: (val: string) => void;
   storageMode: "local" | "database";
   setStorageMode: (val: "local" | "database") => void;
+  appearanceTheme: string;
+  setAppearanceTheme: (val: string) => void;
 }
 
 type TabType = "general" | "account" | "privacy" | "capabilities" | "connectors" | "desktop";
@@ -49,7 +51,9 @@ export const Settings = ({
   callMe,
   setCallMe,
   storageMode,
-  setStorageMode
+  setStorageMode,
+  appearanceTheme,
+  setAppearanceTheme
 }: SettingsProps) => {
   // Navigation & Search State
   const [activeTab, setActiveTab ] = useState<TabType>("general");
@@ -97,9 +101,6 @@ export const Settings = ({
   const [isWinDropdownOpen, setIsWinDropdownOpen] = useState(false);
 
   // Preference Settings
-  const [appearanceTheme, setAppearanceTheme] = useState(() => {
-    return localStorage.getItem("cosmi_settings_appearance") || "dark";
-  });
   const [saveHistory, setSaveHistory] = useState(() => {
     const cached = localStorage.getItem("cosmi_settings_save_history");
     return cached !== "false";
