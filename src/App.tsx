@@ -5090,9 +5090,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
       {isDesktopApp && (
         <>
           <div className="fixed top-0 left-0 right-0 h-[38px] z-[9998] [-webkit-app-region:drag] pointer-events-none" />
-          <div className="fixed top-0 left-0 h-[38px] flex items-center px-4 z-[9999] pointer-events-none">
-            <span className="text-[11px] font-bold text-zinc-600 tracking-[0.2em] select-none">cosmi</span>
-          </div>
           <div className="fixed top-0 right-0 h-[38px] flex items-center z-[9999] [-webkit-app-region:no-drag]">
             <button onClick={handleMinimize} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
               <Icon icon="ph:minus" className="w-[14px] h-[14px]" />
@@ -5133,6 +5130,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
             className={`flex flex-col h-full shrink-0 relative bg-[#070707] font-jakarta z-[100] ${isDesktopApp ? "pt-[38px]" : ""}`}
           >
+            {isDesktopApp && (
+              <div className="absolute top-0 left-0 h-[38px] flex items-center px-4 pointer-events-none">
+                <span className="text-[11px] font-bold text-zinc-200 tracking-[0.2em] select-none">cosmi</span>
+              </div>
+            )}
             {/* Primary Navigation Grid */}
             <nav className="px-2 flex items-center justify-between gap-1 mb-4 h-11 relative">
               {/* Create Toggle Button - Fixed Width */}
