@@ -5132,7 +5132,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
           >
             {isDesktopApp && (
               <div className="absolute top-0 left-0 h-[38px] flex items-center px-4 pointer-events-none">
-                <span className="text-[11px] font-bold text-zinc-200 tracking-[0.2em] select-none">cosmi</span>
+                <span className="text-lg font-black text-white tracking-tighter select-none">cosmi</span>
               </div>
             )}
             {/* Primary Navigation Grid */}
