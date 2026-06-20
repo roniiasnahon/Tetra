@@ -5090,6 +5090,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
       {isDesktopApp && (
         <>
           <div className="fixed top-0 left-0 right-0 h-[38px] z-[9998] [-webkit-app-region:drag] pointer-events-none" />
+          <div className="fixed top-0 left-0 h-[38px] flex items-center px-4 z-[9999] pointer-events-none">
+            <span className="text-[11px] font-bold text-zinc-600 tracking-[0.2em] select-none">cosmi</span>
+          </div>
           <div className="fixed top-0 right-0 h-[38px] flex items-center z-[9999] [-webkit-app-region:no-drag]">
             <button onClick={handleMinimize} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
               <Icon icon="ph:minus" className="w-[14px] h-[14px]" />
@@ -5128,7 +5131,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
             animate={{ width: 240, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className={`flex flex-col h-full shrink-0 relative bg-[#070707] font-jakarta z-50 ${isDesktopApp ? "pt-[38px]" : ""}`}
+            className={`flex flex-col h-full shrink-0 relative bg-[#070707] font-jakarta z-[100] ${isDesktopApp ? "pt-[38px]" : ""}`}
           >
             {/* Primary Navigation Grid */}
             <nav className="px-2 flex items-center justify-between gap-1 mb-4 h-11 relative">
@@ -5899,7 +5902,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       {isProfileDropdownOpen && (
                         <>
                           <div
-                            className="fixed inset-0 z-30"
+                            className="fixed inset-0 z-[110]"
                             onClick={() => setIsProfileDropdownOpen(false)}
                           />
                           <motion.div
@@ -5907,7 +5910,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.95, y: -10 }}
                             transition={{ duration: 0.15 }}
-                            className="absolute left-2 bottom-full mb-2 z-[9999] bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 overflow-hidden w-[280px]"
+                            className="absolute left-2 bottom-full mb-2 z-[120] bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 overflow-hidden w-[280px]"
                           >
                             <div className="px-3 py-3 flex items-center gap-3 border-b border-[#2d2d30]/50 mb-1">
                               <div className="w-10 h-10 rounded bg-[#27272a] flex-shrink-0 flex items-center justify-center overflow-hidden border border-[#3f3f46]">
@@ -6017,7 +6020,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
       </AnimatePresence>
 
       {/* Main Content (Editor Column) */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 relative z-0">
         {/* Header Bar */}
         <header className="relative h-[38px] flex items-end shrink-0 bg-[#070707] px-2 [-webkit-app-region:drag]">
           <div className="flex items-center gap-3 h-full pb-1.5 pt-1.5 group z-20 bg-[#070707] pr-2 [-webkit-app-region:no-drag]">
