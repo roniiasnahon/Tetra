@@ -56,9 +56,8 @@ export const DynamicShimmer: React.FC<DynamicShimmerProps> = ({
     const query = lastUserMsg?.content?.toLowerCase() || "";
     const hasAttachment = !!lastUserMsg?.attachment;
 
-    // Web search: active setting, or query specifies searching/looking up online
+    // Web search: query specifies searching/looking up online
     const isWebSearch =
-      webSearchEnabled ||
       query.includes("search the web") ||
       query.includes("google") ||
       query.includes("look up") ||

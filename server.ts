@@ -6,6 +6,13 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+process.on("uncaughtException", (err) => {
+  console.error("[PROCESS UNCAUGHT EXCEPTION]", err);
+});
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[PROCESS UNHANDLED REJECTION]", reason);
+});
+
 import express from "express";
 import path from "path";
 import fs from "fs";
@@ -16,7 +23,17 @@ import mammoth from "mammoth";
 import PDFDocument from "pdfkit";
 import axios from "axios";
 import { parseStringPromise } from "xml2js";
-import { Storage } from 'megajs';
+import { Storage, API } from 'megajs';
+// Set up global error listener on megajs global API instance immediately on load to prevent unhandled ECONNRESET process crashes
+try {
+  if (API && (API as any).globalApi) {
+    ((API as any).globalApi as any).on('error', (err: any) => {
+      console.error("[MEGA GLOBAL API ERROR-PREVENTED]", err);
+    });
+  }
+} catch (e: any) {
+  console.warn("Failed to register global megajs API error handler", e.message);
+}
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import zlib from "zlib";
@@ -554,6 +571,27 @@ const ai = new Proxy({} as GoogleGenAI, {
   }
 });
 
+function registerMegaErrorHandler(client: any) {
+  if (!client) return;
+  try {
+    client.on('error', (err: any) => {
+      console.error("[MEGA CLIENT ERROR-CAUGHT]", err);
+    });
+    if (client.api) {
+      (client.api as any).on('error', (err: any) => {
+        console.error("[MEGA API ERROR-CAUGHT]", err);
+      });
+    }
+    if (API && (API as any).globalApi) {
+      ((API as any).globalApi as any).on('error', (err: any) => {
+        console.error("[MEGA GLOBAL API ERROR-CAUGHT]", err);
+      });
+    }
+  } catch (err: any) {
+    console.warn("Failed to register mega error handler:", err.message);
+  }
+}
+
 let megaClient: any = null;
 async function getMegaClient(): Promise<any> {
   if (megaClient) return megaClient;
@@ -570,6 +608,7 @@ async function getMegaClient(): Promise<any> {
     // ALWAYS prefer email & password (unless session is a JSON string with key), because it derives the REAL cryptographic master key!
     console.log("[MEGA] Authenticating using email and password to derive correct cryptographic keys...");
     megaClient = new Storage({ email: email!.trim(), password: password!.trim() });
+    registerMegaErrorHandler(megaClient);
     await megaClient.ready;
     console.log("[MEGA] Successfully authenticated with email/password.");
   } else if (session) {
@@ -586,14 +625,15 @@ async function getMegaClient(): Promise<any> {
     if (parsedSession && parsedSession.key && parsedSession.sid) {
       console.log("[MEGA] Successfully restored session with real cryptographic master key from JSON.");
       megaClient = Storage.fromJSON(parsedSession);
+      registerMegaErrorHandler(megaClient);
       await megaClient.ready;
       megaClient.status = 'ready';
       await megaClient.reload();
     } else {
       // It's a raw session ID string. Check if we have MASTER_KEY env var
       const keyToUse = masterKey && masterKey !== 'undefined' && masterKey !== 'null' 
-        ? masterKey.trim() 
-        : Buffer.alloc(16).toString('base64');
+         ? masterKey.trim() 
+         : Buffer.alloc(16).toString('base64');
       
       if (!masterKey) {
         console.warn("[MEGA] WARNING: Using raw session ID with a blank dummy key. Files uploaded using this session will appear as 'undecrypted' on the MEGA web dashboard unless MEGA_MASTER_KEY or MEGA_EMAIL/MEGA_PASSWORD is set.");
@@ -608,6 +648,7 @@ async function getMegaClient(): Promise<any> {
         user: 'User',
         options: {} as any
       });
+      registerMegaErrorHandler(megaClient);
       await megaClient.ready;
       megaClient.status = 'ready';
       await megaClient.reload();
@@ -628,6 +669,7 @@ const PORT = 3000;
 let openaiClient: OpenAI | null = null;
 let mistralClient: OpenAI | null = null;
 let groqClient: OpenAI | null = null;
+let cohereClient: OpenAI | null = null;
 
 function getBasetenClient(): OpenAI {
   if (!openaiClient) {
@@ -675,6 +717,22 @@ function getGroqClient(): OpenAI {
     });
   }
   return groqClient;
+}
+
+function getCohereClient(): OpenAI {
+  if (!cohereClient) {
+    const apiKey = process.env.COHERE_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "COHERE_API_KEY is not configured. Please set it in the Secrets panel."
+      );
+    }
+    cohereClient = new OpenAI({
+      apiKey: apiKey,
+      baseURL: "https://api.cohere.com/compatibility/v1",
+    });
+  }
+  return cohereClient;
 }
 
 function extractTextFromHtml(html: string): string {
@@ -2469,8 +2527,9 @@ CRITICAL RULES:
     try {
       const prompt = `You are an expert helper that extracts a single focused Search Query based on conversation context.
 We need to run a Google search to answer the user's latest query, but the latest query might use pronouns (like "it", "them", "that", "this") referring to previous topics.
-Analyze the past conversation history and output ONLY a 2-5 word highly optimized search query to retrieve precise facts on the web.
-Do NOT include any extra text, punctuation, quotes, or explanations. Only the raw query string.
+If the user's latest query is an explicit greeting (like "hi", "hello"), purely conversational, or DOES NOT strictly require searching live internet data, you MUST return exactly the string "NO_SEARCH_NEEDED".
+Otherwise, analyze the past conversation history and output ONLY a 2-5 word highly optimized search query to retrieve precise facts on the web.
+Do NOT include any extra text, punctuation, quotes, or explanations. Only the raw query string or "NO_SEARCH_NEEDED".
 
 CONVERSATION HISTORY:
 ${messages.slice(-5).map(m => `${m.role}: ${m.content}`).join("\n")}
@@ -2582,12 +2641,14 @@ OPTIMIZED SEARCH QUERY:`;
         }
       }
 
-      if (webSearchEnabled) {
+      if (webSearchEnabled && !requestedModel.includes("gemini") && requestedModel !== "auto") {
         const resolvedQuery = await getContextualQuery(messages, lastMessage);
-        console.log(`[REAL-TIME SEARCH] Fetching web results for query: "${resolvedQuery}" (original: "${lastMessage}")`);
-        const searchResults = await searchWeb(resolvedQuery);
         
-        researchContext = `
+        if (resolvedQuery !== "NO_SEARCH_NEEDED") {
+          console.log(`[REAL-TIME SEARCH] Fetching web results for query: "${resolvedQuery}" (original: "${lastMessage}")`);
+          const searchResults = await searchWeb(resolvedQuery);
+          
+          researchContext = `
 --- GOOGLE / DUCKDUCKGO WEB SEARCH GROUNDING RESULTS ---
 We retrieved these current live web results for "${resolvedQuery}":
 
@@ -2596,6 +2657,9 @@ ${searchResults}
 INSTRUCTION: Synthesize and ground your response on these web results, and make sure to list the source URLs as clickable links.
 --------------------------------------------------------
 `;
+        } else {
+          console.log(`[REAL-TIME SEARCH] Skipping search, LLM determined NO_SEARCH_NEEDED for: "${lastMessage}"`);
+        }
       } else if (isSearchRequest) {
         console.log("Detecting search request, fetching papers...");
         let papers: any[] = [];
@@ -2891,7 +2955,7 @@ ${researchContext}
       }
 
       if (thinkingLevel === "Deep") {
-        activeSystemInstruction += "\n\n[DEEP THINKING MODE ENABLED]: You must reason extensively about the user's request. Think step-by-step, explore edge cases, and provide an exceptionally detailed, thorough, and highly analytical response.";
+        activeSystemInstruction += "\n\n[DEEP THINKING MODE ENABLED - MANDATORY REASONING]: You MUST perform extensive, step-by-step reasoning and analytical planning about the user's request. You MUST write this deep-thinking reasoning and planning inside the <thought>...</thought> tags FIRST, before writing any general chat inside <chat>...</chat> tags. Make your <thought> block extremely detailed, thorough, and highly analytical. Your response MUST strictly start with <thought> and close with </thought> before continuing to <chat>, otherwise the system cannot render your thinking process.";
       } else if (thinkingLevel === "Instant") {
         activeSystemInstruction += "\n\n[THINKING DISABLED]: You must provide a direct, concise, and immediate response without any extensive reasoning, self-reflection, or internal thinking steps. Do not output any <think> tags. Keep it brief and to the point.";
       }
@@ -2910,17 +2974,26 @@ ${researchContext}
 
       let completionStream;
       let usedGeminiFallback = !!(attachment && attachment.mimetype?.startsWith("image/"));
-      let tryMistralFirst = !usedGeminiFallback;
+      let tryMistralFirst = !usedGeminiFallback && !requestedModel.includes("cohere") && !requestedModel.includes("command-a");
+      let tryCohereFirst = !usedGeminiFallback && (requestedModel.includes("cohere") || requestedModel.includes("command-a"));
       let mistralModelToUse = "mistral-large-latest";
+      let cohereModelToUse = "command-a-plus-05-2026";
 
       if (requestedModel && requestedModel !== "auto") {
         if (requestedModel.includes("mistral")) {
           tryMistralFirst = true;
+          tryCohereFirst = false;
           usedGeminiFallback = false;
           mistralModelToUse = requestedModel;
         } else if (requestedModel.includes("gemini")) {
           tryMistralFirst = false;
+          tryCohereFirst = false;
           usedGeminiFallback = true;
+        } else if (requestedModel.includes("cohere") || requestedModel.includes("command-a")) {
+          tryMistralFirst = false;
+          tryCohereFirst = true;
+          usedGeminiFallback = false;
+          cohereModelToUse = requestedModel;
         }
       }
 
@@ -2952,9 +3025,36 @@ ${researchContext}
         }
       }
 
+      if (tryCohereFirst) {
+        try {
+          console.log(`[LLM] Streaming chat with Cohere (${cohereModelToUse})...`);
+          const client = getCohereClient();
+          completionStream = await client.chat.completions.create({
+            model: cohereModelToUse,
+            messages: messagesPayload,
+            temperature: 0.7,
+            stream: true
+          });
+        } catch (err: any) {
+          console.warn(`[LLM] Cohere streaming failed (${cohereModelToUse}):`, err.message || err);
+          
+          if (err.message?.includes("COHERE_API_KEY") || err.message?.includes("configured")) {
+             throw new Error("COHERE_API_KEY is not defined. Please configure it in your Settings.");
+          }
+
+          if (!requestedModel.includes("cohere") && !requestedModel.includes("command-a")) {
+            console.warn("[LLM] Falling back to Gemini...");
+            tryCohereFirst = false;
+            usedGeminiFallback = true;
+          } else {
+             throw new Error(`Cohere LLM failed: ${err.message || "Unknown error during streaming."}`);
+          }
+        }
+      }
+
       let mainChatCollectedText = "";
 
-      if (!tryMistralFirst || usedGeminiFallback) {
+      if ((!tryMistralFirst && !tryCohereFirst) || usedGeminiFallback) {
         console.log(`[LLM] Streaming chat with Gemini...`);
         
         // Convert messages list to Gemini alternated format
@@ -3038,12 +3138,56 @@ ${researchContext}
           config: geminiConfig
         });
 
+        let inThoughtBlock = false;
+
         for await (const chunk of responseStream) {
-          const content = chunk.text || "";
-          if (content) {
-            mainChatCollectedText += content;
-            res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+          const parts = chunk.candidates?.[0]?.content?.parts;
+          if (parts && Array.isArray(parts) && parts.length > 0) {
+            for (const part of parts) {
+              const isThought = !!part.thought;
+              const text = part.text || "";
+              
+              if (text) {
+                let textToStream = "";
+                
+                if (isThought) {
+                  if (!inThoughtBlock) {
+                    textToStream += "<thought>\n";
+                    inThoughtBlock = true;
+                  }
+                  textToStream += text;
+                } else {
+                  if (inThoughtBlock) {
+                    textToStream += "\n</thought>\n";
+                    inThoughtBlock = false;
+                  }
+                  textToStream += text;
+                }
+                
+                if (textToStream) {
+                  mainChatCollectedText += textToStream;
+                  res.write(`data: ${JSON.stringify({ text: textToStream })}\n\n`);
+                }
+              }
+            }
+          } else {
+            const content = chunk.text || "";
+            if (content) {
+              let textToStream = "";
+              if (inThoughtBlock) {
+                textToStream += "\n</thought>\n";
+                inThoughtBlock = false;
+              }
+              textToStream += content;
+              mainChatCollectedText += textToStream;
+              res.write(`data: ${JSON.stringify({ text: textToStream })}\n\n`);
+            }
           }
+        }
+
+        if (inThoughtBlock) {
+          mainChatCollectedText += "\n</thought>\n";
+          res.write(`data: ${JSON.stringify({ text: "\n</thought>\n" })}\n\n`);
         }
       } else if (completionStream) {
         for await (const chunk of completionStream) {

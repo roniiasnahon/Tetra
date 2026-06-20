@@ -30,6 +30,7 @@
     "express": "^4.21.2",
     "firebase": "^12.14.0",
     "firebase-admin": "^13.10.0",
+    "html2pdf.js": "^0.14.0",
     "katex": "^0.17.0",
     "lucide-react": "^0.546.0",
     "mammoth": "^1.12.0",

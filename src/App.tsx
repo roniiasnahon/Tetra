@@ -9,9 +9,13 @@ import "katex/dist/katex.min.css";
 import { MainChat, modelsList } from "./components/MainChat";
 import { TypewriterMarkdown } from "./components/TypewriterMarkdown";
 import { DynamicShimmer } from "./components/DynamicShimmer";
+import { HomePanel } from "./components/HomePanel";
+import { LibraryPanel } from "./components/LibraryPanel";
+import { UploadsManager, UploadTask } from "./components/UploadsManager";
 import { motion, AnimatePresence } from "motion/react";
 import { Icon } from "@iconify/react";
 import { MaterialIcon } from "./components/MaterialIcon";
+import html2pdf from "html2pdf.js";
 
 interface ShimProps extends React.HTMLAttributes<HTMLSpanElement> {
   className?: string;
@@ -128,6 +132,7 @@ export interface Tab {
   chatInput?: string;
   undoStack?: string[];
   redoStack?: string[];
+  starred?: boolean;
 }
 
 export interface ChatMessage {
@@ -610,7 +615,7 @@ const extractTextFromPdf = async (url: string): Promise<string> => {
   }
 };
 
-const cleanJsonLeakFront = (text: string): string => {
+export const cleanJsonLeakFront = (text: string): string => {
   if (!text) return "";
   let clean = text.trim();
 
@@ -739,7 +744,7 @@ const getOrCreateCachedPdf = async (fileId: string): Promise<string> => {
 };
 
 
-const formatAbstractText = (text: string) => {
+export const formatAbstractText = (text: string) => {
   if (!text) return "";
   const cleanedText = cleanJsonLeakFront(text);
   let cleanText = cleanedText.replace(/^Abstract\s*[:\-]*\s*/i, "").trim();
@@ -825,6 +830,9 @@ export default function App() {
   };
 
   const [isAssistantOpen, setIsAssistantOpen] = useState(true);
+  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
+  const [isUploadsPanelOpen, setIsUploadsPanelOpen] = useState(true);
+  const [isUploadsPanelCollapsed, setIsUploadsPanelCollapsed] = useState(false);
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== "undefined" ? navigator.onLine : true);
 
   useEffect(() => {
@@ -1091,6 +1099,10 @@ export default function App() {
 
   const handleLibraryDragOverFolder = (e: React.DragEvent, folderId: string) => {
     e.preventDefault();
+    if (e.dataTransfer.types.includes("Files")) {
+      setDragOverFolderId(folderId);
+      return;
+    }
     if (!draggedLibraryItemRef.current) return;
     if (draggedLibraryItemRef.current.type === "paper") {
       setDragOverFolderId(folderId);
@@ -1106,6 +1118,19 @@ export default function App() {
   const handleLibraryDropOnFolder = async (e: React.DragEvent, targetFolderId: string) => {
     e.preventDefault();
     setDragOverFolderId(null);
+
+    // Support physical operating system files drop
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      if (targetFolderId) {
+        setSelectedFolderId(targetFolderId);
+      }
+      const files = Array.from(e.dataTransfer.files);
+      for (const file of files) {
+        await handleUploadFile(file);
+      }
+      return;
+    }
+
     const dragged = draggedLibraryItemRef.current;
     if (!dragged) return;
 
@@ -1135,14 +1160,29 @@ export default function App() {
 
   const handleLibraryDragOverRoot = (e: React.DragEvent) => {
     e.preventDefault();
+    if (e.dataTransfer.types.includes("Files")) {
+      setDragOverRootLibrary(true);
+      return;
+    }
     if (draggedLibraryItemRef.current && draggedLibraryItemRef.current.type === "paper") {
       setDragOverRootLibrary(true);
     }
   };
 
-  const handleLibraryDropOnRoot = (e: React.DragEvent) => {
+  const handleLibraryDropOnRoot = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOverRootLibrary(false);
+
+    // Support physical operating system files drop
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      setSelectedFolderId("");
+      const files = Array.from(e.dataTransfer.files);
+      for (const file of files) {
+        await handleUploadFile(file);
+      }
+      return;
+    }
+
     const dragged = draggedLibraryItemRef.current;
     if (dragged && dragged.type === "paper") {
       const paper = papers.find((p) => p.title === dragged.title);
@@ -2087,6 +2127,170 @@ export default function App() {
   const [docSaveStatus, setDocSaveStatus] = useState<"saved" | "saving" | null>(
     "saved",
   );
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [isExportSubmenuOpen, setIsExportSubmenuOpen] = useState(false);
+  const [lastSavedTime, setLastSavedTime] = useState<number>(Date.now());
+  const [saveMessage, setSaveMessage] = useState("Saved just now");
+
+  useEffect(() => {
+    if (!isMoreMenuOpen) {
+      setIsExportSubmenuOpen(false);
+    }
+  }, [isMoreMenuOpen]);
+
+  useEffect(() => {
+    if (docSaveStatus === "saving") {
+      setSaveMessage("Saving...");
+    } else if (docSaveStatus === "saved") {
+      setLastSavedTime(Date.now());
+      setSaveMessage("Saved just now");
+    }
+  }, [docSaveStatus]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (docSaveStatus === "saving") return;
+      const diff = Date.now() - lastSavedTime;
+      if (diff < 10000) {
+        setSaveMessage("Saved just now");
+      } else if (diff < 60000) {
+        setSaveMessage("Saved a few seconds ago");
+      } else {
+        const mins = Math.floor(diff / 60000);
+        setSaveMessage(`Saved ${mins}m ago`);
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [lastSavedTime, docSaveStatus]);
+
+  const handleExportMarkdown = () => {
+    try {
+      const content = editorRef.current?.innerText || "";
+      const blob = new Blob([content], { type: "text/markdown;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${documentTitle || "document"}.md`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast("Document exported to Markdown successfully!", "success");
+    } catch (err) {
+      console.error("Export error:", err);
+      showToast("Failed to export Markdown", "error");
+    }
+  };
+
+  const handleExportWord = () => {
+    try {
+      const content = editorRef.current?.innerHTML || "";
+      const title = documentTitle || "Document";
+      const html = `
+        <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+        <head><title>${title}</title>
+        <style>
+          body { font-family: 'Segoe UI', Arial, sans-serif; }
+        </style>
+        </head>
+        <body>
+          ${content}
+        </body>
+        </html>
+      `;
+      const blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${title}.doc`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast("Document exported to Word format successfully!", "success");
+    } catch (err) {
+      console.error("Export word error:", err);
+      showToast("Failed to export to Word", "error");
+    }
+  };
+
+  const handleExportTXT = () => {
+    try {
+      const content = editorRef.current?.innerText || "";
+      const blob = new Blob([content], { type: "text/plain;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${documentTitle || "document"}.txt`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast("Document exported to TXT successfully!", "success");
+    } catch (err) {
+      console.error("Export TXT error:", err);
+      showToast("Failed to export TXT", "error");
+    }
+  };
+
+  const handleExportPDF = () => {
+    try {
+      const element = editorRef.current;
+      if (!element) {
+        showToast("No content to export.", "error");
+        return;
+      }
+      
+      const title = documentTitle || "document";
+      
+      // We prepend the title to the element temporarily
+      const titleEl = document.createElement("h1");
+      titleEl.innerText = title;
+      titleEl.style.fontSize = "28px";
+      titleEl.style.fontWeight = "700";
+      titleEl.style.color = "#111111"; // deep black bold title
+      titleEl.style.borderBottom = "2px solid #e2e8f0";
+      titleEl.style.paddingBottom = "12px";
+      titleEl.style.marginBottom = "28px";
+      titleEl.style.fontFamily = "'Inter', system-ui, sans-serif";
+      
+      element.insertBefore(titleEl, element.firstChild);
+      
+      // Temporarily add dark-to-light/print theme override classes
+      element.classList.add("pdf-export-element");
+
+      const opt = {
+        margin:       0.6,
+        filename:     `${title}.pdf`,
+        image:        { type: 'jpeg' as const, quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true, logging: false },
+        jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' as const }
+      };
+
+      showToast("Generating PDF...", "success");
+      
+      html2pdf().from(element).set(opt).save().then(() => {
+        showToast("Document exported to PDF successfully!", "success");
+        element.classList.remove("pdf-export-element");
+        if (titleEl.parentNode) titleEl.parentNode.removeChild(titleEl);
+      }).catch((err: any) => {
+        console.error("PDF Export error:", err);
+        showToast("Failed to export to PDF", "error");
+        element.classList.remove("pdf-export-element");
+        if (titleEl.parentNode) titleEl.parentNode.removeChild(titleEl);
+      });
+      
+    } catch (err) {
+      console.error("PDF Export error:", err);
+      showToast("Failed to export to PDF", "error");
+    }
+  };
+
+  useEffect(() => {
+    if (isShareModalOpen && activeTabId) {
+      setGeneratedLink(`${window.location.origin}/?tab=${activeTabId}`);
+    }
+  }, [isShareModalOpen, activeTabId]);
 
   // PDF Annotation States
   const [selectionText, setSelectionText] = useState("");
@@ -2564,6 +2768,295 @@ export default function App() {
     return newId;
   };
 
+  const handleUploadFile = async (file: File) => {
+    const taskId = "upload-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+    const uploaderId = currentUserIdRef.current;
+    
+    // Add to uploadTasks state
+    const newTask: UploadTask = {
+      id: taskId,
+      fileName: file.name,
+      progress: 0,
+      status: "starting",
+    };
+    
+    setUploadTasks((prev) => [...prev, newTask]);
+    setIsUploadsPanelOpen(true);
+    setIsUploadsPanelCollapsed(false);
+
+    const toastId = "upload-main-" + Date.now();
+
+    try {
+      const data = await new Promise<any>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const formData = new FormData();
+        formData.append("file", file);
+
+        // Save reference to the task's xhr so we can cancel/abort it
+        setUploadTasks((prev) =>
+          prev.map((t) => (t.id === taskId ? { ...t, xhr } : t))
+        );
+
+        xhr.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            
+            // Update percentage and upload task state
+            setUploadTasks((prev) =>
+              prev.map((t) =>
+                t.id === taskId ? { ...t, progress: percent, status: "uploading" } : t
+              )
+            );
+          }
+        });
+
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch (err) {
+              const preview = xhr.responseText.substring(0, 100);
+              reject(new Error("Invalid server response: " + preview));
+            }
+          } else {
+            let errMsg = `Server responded with status ${xhr.status}`;
+            try {
+              const resData = JSON.parse(xhr.responseText);
+              if (resData.error) errMsg += ": " + resData.error;
+            } catch (e) {}
+            reject(new Error(errMsg));
+          }
+        });
+
+        xhr.addEventListener("error", () => reject(new Error("Network upload error")));
+        xhr.addEventListener("abort", () => reject(new Error("Upload aborted")));
+
+        xhr.open("POST", "/api/upload");
+        xhr.send(formData);
+      });
+
+      if (currentUserIdRef.current !== uploaderId) return;
+      if (data.success) {
+        const fileLabel = data.fileName;
+        const titlePlaceholder = fileLabel.replace(/\.[^/.]+$/, "");
+        const isImage = data.mimetype?.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp"].includes(fileLabel.toLowerCase().split('.').pop() || "");
+
+        // Update task success status
+        setUploadTasks((prev) =>
+          prev.map((t) =>
+            t.id === taskId ? { ...t, progress: 100, status: "success" } : t
+          )
+        );
+
+        if (isImage) {
+          setAttachedFile({
+            fileId: data.fileId,
+            fileName: data.fileName,
+            mimetype: data.mimetype,
+            url: `/api/files/${data.fileId}`
+          });
+          return;
+        } else {
+          setAttachedFile({
+            fileId: data.fileId,
+            fileName: data.fileName,
+            mimetype: data.mimetype,
+            url: `/api/files/${data.fileId}`
+          });
+          setSelectedModel("mistral-large-latest");
+        }
+
+        let extractedText = "";
+        let summaryInfo = `This academic resource was uploaded and incorporated into your workspace. Select 'Ask Assistant' to summarize patterns or find citations.`;
+        let pagesCountString = "";
+
+        if (fileLabel.toLowerCase().endsWith(".pdf")) {
+          // Pre-cache PDF in client-side storage so next view and parser is instant
+          preCachePdfFile(data.fileId, file);
+          try {
+            extractedText = await extractTextFromPdf(`/api/files/${data.fileId}`);
+            if (extractedText) {
+              summaryInfo = `This PDF document is parsed and indexed successfully. You can write essays or ask questions about its exact contents.`;
+              // Count pages mapped
+              const pagesMatch = extractedText.match(/--- Page \d+ of \d+ ---/g);
+              if (pagesMatch) {
+                pagesCountString = ` (${pagesMatch.length} pages mapped)`;
+              }
+            }
+          } catch (pdfErr) {
+            console.error("PDF mapping failed", pdfErr);
+          }
+        } else if (
+          fileLabel.toLowerCase().endsWith(".docx") ||
+          fileLabel.toLowerCase().endsWith(".txt") ||
+          fileLabel.toLowerCase().endsWith(".md") ||
+          fileLabel.toLowerCase().endsWith(".html") ||
+          fileLabel.toLowerCase().endsWith(".htm")
+        ) {
+          try {
+            const textRes = await fetch(`/api/files/${data.fileId}/raw-text`);
+            if (textRes.ok) {
+              const textData = await textRes.json();
+              if (textData.success && textData.text) {
+                let cleanText = textData.text;
+                if (fileLabel.toLowerCase().endsWith(".html") || fileLabel.toLowerCase().endsWith(".htm")) {
+                  cleanText = cleanText
+                    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+                    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
+                    .replace(/<[^>]+>/g, " ")
+                    .replace(/\s+/g, " ")
+                    .trim();
+                }
+                extractedText = cleanText;
+                summaryInfo = `This document is parsed and mapped successfully. You can start synthesizing your notes, analyzing findings, and asking the Assistant specifically about its claims Simon.`;
+                const words = extractedText.trim().split(/\s+/).filter(Boolean).length;
+                pagesCountString = ` (${words} words mapped)`;
+              }
+            }
+          } catch (docxErr) {
+            console.error("Docx/Text/HTML mapping failed", docxErr);
+          }
+        }
+
+        if (currentUserIdRef.current !== uploaderId) return;
+
+        const targetFolder = selectedFolderId || folders[0]?.id || "f1";
+        const parsedPaper: PaperItem = {
+          author: "Unknown Author",
+          title: titlePlaceholder,
+          description: `Uploaded draft document: ${fileLabel}`,
+          added: "Today",
+          fullTextStatus: "Available",
+          viewed: "Just now",
+          fileType: "Document",
+          summary: summaryInfo,
+          fileId: data.fileId,
+          mimetype: data.mimetype,
+          extractedText: extractedText,
+          folderId: targetFolder,
+        };
+        dbSetPaper(parsedPaper, true);
+
+        const newId = `doc-${Date.now()}`;
+        let initialContent = "";
+        if (extractedText) {
+          const pages = extractedText.split(/--- Page \d+ of \d+ ---/);
+          const markers = extractedText.match(/--- Page (\d+) of \d+ ---/g) || [];
+
+          initialContent = `<div class="p-6 text-zinc-300 max-w-3xl mx-auto">
+            <h1 class="text-3xl font-medium tracking-tight mb-2 text-white">${titlePlaceholder}</h1>
+            <p class="text-[11px] font-mono text-zinc-500 mb-6 uppercase tracking-wider">Mapped Document: ${fileLabel}${pagesCountString}</p>
+            <div class="h-[1px] bg-zinc-800 mb-6 font-medium"></div>`;
+
+          pages.forEach((pageContent: string, idx: number) => {
+            if (!pageContent.trim() && idx === 0) return;
+            const pageNumMatch = idx > 0 ? markers[idx - 1].match(/\d+/) : null;
+            const pageNum = pageNumMatch ? pageNumMatch[0] : (idx === 0 ? "1" : idx.toString());
+
+            initialContent += `<div id="pdf-page-${pageNum}" class="mb-10 pt-4 border-t border-zinc-800/30 group/page">
+              <div class="text-[10px] font-mono text-zinc-600 mb-4 uppercase tracking-widest group-hover/page:text-zinc-400 transition-colors">Page ${pageNum}</div>
+              <div class="space-y-4 leading-relaxed">${pageContent
+                .trim()
+                .split("\n\n")
+                .map((p) => p.trim() ? `<p>${p.replace(/\n/g, "<br/>")}</p>` : "")
+                .join("")}</div>
+            </div>`;
+          });
+          initialContent += `</div>`;
+        } else {
+          initialContent = `<div class="p-6 text-zinc-300 max-w-3xl mx-auto">
+              <h1 class="text-3xl font-medium tracking-tight mb-2 text-white">${titlePlaceholder}</h1>
+              <p class="text-[11px] font-mono text-zinc-500 mb-6 uppercase tracking-wider">Document File: ${fileLabel}${pagesCountString}</p>
+              <div class="h-[1px] bg-zinc-800 mb-6"></div>
+              <p class="mb-4 leading-relaxed font-jakarta">The file has been uploaded securely and mapped. You can start synthesizing your notes, analyzing findings, and asking the Assistant specifically about its claims.</p>
+            </div>`;
+        }
+
+        setTabs((prev) => [
+          ...prev,
+          {
+            id: newId,
+            type: "document",
+            title: titlePlaceholder,
+            content: initialContent,
+            fileId: data.fileId,
+            mimetype: data.mimetype,
+            folderId: targetFolder,
+          },
+        ]);
+        setActiveTabId(newId);
+        setSidebarView("files");
+        setIsCreateDropdownOpen(false);
+        setIsAssistantOpen(true);
+
+        if (extractedText) {
+          setTimeout(() => {
+            handleSendMessage(
+              `Please thoroughly analyze the newly uploaded document titled "${fileLabel}". Here are the contents: \n\n${extractedText.substring(0, 10000)}\n\nProvide a comprehensive summary, highlight the main findings, and explain key claims in detail.`,
+              { isHidden: true },
+            );
+          }, 500);
+        } else {
+          setTimeout(() => {
+            const assistantMsg: ChatMessage = {
+              id: String(Date.now()),
+              role: "assistant",
+              content: `### Document Mapped: ${fileLabel}\n\nI have successfully indexed **${fileLabel}** and mapped it to your workspace. The document metadata has been saved.`,
+              timestamp: Date.now(),
+            };
+            updateChatMessages((prev) => [...prev, assistantMsg], false);
+          }, 500);
+        }
+      } else {
+        throw new Error(data.message || "Invalid upload response");
+      }
+    } catch (err: any) {
+      console.error("Upload failed", err);
+      const errMsg = err?.message || "The server returned an unexpected error format.";
+      
+      // Update upload tasks state with failure
+      setUploadTasks((prev) =>
+        prev.map((t) => (t.id === taskId ? { ...t, status: "error", error: errMsg } : t))
+      );
+      
+      showToast(`Upload failed: ${errMsg}`, "error", 4000, toastId);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: String(Date.now()),
+          role: "assistant",
+          content: `⚠️ **Upload failed**: ${errMsg}\n\n*Make sure the file is a valid PDF, DOC, or DOCX, and is under 15MB.*`,
+          timestamp: Date.now(),
+        },
+      ]);
+    }
+  };
+
+  const handleCancelTask = (taskId: string) => {
+    setUploadTasks((prev) => {
+      const match = prev.find((t) => t.id === taskId);
+      if (match && match.xhr) {
+        match.xhr.abort();
+      }
+      return prev.map((t) =>
+        t.id === taskId ? { ...t, status: "cancelled" } : t
+      );
+    });
+  };
+
+  const handleCancelAllTasks = () => {
+    setUploadTasks((prev) => {
+      prev.forEach((t) => {
+        if ((t.status === "uploading" || t.status === "starting") && t.xhr) {
+          t.xhr.abort();
+        }
+      });
+      return prev.map((t) =>
+        t.status === "uploading" || t.status === "starting" ? { ...t, status: "cancelled" } : t
+      );
+    });
+  };
+
   const dbDeletePaper = async (paperTitle: string) => {
     const paperId = encodeURIComponent(paperTitle).replace(/\./g, "%2E");
 
@@ -3039,7 +3532,7 @@ export default function App() {
     }
   });
   const [chatInput, setChatInput] = useState("");
-  const [selectedModel, setSelectedModel] = useState("auto");
+  const [selectedModel, setSelectedModel] = useState("command-a-plus-05-2026");
   const [thinkingLevel, setThinkingLevel] = useState<'Standard' | 'Deep' | 'Instant'>('Standard');
   const [isAgentModelMenuOpen, setIsAgentModelMenuOpen] = useState(false);
   const [isAgentThinkingMenuOpen, setIsAgentThinkingMenuOpen] = useState(false);
@@ -4582,7 +5075,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
   }
 
   return (
-    <div className="h-screen bg-[#070707] text-[#e4e4e7] font-sans flex selection:bg-[#262626] overflow-hidden relative">
+    <div 
+      className="h-screen bg-[#070707] text-[#e4e4e7] font-sans flex selection:bg-[#262626] overflow-hidden relative"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        // Prevent default browser behavior (navigating to file) when dropping files outside dedicated drop zones
+        e.preventDefault();
+      }}
+    >
       {isDesktopApp && (
         <>
           <div className="fixed top-0 left-0 right-0 h-[38px] z-[9998] [-webkit-app-region:drag] pointer-events-none" />
@@ -4604,284 +5104,15 @@ Once you have content, I can help you draft sections, summarize findings, or for
         ref={fileInputRef}
         className="hidden"
         accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.html,.csv,.json"
+        multiple
         onChange={async (e) => {
-          const uploaderId = currentUserIdRef.current;
-          const file = e.target.files?.[0];
-          if (file) {
-            const toastId = "upload-main-" + Date.now();
-            showToast(
-              `Uploading and mapping "${file.name}" (0%)...`,
-              "loading",
-              60000,
-              toastId,
-            );
-            try {
-              const data = await new Promise<any>((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                const formData = new FormData();
-                formData.append("file", file);
-
-                xhr.upload.addEventListener("progress", (event) => {
-                  if (event.lengthComputable) {
-                    const percent = Math.round(
-                      (event.loaded / event.total) * 100,
-                    );
-                    showToast(
-                      `Uploading and mapping "${file.name}" (${percent}%)...`,
-                      "loading",
-                      60000,
-                      toastId,
-                    );
-                  }
-                });
-
-                xhr.addEventListener("load", () => {
-                  if (xhr.status >= 200 && xhr.status < 300) {
-                    try {
-                      resolve(JSON.parse(xhr.responseText));
-                    } catch (err) {
-                      reject(new Error("Invalid server response"));
-                    }
-                  } else {
-                    let errMsg = `Server responded with status ${xhr.status}`;
-                    reject(new Error(errMsg));
-                  }
-                });
-
-                xhr.addEventListener("error", () =>
-                  reject(new Error("Network upload error")),
-                );
-                xhr.addEventListener("abort", () =>
-                  reject(new Error("Upload aborted")),
-                );
-
-                xhr.open("POST", "/api/upload");
-                xhr.send(formData);
-              });
-
-              if (currentUserIdRef.current !== uploaderId) return;
-              if (data.success) {
-                const fileLabel = data.fileName;
-                const titlePlaceholder = fileLabel.replace(/\.[^/.]+$/, "");
-                const isImage = data.mimetype?.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp"].includes(fileLabel.toLowerCase().split('.').pop() || "");
-
-                if (isImage) {
-                  setAttachedFile({
-                    fileId: data.fileId,
-                    fileName: data.fileName,
-                    mimetype: data.mimetype,
-                    url: `/api/files/${data.fileId}`
-                  });
-                  showToast(`"${file.name}" attached successfully to chat.`, "success", 4000, toastId);
-                  return;
-                } else {
-                  setAttachedFile({
-                    fileId: data.fileId,
-                    fileName: data.fileName,
-                    mimetype: data.mimetype,
-                    url: `/api/files/${data.fileId}`
-                  });
-                  setSelectedModel("mistral-large-latest");
-                }
-
-                let extractedText = "";
-                let summaryInfo = `This academic resource was uploaded and incorporated into your workspace. Select 'Ask Assistant' to summarize patterns or find citations.`;
-                let pagesCountString = "";
-
-                if (fileLabel.toLowerCase().endsWith(".pdf")) {
-                  // Pre-cache PDF in client-side storage so next view and parser is instant
-                  preCachePdfFile(data.fileId, file);
-                  try {
-                    extractedText = await extractTextFromPdf(
-                      `/api/files/${data.fileId}`,
-                    );
-                    if (extractedText) {
-                      summaryInfo = `This PDF document is parsed and indexed successfully. You can write essays or ask questions about its exact contents.`;
-                      // Count pages mapped
-                      const pagesMatch = extractedText.match(
-                        /--- Page \d+ of \d+ ---/g,
-                      );
-                      if (pagesMatch) {
-                        pagesCountString = ` (${pagesMatch.length} pages mapped)`;
-                      }
-                    }
-                  } catch (pdfErr) {
-                    console.error("PDF mapping failed", pdfErr);
-                  }
-                } else if (
-                  fileLabel.toLowerCase().endsWith(".docx") ||
-                  fileLabel.toLowerCase().endsWith(".txt") ||
-                  fileLabel.toLowerCase().endsWith(".md") ||
-                  fileLabel.toLowerCase().endsWith(".html") ||
-                  fileLabel.toLowerCase().endsWith(".htm")
-                ) {
-                  try {
-                    const textRes = await fetch(
-                      `/api/files/${data.fileId}/raw-text`,
-                    );
-                    if (textRes.ok) {
-                      const textData = await textRes.json();
-                      if (textData.success && textData.text) {
-                        let cleanText = textData.text;
-                        if (
-                          fileLabel.toLowerCase().endsWith(".html") ||
-                          fileLabel.toLowerCase().endsWith(".htm")
-                        ) {
-                          // Strip script / style tags and HTML tags for elegant context
-                          cleanText = cleanText
-                            .replace(
-                              /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-                              "",
-                            )
-                            .replace(
-                              /<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi,
-                              "",
-                            )
-                            .replace(/<[^>]+>/g, " ")
-                            .replace(/\s+/g, " ")
-                            .trim();
-                        }
-                        extractedText = cleanText;
-                        summaryInfo = `This document is parsed and mapped successfully. You can start synthesizing your notes, analyzing findings, and asking the Assistant specifically about its claims Simon.`;
-                        const words = extractedText
-                          .trim()
-                          .split(/\s+/)
-                          .filter(Boolean).length;
-                        pagesCountString = ` (${words} words mapped)`;
-                      }
-                    }
-                  } catch (docxErr) {
-                    console.error("Docx/Text/HTML mapping failed", docxErr);
-                  }
-                }
-
-                if (currentUserIdRef.current !== uploaderId) return;
-
-                const targetFolder = selectedFolderId || folders[0]?.id || "f1";
-                const parsedPaper: PaperItem = {
-                  author: "Unknown Author",
-                  title: titlePlaceholder,
-                  description: `Uploaded draft document: ${fileLabel}`,
-                  added: "Today",
-                  fullTextStatus: "Available",
-                  viewed: "Just now",
-                  fileType: "Document",
-                  summary: summaryInfo,
-                  fileId: data.fileId,
-                  mimetype: data.mimetype,
-                  extractedText: extractedText,
-                  folderId: targetFolder,
-                };
-                dbSetPaper(parsedPaper, true);
-
-                const newId = `doc-${Date.now()}`;
-                let initialContent = "";
-                if (extractedText) {
-                  const pages = extractedText.split(/--- Page \d+ of \d+ ---/);
-                  const markers =
-                    extractedText.match(/--- Page (\d+) of \d+ ---/g) || [];
-
-                  initialContent = `<div class="p-6 text-zinc-300 max-w-3xl mx-auto">
-                    <h1 class="text-3xl font-medium tracking-tight mb-2 text-white">${titlePlaceholder}</h1>
-                    <p class="text-[11px] font-mono text-zinc-500 mb-6 uppercase tracking-wider">Mapped Document: ${fileLabel}${pagesCountString}</p>
-                    <div class="h-[1px] bg-zinc-800 mb-6"></div>`;
-
-                  pages.forEach((pageContent: string, idx: number) => {
-                    if (!pageContent.trim() && idx === 0) return;
-                    const pageNumMatch =
-                      idx > 0 ? markers[idx - 1].match(/\d+/) : null;
-                    const pageNum = pageNumMatch
-                      ? pageNumMatch[0]
-                      : idx === 0
-                        ? "1"
-                        : idx.toString();
-
-                    initialContent += `<div id="pdf-page-${pageNum}" class="mb-10 pt-4 border-t border-zinc-800/30 group/page">
-                      <div class="text-[10px] font-mono text-zinc-600 mb-4 uppercase tracking-widest group-hover/page:text-zinc-400 transition-colors">Page ${pageNum}</div>
-                      <div class="space-y-4 leading-relaxed">${pageContent
-                        .trim()
-                        .split("\n\n")
-                        .map((p) =>
-                          p.trim() ? `<p>${p.replace(/\n/g, "<br/>")}</p>` : "",
-                        )
-                        .join("")}</div>
-                    </div>`;
-                  });
-                  initialContent += `</div>`;
-                } else {
-                  initialContent = `<div class="p-6 text-zinc-300 max-w-3xl mx-auto">
-                      <h1 class="text-3xl font-medium tracking-tight mb-2 text-white">${titlePlaceholder}</h1>
-                      <p class="text-[11px] font-mono text-zinc-500 mb-6 uppercase tracking-wider">Document File: ${fileLabel}${pagesCountString}</p>
-                      <div class="h-[1px] bg-zinc-800 mb-6"></div>
-                      <p class="mb-4 leading-relaxed">The file has been uploaded securely and mapped. You can start synthesizing your notes, analyzing findings, and asking the Assistant specifically about its claims.</p>
-                    </div>`;
-                }
-
-                setTabs((prev) => [
-                  ...prev,
-                  {
-                    id: newId,
-                    type: "document",
-                    title: titlePlaceholder,
-                    content: initialContent,
-                    fileId: data.fileId,
-                    mimetype: data.mimetype,
-                    folderId: targetFolder,
-                  },
-                ]);
-                setActiveTabId(newId);
-                setSidebarView("files");
-                setIsCreateDropdownOpen(false);
-                setIsAssistantOpen(true);
-                showToast(
-                  `"${fileLabel}" uploaded and structured successfully!`,
-                  "success",
-                  3000,
-                  toastId,
-                );
-
-                if (extractedText) {
-                  setTimeout(() => {
-                    handleSendMessage(
-                      `Please thoroughly analyze the newly uploaded document titled "${fileLabel}". Here are the contents: \n\n${extractedText.substring(0, 10000)}\n\nProvide a comprehensive summary, highlight the main findings, and explain key claims in detail.`,
-                      { isHidden: true },
-                    );
-                  }, 500);
-                } else {
-                  setTimeout(() => {
-                    const assistantMsg: ChatMessage = {
-                      id: String(Date.now()),
-                      role: "assistant",
-                      content: `### Document Mapped: ${fileLabel}\n\nI have successfully indexed **${fileLabel}** and mapped it to your workspace. The document metadata has been saved.`,
-                      timestamp: Date.now(),
-                    };
-                    updateChatMessages(
-                      (prev) => [...prev, assistantMsg],
-                      false,
-                    );
-                  }, 500);
-                }
-              }
-            } catch (err: any) {
-              console.error("Upload failed", err);
-              const errMsg =
-                err?.message ||
-                "The server returned an unexpected error format.";
-              showToast(`Upload failed: ${errMsg}`, "error", 4000, toastId);
-              // Inform the user via assistant message nicely
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: String(Date.now()),
-                  role: "assistant",
-                  content: `⚠️ **Upload failed**: ${errMsg}\n\n*Make sure the file is a valid PDF, DOC, or DOCX, and is under 15MB.*`,
-                  timestamp: Date.now(),
-                },
-              ]);
-            } finally {
-              e.target.value = "";
+          const files = e.target.files;
+          if (files && files.length > 0) {
+            for (let i = 0; i < files.length; i++) {
+              await handleUploadFile(files[i]);
             }
           }
+          e.target.value = "";
         }}
       />
 
@@ -4896,17 +5127,23 @@ Once you have content, I can help you draft sections, summarize findings, or for
             className="flex flex-col h-full shrink-0 overflow-hidden bg-[#070707] font-jakarta"
           >
             {/* Primary Navigation Grid */}
-            <nav className="px-3 grid grid-cols-4 gap-2 mb-3 relative">
+            <nav className="px-2 flex items-center justify-between gap-1 mb-4 h-11 relative">
+              {/* Create Toggle Button - Fixed Width */}
+              <button
+                onClick={(e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  setIsCreateDropdownOpen(!isCreateDropdownOpen);
+                }}
+                className={`flex items-center justify-center w-9 h-9 rounded-full transition-all duration-300 cursor-pointer shrink-0 ${
+                  isCreateDropdownOpen
+                    ? "bg-[#27272a] text-[#ffffff]"
+                    : "text-[#52525b] hover:text-[#a1a1aa]"
+                }`}
+              >
+                <Icon icon="ph:pencil-line" className="w-[18px] h-[18px]" />
+              </button>
+
               {[
-                {
-                  icon: "ph:pencil-line",
-                  label: "Create",
-                  onClick: (e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    setIsCreateDropdownOpen(!isCreateDropdownOpen);
-                  },
-                  active: isCreateDropdownOpen,
-                },
                 {
                   icon: "ph:house",
                   label: "Home",
@@ -4960,14 +5197,26 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <button
                   key={item.label}
                   onClick={item.onClick}
-                  className={`flex flex-col items-center justify-center gap-1.5 py-2.5 transition-all duration-300 cursor-pointer ${
+                  className={`flex items-center justify-center gap-2 px-3 h-9 rounded-full transition-all duration-300 cursor-pointer overflow-hidden relative group ${
                     item.active
-                      ? "text-white scale-105"
-                      : "text-[#3f3f46] hover:text-[#a1a1aa] hover:bg-[#111111]"
+                      ? "bg-[#27272a] text-white flex-1 min-w-0"
+                      : "text-[#52525b] hover:text-[#a1a1aa] w-9 shrink-0"
                   }`}
                 >
-                  <Icon icon={item.icon} className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] font-medium">{item.label}</span>
+                  <Icon icon={item.icon} className={`w-[18px] h-[18px] shrink-0 transition-transform ${item.active ? "scale-100" : "scale-110"}`} />
+                  <AnimatePresence initial={false}>
+                    {item.active && (
+                      <motion.span 
+                        initial={{ width: 0, opacity: 0 }}
+                        animate={{ width: "auto", opacity: 1 }}
+                        exit={{ width: 0, opacity: 0 }}
+                        transition={{ duration: 0.2, ease: "easeOut" }}
+                        className="text-[12px] font-bold tracking-tight whitespace-nowrap"
+                      >
+                        {item.label}
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
                 </button>
               ))}
 
@@ -5062,18 +5311,40 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
             {/* Files/Chats Toggle Tabs (Only shown when in files/chats mode) */}
             {(sidebarView === "files" || sidebarView === "chats") && (
-              <div className="mx-3 mb-4 p-1 bg-[#111111] rounded-lg flex items-center gap-1">
+              <div className="mx-3 mb-4 flex items-center gap-6 border-b border-zinc-800/30">
                 <button
                   onClick={() => setSidebarView("files")}
-                  className={`flex-1 py-1 text-[11px] font-medium rounded-[6px] transition-all ${sidebarView === "files" ? "text-[#f4f4f5] bg-[#27272a]" : "text-[#71717a] hover:text-[#a1a1aa]"}`}
+                  className={`text-xs font-semibold pb-2.5 transition-all cursor-pointer relative ${
+                    sidebarView === "files"
+                      ? "text-zinc-100"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
                 >
                   Files
+                  {sidebarView === "files" && (
+                    <motion.div
+                      layoutId="sidebarTabUnderline"
+                      className="absolute bottom-0 left-0 right-0 h-[1.5px] bg-zinc-300"
+                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    />
+                  )}
                 </button>
                 <button
                   onClick={() => setSidebarView("chats")}
-                  className={`flex-1 py-1 text-[11px] font-medium rounded-[6px] transition-all ${sidebarView === "chats" ? "text-[#f4f4f5] bg-[#27272a]" : "text-[#71717a] hover:text-[#a1a1aa]"}`}
+                  className={`text-xs font-semibold pb-2.5 transition-all cursor-pointer relative ${
+                    sidebarView === "chats"
+                      ? "text-zinc-100"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
                 >
                   Chats
+                  {sidebarView === "chats" && (
+                    <motion.div
+                      layoutId="sidebarTabUnderline"
+                      className="absolute bottom-0 left-0 right-0 h-[1.5px] bg-zinc-300"
+                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    />
+                  )}
                 </button>
               </div>
             )}
@@ -5846,230 +6117,21 @@ Once you have content, I can help you draft sections, summarize findings, or for
         <div className="relative flex-1 bg-[#121212] rounded-2xl flex flex-row overflow-hidden min-w-0 transition-all">
           <div className="flex-1 flex flex-col min-w-0">
             {activeTab.type === "home" ? (
-              <div className="flex-1 overflow-y-auto focus:outline-none scroll-smooth">
-                <div className="max-w-[800px] mx-auto w-full p-8 md:p-14 lg:p-20 flex flex-col justify-center min-h-full">
-                  {(() => {
-                    const hour = new Date().getHours();
-                    let timeGreeting = "Good evening";
-                    if (hour < 12) timeGreeting = "Good morning";
-                    else if (hour < 18) timeGreeting = "Good afternoon";
-                    const customFullName = localStorage.getItem(`cosmi_settings_full_name_${currentUser?.uid || "guest"}`);
-                    const preferredName = callMe || (customFullName ? customFullName.trim().split(" ")[0] : (currentUser?.displayName ? currentUser.displayName.split(" ")[0] : ""));
-                    return (
-                      <h1 className="text-3xl md:text-4xl text-[#f4f4f5] font-medium tracking-tight mb-8">
-                        {timeGreeting}
-                        {preferredName ? `, ${preferredName}` : ""}.
-                      </h1>
-                    );
-                  })()}
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
-                    <button
-                      onClick={() => {
-                        const docTab = tabs.find(
-                          (t) => t.type === "document" && !t.fileId,
-                        );
-                        if (docTab) {
-                          setActiveTabId(docTab.id);
-                        } else {
-                          createNewDocument();
-                        }
-                      }}
-                      className="flex items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-colors rounded-3xl text-left cursor-pointer group"
-                    >
-                      <div className="mr-5">
-                        <Icon
-                          icon="ph:pencil-line"
-                          className="w-7 h-7 text-[#f4f4f5]"
-                        />
-                      </div>
-                      <div>
-                        <h3 className="text-[#e4e4e7] font-medium text-sm">
-                          Resume Document
-                        </h3>
-                        <p className="text-[#a1a1aa] text-xs mt-0.5 truncate max-w-[200px]">
-                          {tabs.find((t) => t.type === "document" && !t.fileId)
-                            ?.title || "Untitled Document"}
-                        </p>
-                      </div>
-                    </button>
-
-                    <div className="relative">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setIsHomeCreateDropdownOpen(
-                            !isHomeCreateDropdownOpen,
-                          );
-                        }}
-                        className={`flex w-full items-center p-4 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-all rounded-3xl text-left cursor-pointer group ${isHomeCreateDropdownOpen ? "ring-1 ring-zinc-500 bg-[#222222]" : ""}`}
-                      >
-                        <div className="mr-5">
-                          <Icon
-                            icon="ph:plus-circle"
-                            className={`w-7 h-7 text-[#e4e4e7] transition-transform ${isHomeCreateDropdownOpen ? "rotate-45" : ""}`}
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="text-[#e4e4e7] font-medium text-sm">
-                            Create New
-                          </h3>
-                          <p className="text-[#a1a1aa] text-xs mt-0.5">
-                            Start a blank hypothesis
-                          </p>
-                        </div>
-                        <Icon
-                          icon="ph:caret-down"
-                          className={`w-4 h-4 text-[#71717a] transition-transform ${isHomeCreateDropdownOpen ? "rotate-180" : ""}`}
-                        />
-                      </button>
-
-                      <AnimatePresence>
-                        {isHomeCreateDropdownOpen && (
-                          <motion.div
-                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                            animate={{ opacity: 1, y: 8, scale: 1 }}
-                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                            className="absolute top-full left-0 w-56 bg-[#18181b] border border-[#27272a] rounded-2xl p-1.5 flex flex-col gap-0.5 z-[70]"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <button
-                              onClick={() => {
-                                createNewDocument();
-                                setIsHomeCreateDropdownOpen(false);
-                              }}
-                              className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-xl text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-all cursor-pointer group"
-                            >
-                              <Icon
-                                icon="ph:file-text"
-                                className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors"
-                              />
-                              <span className="font-medium text-xs text-left">
-                                New Document
-                              </span>
-                            </button>
-
-                            <button
-                              onClick={() => {
-                                const newId = `chat-${Date.now()}`;
-                                setTabs([
-                                  ...tabs,
-                                  {
-                                    id: newId,
-                                    type: "chat",
-                                    title: "Untitled",
-                                  },
-                                ]);
-                                setActiveTabId(newId);
-                                setIsHomeCreateDropdownOpen(false);
-                              }}
-                              className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-xl text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-all cursor-pointer group"
-                            >
-                              <Icon
-                                icon="ph:chat-circle"
-                                className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors"
-                              />
-                              <span className="font-medium text-xs text-left">
-                                Talk to Cosmi
-                              </span>
-                            </button>
-
-                            <div className="h-[1px] bg-[#27272a] mx-2 my-0.5" />
-
-                            <button
-                              onClick={() => {
-                                const newFolderId = `folder-${Date.now()}`;
-                                dbSetFolder({
-                                  id: newFolderId,
-                                  name: "Untitled Folder",
-                                  createdAt: Date.now(),
-                                });
-                                setIsHomeCreateDropdownOpen(false);
-                              }}
-                              className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-xl text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-all cursor-pointer group"
-                            >
-                              <Icon
-                                icon="ph:folder-simple-plus"
-                                className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors"
-                              />
-                              <span className="font-medium text-xs text-left">
-                                New Folder
-                              </span>
-                            </button>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  </div>
-
-                  <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wider mb-6">
-                    Recent Folders
-                  </h2>
-                  <div className="relative group/carousel">
-                    <div
-                      className="flex overflow-x-auto gap-4 pb-6 custom-scrollbar-h scroll-smooth"
-                      style={{
-                        WebkitMaskImage:
-                          "linear-gradient(to right, rgba(0,0,0,1) 82%, rgba(0,0,0,0) 98%)",
-                        maskImage:
-                          "linear-gradient(to right, rgba(0,0,0,1) 82%, rgba(0,0,0,0) 98%)",
-                      }}
-                    >
-                      {folders.slice(0, 6).map((folder, idx) => (
-                        <button
-                          key={folder.id}
-                          onClick={() => {
-                            setSelectedFolderId(folder.id);
-                            const libraryTab = tabs.find(
-                              (t) => t.type === "library",
-                            );
-                            if (libraryTab) {
-                              setActiveTabId(libraryTab.id);
-                            } else {
-                              const newId = `library-${Date.now()}`;
-                              setTabs([
-                                ...tabs,
-                                {
-                                  id: newId,
-                                  type: "library",
-                                  title: "Library",
-                                },
-                              ]);
-                              setActiveTabId(newId);
-                            }
-                          }}
-                          className="flex flex-col items-start p-6 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#222222] transition-all duration-300 rounded-[28px] text-left cursor-pointer group min-w-[240px] shrink-0"
-                        >
-                          <div className="mb-4">
-                            <Icon
-                              icon="ph:folder-user"
-                              className="w-10 h-10 text-[#f4f4f5]"
-                            />
-                          </div>
-                          <div className="min-w-0">
-                            <h3 className="text-[#e4e4e7] font-medium text-base truncate mb-1">
-                              {folder.name}
-                            </h3>
-                            <p className="text-[#71717a] text-xs">
-                              {idx === 0
-                                ? "Recently updated"
-                                : idx === 1
-                                  ? "Last week"
-                                  : "Research project"}
-                            </p>
-                          </div>
-                        </button>
-                      ))}
-                      {/* Spacer for right padding in overflow */}
-                      <div className="min-w-[40px] shrink-0 h-full" />
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <HomePanel
+                currentUser={currentUser}
+                callMe={callMe}
+                tabs={tabs}
+                setTabs={setTabs}
+                setActiveTabId={setActiveTabId}
+                createNewDocument={createNewDocument}
+                folders={folders}
+                dbSetFolder={dbSetFolder}
+                setSelectedFolderId={setSelectedFolderId}
+              />
             ) : activeTab.type === "chat" ? (
               <div className="flex-1 flex flex-col bg-[#121212] relative overflow-hidden">
                 {/* Chat Header */}
-                <header className="h-[52px] flex items-center justify-between px-4 shrink-0 relative border-b border-[#1c1c1f] z-45">
+                <header className="h-[52px] flex items-center justify-between px-4 shrink-0 relative z-45">
                   <div className="flex items-center gap-2">
                     <div className="relative">
                       {isRenamingChat === activeTab.id ? (
@@ -6259,6 +6321,33 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 />
               </div>
             ) : activeTab.type === "library" ? (
+              <LibraryPanel
+                papers={papers}
+                folders={folders}
+                selectedFolderId={selectedFolderId}
+                setSelectedFolderId={setSelectedFolderId}
+                dbSetPaper={dbSetPaper}
+                dbSetFolder={dbSetFolder}
+                dbDeleteFolder={dbDeleteFolder}
+                dbDeletePaper={dbDeletePaper}
+                tabs={tabs}
+                setTabs={setTabs}
+                setActiveTabId={setActiveTabId}
+                createNewDocument={createNewDocument}
+                fileInputRef={fileInputRef}
+                handleLibraryDragStart={handleLibraryDragStart}
+                handleLibraryDragOverFolder={handleLibraryDragOverFolder}
+                handleFolderDragLeave={handleFolderDragLeave}
+                handleLibraryDropOnFolder={handleLibraryDropOnFolder}
+                handleLibraryDragOverRoot={handleLibraryDragOverRoot}
+                handleLibraryDropOnRoot={handleLibraryDropOnRoot}
+                dragOverFolderId={dragOverFolderId}
+                dragOverRootLibrary={dragOverRootLibrary}
+                setDragOverRootLibrary={setDragOverRootLibrary}
+                handlePaperClick={handlePaperClick}
+                formatAbstractText={formatAbstractText}
+              />
+            ) : (activeTab.type as string) === "library_LEGACY" ? (
               <div className="flex-1 overflow-y-auto focus:outline-none bg-[#121212] flex flex-col">
                 <div className="w-full px-[1px] py-6 flex-1 flex flex-col">
                   {/* Header section - Millimeter margin from edge */}
@@ -6761,20 +6850,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               No assets have been added here yet. Create some
                               research notes or upload files to fill it!
                             </p>
-                            <div className="flex justify-center gap-2">
+                            <div className="flex justify-center gap-3">
                               <button
                                 onClick={() =>
                                   createNewDocument(
                                     selectedFolderId || folders[0]?.id,
                                   )
                                 }
-                                className="px-3.5 py-1.5 bg-zinc-200 hover:bg-white text-zinc-900 rounded-lg text-xs font-semibold cursor-pointer"
+                                className="px-6 py-2 bg-[#e4e4e7] hover:bg-white text-black rounded-full text-xs font-bold cursor-pointer transition-colors shadow-sm"
                               >
                                 New Document
                               </button>
                               <button
                                 onClick={() => fileInputRef.current?.click()}
-                                className="px-3.5 py-1.5 bg-[#1a1a1a] border border-[#27272a] hover:bg-[#252528] text-zinc-200 rounded-lg text-xs font-medium cursor-pointer"
+                                className="px-6 py-2 bg-[#18181b] border border-[#27272a] hover:bg-[#27272a] text-[#f4f4f5] rounded-full text-xs font-bold cursor-pointer transition-colors"
                               >
                                 Upload PDF File
                               </button>
@@ -7754,21 +7843,223 @@ Once you have content, I can help you draft sections, summarize findings, or for
               </div>
             ) : (
               <div className="relative flex-1 flex flex-col h-full overflow-hidden">
-                {/* Repositioned Auto-Save Indicator next to SidePanel icon */}
+                {/* Document Editor Header Tools */}
                 <div
-                  className={`absolute top-3.5 z-30 transition-all duration-200 ${isSidePanelOpen ? "right-4" : "right-12"} flex items-center gap-2.5`}
+                  className="absolute top-2.5 right-3 z-30 flex items-center gap-3 select-none"
                 >
-                  {/* Share button removed */}
-                </div>
-                {!isSidePanelOpen && (
+                  <span className="text-zinc-500 text-[11px] font-medium mr-1 select-none hidden sm:inline-block">
+                    {saveMessage}
+                  </span>
+                  
                   <button
-                    onClick={() => setIsSidePanelOpen(true)}
-                    className="absolute top-3 right-3 z-30 p-2 text-[#a1a1aa] hover:text-[#f4f4f5] transition-all cursor-pointer"
-                    title="Toggle Side Panel"
+                    onClick={() => setIsShareModalOpen(true)}
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[#e4e4e6] hover:bg-white text-black text-xs font-semibold select-none transition-colors cursor-pointer h-[28px] border-none"
                   >
-                    <PanelRight className="w-5 h-5" />
+                    <Icon icon="ph:lock-bold" className="w-[14px] h-[14px] text-zinc-700" />
+                    <span>Share</span>
                   </button>
-                )}
+
+                  <div className="flex items-center gap-0.5">
+                    <button 
+                      onClick={() => {
+                        const url = `${window.location.origin}/?tab=${activeTabId}`;
+                        navigator.clipboard.writeText(url).then(() => {
+                          showToast("Copied shareable link to clipboard!", "success");
+                        }).catch((err) => {
+                          console.error("Failed to copy link:", err);
+                        });
+                      }}
+                      className="p-1.5 rounded-[6px] text-zinc-400 hover:text-zinc-200 hover:bg-[#27272a] transition-colors cursor-pointer" 
+                      title="Copy Link"
+                    >
+                      <Icon icon="ph:link-bold" className="w-[18px] h-[18px]" />
+                    </button>
+                    
+                    <button 
+                      onClick={() => {
+                        setTabs((prev) =>
+                          prev.map((t) =>
+                            t.id === activeTabId
+                              ? { ...t, starred: !t.starred }
+                              : t
+                          )
+                        );
+                        showToast(
+                          activeTab?.starred 
+                            ? "Removed from starred documents" 
+                            : "Added to starred documents", 
+                          "success"
+                        );
+                      }}
+                      className={`p-1.5 rounded-[6px] transition-colors cursor-pointer ${
+                        activeTab?.starred 
+                          ? "text-yellow-400 hover:text-yellow-300" 
+                          : "text-zinc-400 hover:text-zinc-200 hover:bg-[#27272a]"
+                      }`}
+                      title={activeTab?.starred ? "Unstar Document" : "Star Document"}
+                    >
+                      <Icon icon={activeTab?.starred ? "ph:star-fill" : "ph:star-bold"} className="w-[18px] h-[18px]" />
+                    </button>
+
+                    <div className="relative">
+                      <button 
+                        onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
+                        className={`p-1.5 rounded-[6px] transition-colors cursor-pointer ${isMoreMenuOpen ? "bg-[#27272a] text-zinc-200" : "text-zinc-400 hover:text-zinc-200 hover:bg-[#27272a]"}`} 
+                        title="More Options"
+                      >
+                        <Icon icon="ph:dots-three-bold" className="w-[18px] h-[18px]" />
+                      </button>
+                      
+                      <AnimatePresence>
+                        {isMoreMenuOpen && (
+                          <>
+                            <div 
+                              className="fixed inset-0 z-40 bg-transparent" 
+                              onClick={() => setIsMoreMenuOpen(false)}
+                            />
+                            
+                            <motion.div
+                              initial={{ opacity: 0, y: -4, scale: 0.95 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: -4, scale: 0.95 }}
+                              transition={{ duration: 0.12 }}
+                              className="absolute right-0 mt-1.5 z-50 bg-[#18181b] border border-[#27272a] rounded-xl p-1.5 w-[190px] shadow-xl text-left flex flex-col gap-0.5"
+                            >
+                              <button
+                                onClick={() => {
+                                  setIsMoreMenuOpen(false);
+                                  const text = editorRef.current?.innerText || "";
+                                  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+                                  const chars = text.length;
+                                  showToast(`Stats: ${words} words, ${chars} characters`, "success");
+                                }}
+                                className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                              >
+                                <Icon icon="ph:info-bold" className="w-[15px] h-[15px] text-zinc-500 group-hover:text-zinc-300" />
+                                <span className="font-medium">Document Stats</span>
+                              </button>
+                              
+                              <div
+                                className="relative w-full"
+                                onMouseEnter={() => setIsExportSubmenuOpen(true)}
+                                onMouseLeave={() => setIsExportSubmenuOpen(false)}
+                              >
+                                <button
+                                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <Icon icon="ph:download-simple-bold" className="w-[15px] h-[15px] text-zinc-500 group-hover:text-zinc-300" />
+                                    <span className="font-medium">Export</span>
+                                  </div>
+                                  <Icon 
+                                    icon="ph:caret-right-bold" 
+                                    className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300 transition-transform" 
+                                  />
+                                </button>
+
+                                <AnimatePresence>
+                                  {isExportSubmenuOpen && (
+                                    <motion.div 
+                                      initial={{ opacity: 0, x: -5, scale: 0.95 }}
+                                      animate={{ opacity: 1, x: 0, scale: 1 }}
+                                      exit={{ opacity: 0, x: -5, scale: 0.95 }}
+                                      transition={{ duration: 0.1 }}
+                                      className="absolute right-full top-0 mr-1.5 w-[180px] bg-[#18181b] border border-[#27272a] rounded-xl p-1.5 shadow-xl flex flex-col gap-0.5 z-50 text-left"
+                                    >
+                                      {/* Export to Word with MS Word Logo icon */}
+                                      <button
+                                        onClick={() => {
+                                          setIsMoreMenuOpen(false);
+                                          setIsExportSubmenuOpen(false);
+                                          handleExportWord();
+                                        }}
+                                        className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-xs text-zinc-400 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group shrink-0"
+                                      >
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/e/e8/Microsoft_Office_Word_%282025%E2%80%93present%29.svg" alt="Word" className="w-4 h-4 shrink-0 object-contain" />
+                                        <span className="font-medium">Word Document</span>
+                                      </button>
+
+                                      {/* Export PDF */}
+                                      <button
+                                        onClick={() => {
+                                          setIsMoreMenuOpen(false);
+                                          setIsExportSubmenuOpen(false);
+                                          handleExportPDF();
+                                        }}
+                                        className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-xs text-zinc-400 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group shrink-0"
+                                      >
+                                        <Icon icon="ph:file-pdf-fill" className="w-4 h-4 shrink-0 text-red-500" />
+                                        <span className="font-medium">Export PDF</span>
+                                      </button>
+
+                                      {/* Export Markdown */}
+                                      <button
+                                        onClick={() => {
+                                          setIsMoreMenuOpen(false);
+                                          setIsExportSubmenuOpen(false);
+                                          handleExportMarkdown();
+                                        }}
+                                        className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-xs text-zinc-400 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group shrink-0"
+                                      >
+                                        <Icon icon="ph:markdown-logo-fill" className="w-4 h-4 shrink-0 text-sky-500" />
+                                        <span className="font-medium">Markdown (.md)</span>
+                                      </button>
+
+                                      {/* Export .txt */}
+                                      <button
+                                        onClick={() => {
+                                          setIsMoreMenuOpen(false);
+                                          setIsExportSubmenuOpen(false);
+                                          handleExportTXT();
+                                        }}
+                                        className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-xs text-zinc-400 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group shrink-0"
+                                      >
+                                        <Icon icon="ph:file-txt-bold" className="w-4 h-4 shrink-0 text-zinc-400" />
+                                        <span className="font-medium">Plain Text (.txt)</span>
+                                      </button>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
+
+                              <button
+                                onClick={() => {
+                                  setIsMoreMenuOpen(false);
+                                  if (confirm("Are you sure you want to clear your current document content? This cannot be undone.")) {
+                                    if (editorRef.current) {
+                                      editorRef.current.innerHTML = "";
+                                      setDocumentContent("");
+                                      saveDraftToLibrary({
+                                        ...activeTab,
+                                        content: ""
+                                      });
+                                    }
+                                  }
+                                }}
+                                className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-red-400 hover:text-red-300 hover:bg-red-950/20 transition-colors cursor-pointer group border-t border-zinc-800/40 mt-1 pt-1.5"
+                              >
+                                <Icon icon="ph:trash-bold" className="w-[15px] h-[15px] text-red-500/80 group-hover:text-red-400" />
+                                <span className="font-medium">Clear Content</span>
+                              </button>
+                            </motion.div>
+                          </>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    <button
+                      onClick={() => setIsSidePanelOpen(!isSidePanelOpen)}
+                      className={`p-1.5 rounded-[6px] transition-colors cursor-pointer ${
+                        isSidePanelOpen 
+                          ? "text-zinc-200 bg-[#27272a]" 
+                          : "text-zinc-400 hover:text-zinc-200 hover:bg-[#27272a]"
+                      }`}
+                      title={isSidePanelOpen ? "Collapse Side Panel" : "Expand Side Panel"}
+                    >
+                      <PanelRight className="w-[18px] h-[18px]" />
+                    </button>
+                  </div>
+                </div>
                 {/* Floating Pill Formatting Bar - Compact, clean, with a 3-dots overflow menu to prevent layout wrapping or overlapping */}
                 <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-[#161616]/95 backdrop-blur-md border border-[#2d2d30] rounded-full px-3.5 h-[44px] flex items-center justify-center gap-x-2 text-[12px] text-[#a1a1aa] select-none max-w-[calc(100%-1.5rem)] md:max-w-max shadow-xl transition-all duration-200">
                   {/* Font Selector */}
@@ -11186,6 +11477,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
           </motion.div>
         )}
       </AnimatePresence>
+
+      {isUploadsPanelOpen && (
+        <UploadsManager
+          tasks={uploadTasks}
+          onCancelTask={handleCancelTask}
+          onCancelAll={handleCancelAllTasks}
+          onClose={() => setIsUploadsPanelOpen(false)}
+          isCollapsed={isUploadsPanelCollapsed}
+          setIsCollapsed={setIsUploadsPanelCollapsed}
+        />
+      )}
 
       <ToastContainer />
     </div>

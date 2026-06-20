@@ -32,6 +32,7 @@ export const modelsList = [
   { id: 'auto', label: 'Composition I', desc: 'Fastest answers & multi-modal' },
   { id: 'mistral-large-latest', label: 'Sift II', desc: 'Advanced multi-lingual logic' },
   { id: 'codestral-latest', label: 'Kindle Preview', desc: 'Optimized for scripting & automation' },
+  { id: 'command-a-plus-05-2026', label: 'Raisee V', desc: 'Cohere high-performance language engine' },
 ];
 
 const renderLinkifiedText = (text: string) => {
