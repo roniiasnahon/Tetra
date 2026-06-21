@@ -1136,6 +1136,41 @@ export { app };
 async function startServer() {
   await ensureUploadsDir();
 
+  // Robust static asset serving for images/assets to prevent SPA fallback
+  app.use((req, res, next) => {
+    const urlPath = req.path;
+    const ext = path.extname(urlPath).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      '.png': 'image/png',
+      '.svg': 'image/svg+xml',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif',
+      '.ico': 'image/x-icon'
+    };
+
+    if (mimeTypes[ext]) {
+      const pathsToTry = [
+        path.join(process.cwd(), "public", urlPath),
+        path.join(process.cwd(), "dist", urlPath),
+        path.join(process.cwd(), urlPath)
+      ];
+      
+      for (const p of pathsToTry) {
+        try {
+          if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+            res.setHeader('Content-Type', mimeTypes[ext]);
+            return res.sendFile(p);
+          }
+        } catch (e) {
+          // Skip
+        }
+      }
+    }
+    next();
+  });
+
   // Request logger middleware
   app.use((req, res, next) => {
     if (req.url.startsWith("/api/")) {
@@ -3727,9 +3762,6 @@ ${textToAnalyze}
       res.status(500).json({ error: e.message || "An exception occurred during notes composition." });
     }
   });
-
-   // Serve public static assets to prevent text/html SPA fallback on images
-   app.use(express.static(path.join(process.cwd(), "public")));
 
    // serve static UI assets and delegate routing
    if (process.env.NODE_ENV !== "production") {
