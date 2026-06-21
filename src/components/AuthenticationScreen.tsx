@@ -573,13 +573,13 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
         </div>
         
         <div className="flex items-center gap-4">
-          <a href="#" className="hover:text-white transition-colors">Terms of Use</a>
+          <a href="https://genlang.vercel.app/#terms" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Terms of Use</a>
           <div className="w-[1px] h-3.5 bg-zinc-700"></div>
-          <a href="#" className="hover:text-white transition-colors">Cookie preferences</a>
+          <a href="https://genlang.vercel.app/#cookie-preferences" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Cookie preferences</a>
           <div className="w-[1px] h-3.5 bg-zinc-700"></div>
-          <a href="#" className="hover:text-white transition-colors">Privacy</a>
+          <a href="https://genlang.vercel.app/#privacy" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Privacy</a>
           <div className="w-[1px] h-3.5 bg-zinc-700"></div>
-          <a href="#" className="hover:text-white transition-colors">Do not sell or share my personal information</a>
+          <a href="https://genlang.vercel.app/#do-not-sell" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Do not sell or share my personal information</a>
         </div>
       </div>
     </div>
