@@ -3728,6 +3728,9 @@ ${textToAnalyze}
     }
   });
 
+   // Serve public static assets to prevent text/html SPA fallback on images
+   app.use(express.static(path.join(process.cwd(), "public")));
+
    // serve static UI assets and delegate routing
    if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
