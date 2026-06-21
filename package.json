@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "main": "main.cjs",
+  "main": "dist/server.cjs",
   "scripts": {
     "dev": "tsx server.ts",
     "electron:dev": "electron .",
@@ -17,6 +17,7 @@
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@iconify/react": "^6.0.2",
+    "@solar-icons/react": "^1.1.1",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.1.14",
     "@tauri-apps/api": "^2.11.0",
@@ -68,7 +69,7 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
   },
-  "build": {
+  "electron-builder": {
     "appId": "com.cosmiwise.app",
     "productName": "Cosmiwise",
     "directories": {

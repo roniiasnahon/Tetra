@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { showToast } from './Toast';
 import { AudioVisualizerPlayer } from './AudioVisualizerPlayer';
-import { Icon } from '@iconify/react';
+import { Icon } from './SolarIcon';
 import { MaterialIcon } from './MaterialIcon';
 
 interface ShimProps extends React.HTMLAttributes<HTMLSpanElement> {

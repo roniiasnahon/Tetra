@@ -1,10 +1,12 @@
 import React, { useRef, useEffect, useState } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import ReactMarkdown from 'react-markdown';
-import { Icon } from '@iconify/react';
+import { Icon } from './SolarIcon';
 import { Tab, ChatMessage } from '../App';
 import { TypewriterMarkdown } from './TypewriterMarkdown';
 import { DynamicShimmer } from './DynamicShimmer';
+import { Plain2, PaperclipRounded2 } from '@solar-icons/react';
+import { Plus } from 'lucide-react';
 
 interface MainChatProps {
   tab: Tab;
@@ -307,7 +309,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                   }`}
                   title="Upload or Search Options"
                 >
-                  <Icon icon="ph:plus" className={`w-5 h-5 transition-transform duration-200 ${isPlusMenuOpen ? 'rotate-45' : ''}`} />
+                  <Plus className={`w-5 h-5 transition-transform duration-200 ${isPlusMenuOpen ? 'rotate-45' : ''}`} />
                 </button>
 
                 {webSearchVal && (
@@ -338,7 +340,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                         }}
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-zinc-350 hover:text-white hover:bg-zinc-800/40 transition-none font-jakarta cursor-pointer"
                       >
-                        <Icon icon="ph:paperclip-horizontal" className="w-[18px] h-[18px] text-zinc-450 shrink-0" />
+                        <PaperclipRounded2 weight="Linear" size={18} color="currentColor" />
                         <span className="text-[13px] font-normal text-zinc-300 leading-none">Upload files</span>
                       </button>
 
@@ -518,10 +520,10 @@ export const MainChat: React.FC<MainChatProps> = ({
                       {isAiTyping ? (
                         <button 
                           onClick={handleStopGeneration}
-                          className="bg-red-500/20 text-red-500 hover:bg-red-500/30 rounded-full transition-all flex items-center justify-center w-8.5 h-8.5 shrink-0 cursor-pointer relative"
+                          className="bg-white text-zinc-950 hover:bg-zinc-200 rounded-full transition-all flex items-center justify-center w-8.5 h-8.5 shrink-0 cursor-pointer shadow-sm"
+                          title="Stop generating"
                         >
-                          <Icon icon="ph:spinner-gap" className="w-5 h-5 animate-spin absolute" />
-                          <Icon icon="ph:stop-fill" className="w-2.5 h-2.5" />
+                          <Icon icon="ph:stop-fill" className="w-3.5 h-3.5" />
                         </button>
                       ) : (
                         <button 
@@ -534,7 +536,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                           }`}
                           title="Send message"
                         >
-                          <Icon icon="ph:arrow-up-bold" className="w-4 h-4 font-bold" />
+                          <Plain2 weight="Linear" size={16} color="currentColor" />
                         </button>
                       )}
             </div>

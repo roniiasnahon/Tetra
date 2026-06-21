@@ -13,8 +13,10 @@ import { HomePanel } from "./components/HomePanel";
 import { LibraryPanel } from "./components/LibraryPanel";
 import { UploadsManager, UploadTask } from "./components/UploadsManager";
 import { motion, AnimatePresence } from "motion/react";
-import { Icon } from "@iconify/react";
+import { Icon } from "./components/SolarIcon";
 import { MaterialIcon } from "./components/MaterialIcon";
+import { Sidebar, Plain2, PaperclipRounded2, Notes, FolderWithFiles, PenNewRound, FolderOpen, MinimalisticMagnifier, MenuDots, UploadMinimalistic, AddFolder, AddCircle, PaletteRound, NotebookBookmark } from "@solar-icons/react";
+import { Plus, X as XIcon } from "lucide-react";
 import html2pdf from "html2pdf.js";
 
 interface ShimProps extends React.HTMLAttributes<HTMLSpanElement> {
@@ -5212,7 +5214,21 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       : "text-[#52525b] hover:text-[#a1a1aa] w-9 shrink-0"
                   }`}
                 >
-                  <Icon icon={item.icon} className={`w-[18px] h-[18px] shrink-0 transition-transform pointer-events-none ${item.active ? "scale-100" : "scale-110"}`} />
+                  {item.label === "Tools" ? (
+                    <PaletteRound
+                      weight="Linear"
+                      className={`w-[18px] h-[18px] shrink-0 transition-transform pointer-events-none ${
+                        item.active ? "scale-100" : "scale-110"
+                      }`}
+                    />
+                  ) : (
+                    <Icon
+                      icon={item.icon}
+                      className={`w-[18px] h-[18px] shrink-0 transition-transform pointer-events-none ${
+                        item.active ? "scale-100" : "scale-110"
+                      }`}
+                    />
+                  )}
                   <AnimatePresence initial={false}>
                     {item.active && (
                       <motion.span 
@@ -5297,9 +5313,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       }}
                       className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                     >
-                      <Icon
-                        icon="ph:folder-simple-plus"
-                        className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300"
+                      <AddFolder
+                        weight="Linear"
+                        className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 shrink-0"
                       />
                       <span className="font-medium">New Folder</span>
                     </button>
@@ -5307,9 +5323,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       onClick={() => fileInputRef.current?.click()}
                       className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                     >
-                      <Icon
-                        icon="ph:upload-simple"
-                        className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300"
+                      <UploadMinimalistic
+                        weight="Linear"
+                        className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 shrink-0"
                       />
                       <span className="font-medium">Upload File</span>
                     </button>
@@ -5386,10 +5402,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       className="p-1 hover:bg-[#27272a] rounded text-[#71717a] hover:text-[#f4f4f5] transition-colors cursor-pointer"
                       title="New Folder"
                     >
-                      <Icon
-                        icon="ph:folder-simple-plus"
-                        className="w-3.5 h-3.5"
-                      />
+                    <AddFolder
+                      weight="Linear"
+                      className="w-3.5 h-3.5 shrink-0"
+                    />
                     </button>
                   </div>
                   {folders.map((folder) => {
@@ -5464,12 +5480,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             className="flex-1 flex items-center justify-between min-w-0 text-left cursor-pointer"
                           >
                             <div className="flex items-center gap-2 min-w-0">
-                              <Icon
-                                icon={
-                                  isExpanded ? "ph:folder-open" : "ph:folder"
-                                }
-                                className={`w-4 h-4 shrink-0 col-[#52525b] ${isSelected ? "text-blue-400" : "text-zinc-500"}`}
-                              />
+                              {isExpanded ? (
+                                <FolderOpen
+                                  weight="Linear"
+                                  className={`w-4 h-4 shrink-0 ${isSelected ? "text-blue-400" : "text-zinc-500"}`}
+                                />
+                              ) : (
+                                <FolderWithFiles
+                                  weight="Linear"
+                                  className={`w-4 h-4 shrink-0 ${isSelected ? "text-blue-400" : "text-zinc-500"}`}
+                                />
+                              )}
                               <span className="text-xs font-semibold truncate text-[#a1a1aa] group-hover:text-white">
                                 {folder.name}
                               </span>
@@ -5657,7 +5678,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       className="w-full flex items-center justify-between px-1.5 py-1 text-[10px] text-[#71717a] hover:text-zinc-200 font-bold uppercase tracking-wider transition-colors cursor-pointer"
                     >
                       <div className="flex items-center gap-1.5">
-                        <Icon icon="ph:wrench-fill" className="w-3.5 h-3.5" />
+                        <PaletteRound weight="Linear" className="w-3.5 h-3.5 shrink-0" />
                         <span>Tools</span>
                       </div>
                       <Icon
@@ -6031,7 +6052,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
               className={`transition-all duration-300 cursor-pointer p-1 rounded-md ${isSidebarOpen ? "opacity-0 group-hover:opacity-100 bg-[#1a1a1a] text-[#f4f4f5]" : "text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1a1a1a]"}`}
               title={isSidebarOpen ? "Close Sidebar" : "Open Sidebar"}
             >
-              <Icon icon="ph:sidebar-simple" className="w-[18px] h-[18px]" />
+              <Sidebar weight="Linear" size={18} color="currentColor" />
             </button>
           </div>
 
@@ -6085,7 +6106,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 ) : tab.type === "chat" ? (
                   <Icon icon="ph:chat-circle" className="w-3.5 h-3.5" />
                 ) : tab.type === "tools" ? (
-                  <Icon icon="ph:wrench" className="w-3.5 h-3.5" />
+                  <PaletteRound weight="Linear" className="w-3.5 h-3.5 shrink-0" />
                 ) : (
                   <Icon icon="ph:pencil-line" className="w-3.5 h-3.5" />
                 )}
@@ -6108,7 +6129,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     onClick={(e) => requestDeleteTab(tab.id, e)}
                     className="ml-2 hover:text-white p-0.5 rounded-sm hover:bg-white/10"
                   >
-                    <Icon icon="ph:x" className="w-3 h-3" />
+                    <XIcon className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
@@ -6123,7 +6144,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
               }}
               className="flex items-center justify-center p-2 mb-0.5 ml-1 rounded-md hover:bg-[#1a1a1a] text-[#86868b] hover:text-[#e4e4e7] transition-colors cursor-pointer"
             >
-              <Icon icon="ph:plus-circle" className="w-4 h-4" />
+              <Plus className="w-4 h-4 text-current" strokeWidth={2} />
             </div>
           </div>
 
@@ -6265,10 +6286,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         ]);
                         setActiveTabId(newId);
                       }}
-                      className="p-2 text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#1a1a1a] rounded-xl transition-colors cursor-pointer"
+                      className="p-2 text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#1a1a1a] rounded-xl transition-colors cursor-pointer flex items-center justify-center shrink-0"
                       title="New Chat"
                     >
-                      <Icon icon="ph:plus" className="w-4 h-4" />
+                      <AddCircle weight="Linear" className="w-4 h-4 shrink-0" />
                     </button>
 
                     <div className="relative">
@@ -6276,8 +6297,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         onClick={() => setIsChatMenuOpen(!isChatMenuOpen)}
                         className={`p-2 text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#1a1a1a] rounded-xl transition-colors cursor-pointer ${isChatMenuOpen ? "bg-[#1a1a1a] text-[#e4e4e7]" : ""}`}
                       >
-                        <Icon
-                          icon="ph:dots-three-outline-fill"
+                        <MenuDots
+                          weight="Linear"
                           className="w-4 h-4"
                         />
                       </button>
@@ -6400,9 +6421,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </div>
 
                     <div className="relative w-64">
-                      <Icon
-                        icon="ph:magnifying-glass"
-                        className="absolute left-3 top-2.5 w-4 h-4 text-zinc-500"
+                      <MinimalisticMagnifier
+                        weight="Linear"
+                        className="absolute left-3 top-2.5 w-4 h-4 text-zinc-500 shrink-0"
                       />
                       <input
                         type="text"
@@ -6641,8 +6662,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 }}
                                 className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                               >
-                                <Icon
-                                  icon="ph:file-plus"
+                                <Notes
+                                  weight="Linear"
                                   className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300"
                                 />
                                 <span className="font-medium">
@@ -6657,9 +6678,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 }}
                                 className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                               >
-                                <Icon
-                                  icon="ph:upload-simple"
-                                  className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300"
+                                <UploadMinimalistic
+                                  weight="Linear"
+                                  className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 shrink-0"
                                 />
                                 <span className="font-medium">File upload</span>
                               </button>
@@ -6676,9 +6697,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 }}
                                 className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                               >
-                                <Icon
-                                  icon="ph:folder-plus"
-                                  className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300"
+                                <AddFolder
+                                  weight="Linear"
+                                  className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 shrink-0"
                                 />
                                 <span className="font-medium">New folder</span>
                               </button>
@@ -6738,9 +6759,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 >
                                   <td className={`pl-6 pr-3 font-medium ${displayDensity === "compact" ? "py-1.5" : "py-3.5"}`}>
                                     <div className="flex items-center gap-3">
-                                      <Icon
-                                        icon="ph:folder-open"
-                                        className="w-4 h-4 text-zinc-400"
+                                      <FolderWithFiles
+                                        weight="Linear"
+                                        className="w-4 h-4 text-zinc-400 shrink-0"
                                       />
                                       {renamingFolderId === folder.id ? (
                                         <input
@@ -6805,8 +6826,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                         className="p-1.5 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white transition-colors"
                                         title="Rename Folder"
                                       >
-                                        <Icon
-                                          icon="ph:pencil-simple"
+                                        <PenNewRound
+                                          weight="Linear"
                                           className="w-3.5 h-3.5"
                                         />
                                       </button>
@@ -6854,9 +6875,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         </button>
                         <span className="text-[#27272a] text-xs">/</span>
                         <div className="flex items-center gap-2">
-                          <Icon
-                            icon="ph:folder-open"
-                            className="w-3.5 h-3.5 text-zinc-400"
+                          <FolderWithFiles
+                            weight="Linear"
+                            className="w-3.5 h-3.5 text-zinc-400 shrink-0"
                           />
                           <span className="text-xs font-semibold text-white">
                             {folders.find((f) => f.id === selectedFolderId)
@@ -6872,9 +6893,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         );
                         return folderPapers.length === 0 ? (
                           <div className="py-20 text-center border border-dashed border-[#27272a] rounded-xl bg-[#161616]/20">
-                            <Icon
-                              icon="ph:folder"
-                              className="w-10 h-10 text-zinc-600 mx-auto mb-4 animate-pulse"
+                            <FolderWithFiles
+                              weight="Linear"
+                              className="w-10 h-10 text-zinc-600 mx-auto mb-4 animate-pulse shrink-0"
                             />
                             <h3 className="text-[#e4e4e7] text-sm font-medium mb-1">
                               Folder is Empty
@@ -7224,7 +7245,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             </button>
                           )}
                           <button className="flex items-center gap-2 px-3 py-1.5 hover:bg-[#1a1a1a] rounded-lg text-white text-[13px] transition-colors cursor-pointer">
-                            <Icon icon="ph:folder" className="w-4 h-4" />
+                            <FolderWithFiles weight="Linear" className="w-4 h-4 text-zinc-400 shrink-0" />
                             <span>Add to folder</span>
                           </button>
 
@@ -7442,7 +7463,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           }}
                           className="text-zinc-500 hover:text-zinc-300 cursor-pointer p-0.5"
                         >
-                          <X className="w-3.5 h-3.5" />
+                          <XIcon className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
@@ -7808,9 +7829,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         disabled={!selectionText}
                         className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12px] text-zinc-300 hover:bg-[#27272a] hover:text-white transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent group"
                       >
-                        <Icon
-                          icon="ph:book-open"
-                          className="w-4 h-4 text-zinc-500 group-hover:text-white"
+                        <NotebookBookmark
+                          weight="Linear"
+                          size={16}
+                          className="w-4 h-4 text-zinc-500 group-hover:text-white shrink-0"
                         />
                         <span>Define / Dictionary</span>
                       </button>
@@ -7940,7 +7962,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         className={`p-1.5 rounded-[6px] transition-colors cursor-pointer ${isMoreMenuOpen ? "bg-[#27272a] text-zinc-200" : "text-zinc-400 hover:text-zinc-200 hover:bg-[#27272a]"}`} 
                         title="More Options"
                       >
-                        <Icon icon="ph:dots-three-bold" className="w-[18px] h-[18px]" />
+                        <MenuDots weight="Linear" className="w-[18px] h-[18px] shrink-0" />
                       </button>
                       
                       <AnimatePresence>
@@ -8110,9 +8132,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               ? "Inter (Sans)"
                               : "Plus Jakarta (Alt)"}
                       </span>
-                      <Icon
-                        icon="ph:caret-down"
-                        className={`w-3 h-3 text-[#71717a] transition-transform duration-200 ${isFontDropdownOpen ? "rotate-180" : ""}`}
+                      <MaterialIcon
+                        name="keyboard_arrow_down"
+                        className={`text-[12px] text-[#71717a] transition-transform duration-200 ${isFontDropdownOpen ? "rotate-180" : ""}`}
                       />
                     </button>
 
@@ -8145,9 +8167,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             >
                               <span className={font.value}>{font.label}</span>
                               {editorFont === font.value && (
-                                <Icon
-                                  icon="ph:check"
-                                  className="w-3 h-3 text-blue-400"
+                                <MaterialIcon
+                                  name="check"
+                                  className="text-[12px] text-blue-400"
                                 />
                               )}
                             </button>
@@ -8192,7 +8214,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                       title="Undo"
                     >
-                      <Icon icon="ph:arrow-u-up-left" className="w-4 h-4" />
+                      <MaterialIcon name="undo" className="text-[16px]" />
                     </button>
                     <button
                       onMouseDown={(e) => e.preventDefault()}
@@ -8200,7 +8222,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                       title="Redo"
                     >
-                      <Icon icon="ph:arrow-u-up-right" className="w-4 h-4" />
+                      <MaterialIcon name="redo" className="text-[16px]" />
                     </button>
                   </div>
 
@@ -8214,7 +8236,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                       title="Bold Selection"
                     >
-                      <Icon icon="ph:text-b" className="w-4 h-4" />
+                      <MaterialIcon name="format_bold" className="text-[16px]" />
                     </button>
                     <button
                       onMouseDown={(e) => e.preventDefault()}
@@ -8222,7 +8244,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                       title="Italic Selection"
                     >
-                      <Icon icon="ph:text-italic" className="w-4 h-4" />
+                      <MaterialIcon name="format_italic" className="text-[16px]" />
                     </button>
                     <button
                       onMouseDown={(e) => e.preventDefault()}
@@ -8230,7 +8252,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       className="p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022]"
                       title="Underline Selection"
                     >
-                      <Icon icon="ph:text-underline" className="w-4 h-4" />
+                      <MaterialIcon name="format_underlined" className="text-[16px]" />
                     </button>
                     <div className="relative flex items-center gap-1">
                       <button
@@ -8242,7 +8264,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         className={`p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022] ${isTablePickerOpen ? "bg-[#2c2c2e] text-white" : ""}`}
                         title="Insert Table"
                       >
-                        <Icon icon="ph:table" className="w-4 h-4" />
+                        <MaterialIcon name="table_chart" className="text-[16px]" />
                       </button>
                       
                       <button
@@ -8254,7 +8276,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         className={`p-1 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022] ${isChartModalOpen ? "bg-[#2c2c2e] text-white" : ""}`}
                         title="Insert Chart/Graph"
                       >
-                        <Icon icon="ph:chart-bar" className="w-4 h-4" />
+                        <MaterialIcon name="bar_chart" className="text-[16px]" />
                       </button>
 
                       <AnimatePresence>
@@ -8304,7 +8326,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       className={`p-1.5 rounded-md transition-colors cursor-pointer hover:text-white hover:bg-[#202022] ${isMoreToolsOpen ? "bg-[#2c2c2e] text-white" : ""}`}
                       title="More formatting"
                     >
-                      <Icon icon="ph:dots-three-bold" className="w-5 h-5" />
+                      <MaterialIcon name="more_horiz" className="text-[20px]" />
                     </button>
 
                     <AnimatePresence>
@@ -8325,25 +8347,25 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               {[
                                 {
                                   id: "left",
-                                  icon: "ph:text-align-left",
+                                  icon: "format_align_left",
                                   format: "justifyLeft",
                                   label: "Left",
                                 },
                                 {
                                   id: "center",
-                                  icon: "ph:text-align-center",
+                                  icon: "format_align_center",
                                   format: "justifyCenter",
                                   label: "Center",
                                 },
                                 {
                                   id: "right",
-                                  icon: "ph:text-align-right",
+                                  icon: "format_align_right",
                                   format: "justifyRight",
                                   label: "Right",
                                 },
                                 {
                                   id: "justify",
-                                  icon: "ph:text-align-justify",
+                                  icon: "format_align_justify",
                                   format: "justifyFull",
                                   label: "Justify",
                                 },
@@ -8362,7 +8384,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                   }`}
                                   title={`Align ${align.label}`}
                                 >
-                                  <Icon icon={align.icon} className="w-4 h-4" />
+                                  <MaterialIcon name={align.icon} className="text-[16px]" />
                                 </button>
                               ))}
                             </div>
@@ -8382,9 +8404,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
                                 title="Strikethrough Selection"
                               >
-                                <Icon
-                                  icon="ph:text-strikethrough"
-                                  className="w-4 h-4"
+                                <MaterialIcon
+                                  name="format_strikethrough"
+                                  className="text-[16px]"
                                 />
                               </button>
                               <button
@@ -8393,9 +8415,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
                                 title="Subscript"
                               >
-                                <Icon
-                                  icon="ph:text-subscript"
-                                  className="w-4 h-4"
+                                <MaterialIcon
+                                  name="subscript"
+                                  className="text-[16px]"
                                 />
                               </button>
                               <button
@@ -8404,9 +8426,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
                                 title="Superscript"
                               >
-                                <Icon
-                                  icon="ph:text-superscript"
-                                  className="w-4 h-4"
+                                <MaterialIcon
+                                  name="superscript"
+                                  className="text-[16px]"
                                 />
                               </button>
                               <button
@@ -8415,7 +8437,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#202022] flex items-center justify-center"
                                 title="Clear Formatting"
                               >
-                                <Icon icon="ph:eraser" className="w-4 h-4" />
+                                <MaterialIcon name="format_clear" className="text-[16px]" />
                               </button>
                             </div>
                           </div>
@@ -8425,7 +8447,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           {/* Text Color Section */}
                           <div>
                             <div className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider mb-1.5 select-none text-left flex items-center gap-1">
-                              <Icon icon="ph:palette" className="w-3.5 h-3.5" />
+                              <MaterialIcon name="palette" className="text-[14px]" />
                               <span>Text Color</span>
                             </div>
                             <div className="grid grid-cols-8 gap-1.5 p-1 bg-[#1e1e20] rounded-lg border border-[#27272a]">
@@ -8487,9 +8509,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           {/* Highlight Section */}
                           <div>
                             <div className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider mb-1.5 select-none text-left flex items-center gap-1">
-                              <Icon
-                                icon="ph:highlighter"
-                                className="w-3.5 h-3.5"
+                              <MaterialIcon
+                                name="format_ink_pen"
+                                className="text-[14px]"
                               />
                               <span>Highlight</span>
                             </div>
@@ -8573,9 +8595,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
                                 title="Bullet List"
                               >
-                                <Icon
-                                  icon="ph:list-bullets"
-                                  className="w-4 h-4"
+                                <MaterialIcon
+                                  name="format_list_bulleted"
+                                  className="text-[16px]"
                                 />
                               </button>
                               <button
@@ -8587,9 +8609,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
                                 title="Numbered List"
                               >
-                                <Icon
-                                  icon="ph:list-numbers"
-                                  className="w-4 h-4"
+                                <MaterialIcon
+                                  name="format_list_numbered"
+                                  className="text-[16px]"
                                 />
                               </button>
                               <button
@@ -8601,7 +8623,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
                                 title="Horizontal Rule"
                               >
-                                <Icon icon="ph:minus" className="w-4 h-4" />
+                                <MaterialIcon name="horizontal_rule" className="text-[16px]" />
                               </button>
                               <button
                                 onMouseDown={(e) => e.preventDefault()}
@@ -8612,7 +8634,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 className="p-1 rounded-md transition-colors cursor-pointer text-[#a1a1aa] hover:text-white hover:bg-[#202022] flex items-center justify-center"
                                 title="Table"
                               >
-                                <Icon icon="ph:table" className="w-4 h-4" />
+                                <MaterialIcon name="table_chart" className="text-[16px]" />
                               </button>
                             </div>
                           </div>
@@ -9203,7 +9225,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       className="text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#2d2d30] transition-colors p-[6px] rounded-md cursor-pointer flex items-center justify-center w-8 h-8 shrink-0 border border-transparent"
                       title="Upload File or Photo"
                     >
-                      <Icon icon="ph:plus-bold" className="w-[16px] h-[16px]" />
+                      <PaperclipRounded2 weight="Linear" size={18} color="currentColor" />
                     </button>
                     <button
                       onClick={() => setWebSearchEnabled(!webSearchEnabled)}
@@ -9361,11 +9383,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           setIsAiTyping(false);
                           updateChatMessages((prev) => prev, false);
                         }}
-                        className="text-[#ef4444] hover:bg-[#2d2d30] transition-colors p-[6px] rounded-md cursor-pointer relative"
+                        className="text-[#f4f4f5] hover:bg-[#2d2d30] transition-colors p-[6px] rounded-md cursor-pointer"
+                        title="Stop Generating"
                       >
                         <Icon
-                          icon="ph:spinner-gap"
-                          className="w-5 h-5 animate-spin"
+                          icon="ph:stop-fill"
+                          className="w-5 h-5"
                         />
                       </button>
                     ) : (
@@ -9380,7 +9403,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             : "text-[#52525b] cursor-not-allowed"
                         }`}
                       >
-                        <Icon icon="ph:paper-plane-right" className="w-5 h-5" />
+                        <Plain2 weight="Linear" size={18} color="currentColor" />
                       </button>
                     )}
                   </div>
@@ -11385,7 +11408,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 cursor-pointer p-1 rounded-md hover:bg-[#1a1a1c] transition-colors"
                 title="Close dialog"
               >
-                <X className="w-5 h-5" />
+                <XIcon className="w-5 h-5" />
               </button>
 
               {supportAmountPaid ? (

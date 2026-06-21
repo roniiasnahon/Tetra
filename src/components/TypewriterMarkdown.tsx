@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Icon } from '@iconify/react';
+import { Icon } from './SolarIcon';
 
 const previewCache = new Map<string, any>();
 

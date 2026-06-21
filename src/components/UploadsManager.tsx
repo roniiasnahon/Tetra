@@ -1,5 +1,5 @@
 import React from "react";
-import { Icon } from "@iconify/react";
+import { Icon } from "./SolarIcon";
 import { motion, AnimatePresence } from "motion/react";
 
 export interface UploadTask {

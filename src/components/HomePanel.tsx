@@ -1,7 +1,9 @@
 import React, { useState } from "react";
-import { Icon } from "@iconify/react";
+import { Icon } from "./SolarIcon";
 import { motion, AnimatePresence } from "motion/react";
 import { Tab } from "../App";
+import { Plus } from "lucide-react";
+import { AddFolder } from "@solar-icons/react";
 
 interface FolderItem {
   id: string;
@@ -104,10 +106,10 @@ export const HomePanel: React.FC<HomePanelProps> = ({
                 isHomeCreateDropdownOpen ? "ring-1 ring-zinc-500 bg-[#222222]" : ""
               }`}
             >
-              <div className="mr-5 flex items-center justify-center">
-                <Icon
-                  icon="ph:plus-circle"
-                  className={`w-7 h-7 text-[#e4e4e7] transition-transform ${
+              <div className="mr-5 flex items-center justify-center text-[#e4e4e7]">
+                <Plus
+                  strokeWidth={2}
+                  className={`w-7 h-7 transition-transform duration-300 ${
                     isHomeCreateDropdownOpen ? "rotate-45" : ""
                   }`}
                 />
@@ -199,9 +201,9 @@ export const HomePanel: React.FC<HomePanelProps> = ({
                       }}
                       className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-xl text-sm text-zinc-300 hover:text-white hover:bg-[#27272a] transition-all cursor-pointer group"
                     >
-                      <Icon
-                        icon="ph:folder-simple-plus"
-                        className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors"
+                      <AddFolder
+                        weight="Linear"
+                        className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors shrink-0"
                       />
                       <span className="font-medium text-xs text-left">
                         New Folder

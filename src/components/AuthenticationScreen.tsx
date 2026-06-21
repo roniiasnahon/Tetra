@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Icon } from '@iconify/react';
+import { Icon } from './SolarIcon';
 import { MaterialIcon } from './MaterialIcon';
 import { auth, googleProvider, signInWithPopup } from '../firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
@@ -167,6 +167,39 @@ const EyeBall = ({
   );
 };
 
+// --- TypewriterText Component ---
+const TypewriterText: React.FC<{ text: string; delay?: number; speed?: number }> = ({ 
+  text, 
+  delay = 300, 
+  speed = 80 
+}) => {
+  const [displayedText, setDisplayedText] = useState("");
+
+  useEffect(() => {
+    let startTimeout = setTimeout(() => {
+      let currentIndex = 0;
+      const interval = setInterval(() => {
+        if (currentIndex < text.length) {
+          setDisplayedText(text.slice(0, currentIndex + 1));
+          currentIndex++;
+        } else {
+          clearInterval(interval);
+        }
+      }, speed);
+      
+      return () => clearInterval(interval);
+    }, delay);
+
+    return () => clearTimeout(startTimeout);
+  }, [text, delay, speed]);
+
+  return (
+    <span className="inline-flex items-center">
+      {displayedText}
+    </span>
+  );
+};
+
 // --- Main Authentication Screen Component ---
 interface AuthenticationScreenProps {
   onSuccess?: () => void;
@@ -185,115 +218,6 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-
-  // Character States
-  const [mouseX, setMouseX] = useState<number>(0);
-  const [mouseY, setMouseY] = useState<number>(0);
-  const [isPurpleBlinking, setIsPurpleBlinking] = useState(false);
-  const [isBlackBlinking, setIsBlackBlinking] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
-  const [isLookingAtEachOther, setIsLookingAtEachOther] = useState(false);
-  const [isPurplePeeking, setIsPurplePeeking] = useState(false);
-
-  const purpleRef = useRef<HTMLDivElement>(null);
-  const blackRef = useRef<HTMLDivElement>(null);
-  const yellowRef = useRef<HTMLDivElement>(null);
-  const orangeRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      setMouseX(e.clientX);
-      setMouseY(e.clientY);
-    };
-    window.addEventListener("mousemove", handleMouseMove);
-    return () => window.removeEventListener("mousemove", handleMouseMove);
-  }, []);
-
-  // Blinking effects
-  useEffect(() => {
-    const getRandomInterval = () => Math.random() * 4000 + 3000;
-    const scheduleBlink = () => {
-      const timeout = setTimeout(() => {
-        setIsPurpleBlinking(true);
-        setTimeout(() => {
-          setIsPurpleBlinking(false);
-          scheduleBlink();
-        }, 150);
-      }, getRandomInterval());
-      return timeout;
-    };
-    const t = scheduleBlink();
-    return () => clearTimeout(t);
-  }, []);
-
-  useEffect(() => {
-    const getRandomInterval = () => Math.random() * 4000 + 3000;
-    const scheduleBlink = () => {
-      const timeout = setTimeout(() => {
-        setIsBlackBlinking(true);
-        setTimeout(() => {
-          setIsBlackBlinking(false);
-          scheduleBlink();
-        }, 150);
-      }, getRandomInterval());
-      return timeout;
-    };
-    const t = scheduleBlink();
-    return () => clearTimeout(t);
-  }, []);
-
-  // Look at each other when typing
-  useEffect(() => {
-    if (isTyping) {
-      setIsLookingAtEachOther(true);
-      const timer = setTimeout(() => {
-        setIsLookingAtEachOther(false);
-      }, 800);
-      return () => clearTimeout(timer);
-    } else {
-      setIsLookingAtEachOther(false);
-    }
-  }, [isTyping]);
-
-  // Purple sneaky peek animation when typing password and it's visible
-  useEffect(() => {
-    if (password.length > 0 && showPassword) {
-      const schedulePeek = () => {
-        const timer = setTimeout(() => {
-          setIsPurplePeeking(true);
-          setTimeout(() => {
-            setIsPurplePeeking(false);
-          }, 800);
-        }, Math.random() * 3000 + 2000);
-        return timer;
-      };
-      const t = schedulePeek();
-      return () => clearTimeout(t);
-    } else {
-      setIsPurplePeeking(false);
-    }
-  }, [password, showPassword]);
-
-  const calculateLeanPosition = (ref: React.RefObject<HTMLDivElement | null>) => {
-    if (!ref.current) return { faceX: 0, faceY: 0, bodySkew: 0 };
-    const rect = ref.current.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 3;
-
-    const deltaX = mouseX - centerX;
-    const deltaY = mouseY - centerY;
-
-    const faceX = Math.max(-15, Math.min(15, deltaX / 20));
-    const faceY = Math.max(-10, Math.min(10, deltaY / 30));
-    const bodySkew = Math.max(-6, Math.min(6, -deltaX / 120));
-
-    return { faceX, faceY, bodySkew };
-  };
-
-  const purplePos = calculateLeanPosition(purpleRef);
-  const blackPos = calculateLeanPosition(blackRef);
-  const yellowPos = calculateLeanPosition(yellowRef);
-  const orangePos = calculateLeanPosition(orangeRef);
 
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
@@ -330,16 +254,30 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
         await signInWithPopup(auth, googleProvider);
       } catch (err: any) {
         console.error('Google Sign-In failed:', err);
-        setErrorMessage(err.message || 'Failed to sign in with Google');
+        setErrorMessage('We couldn\'t connect your Google account. Please check your internet connection or try again.');
         setIsLoading(false);
       }
+    }
+  };
+
+  const handleYahooSignIn = async () => {
+    setIsLoading(true);
+    setErrorMessage('');
+    try {
+      const { OAuthProvider, signInWithPopup } = await import('firebase/auth');
+      const yahooProvider = new OAuthProvider('yahoo.com');
+      await signInWithPopup(auth, yahooProvider);
+    } catch (err: any) {
+      console.error('Yahoo Sign-In failed:', err);
+      setErrorMessage('We couldn\'t connect your Yahoo account. Please check your internet connection or try again.');
+      setIsLoading(false);
     }
   };
 
   const handleEmailAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) {
-      setErrorMessage('Please enter your email address.');
+      setErrorMessage('Please enter your email address so we can get you started.');
       return;
     }
 
@@ -350,7 +288,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     try {
       if (authMode === 'login') {
         if (!password) {
-          setErrorMessage('Please enter your password.');
+          setErrorMessage('Please enter your password to continue.');
           setIsLoading(false);
           return;
         }
@@ -358,22 +296,22 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
         onSuccess?.();
       } else if (authMode === 'register') {
         if (!password) {
-          setErrorMessage('Please enter a password.');
+          setErrorMessage('Please type in a secure password.');
           setIsLoading(false);
           return;
         }
         if (password.length < 6) {
-          setErrorMessage('Password must be at least 6 characters.');
+          setErrorMessage('Please choose a password that is at least 6 characters long.');
           setIsLoading(false);
           return;
         }
         if (password !== confirmPassword) {
-          setErrorMessage('Passwords do not match.');
+          setErrorMessage("The passwords you entered don't match. Please try typing them again.");
           setIsLoading(false);
           return;
         }
         await createUserWithEmailAndPassword(auth, email.trim(), password);
-        setSuccessMessage('Account created successfully! Welcome to Research Workspace.');
+        setSuccessMessage('Account created successfully! Welcome to cosmi.');
         onSuccess?.();
       } else {
         await sendPasswordResetEmail(auth, email.trim());
@@ -387,17 +325,17 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
       console.error("Email auth operation failed:", err);
       
       if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
-        setErrorMessage('Invalid email or password. Please try again.');
+        setErrorMessage('We couldn\'t find an account matching that email and password. Please check your details and try again.');
       } else if (err.code === 'auth/email-already-in-use') {
-        setErrorMessage('An account with this email address already exists.');
+        setErrorMessage('An account with this email address already exists. Try signing in helper instead.');
       } else if (err.code === 'auth/invalid-email') {
-        setErrorMessage('Please enter a valid email address.');
+        setErrorMessage('That email address doesn\'t look quite right. Please check for any typos.');
       } else if (err.code === 'auth/operation-not-allowed') {
-        setErrorMessage('Email/password login is not yet enabled in the Firebase Console. Go to Authentication -> Sign-in method to activate it.');
+        setErrorMessage('Email and password sign-in is currently undergoing updates. Please use a different sign-in partner or contact support.');
       } else if (err.code === 'auth/weak-password') {
-        setErrorMessage('Password is too weak. Please use at least 6 characters.');
+        setErrorMessage('For your security, please choose a stronger password with at least 6 characters.');
       } else {
-        setErrorMessage(err.message || 'An error occurred during authentication.');
+        setErrorMessage('We ran into an unexpected issue while signing you in. Please verify your details or try again in a moment.');
       }
     } finally {
       setIsLoading(false);
@@ -412,7 +350,13 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
   );
 
   return (
-    <div className="h-screen bg-gradient-to-br from-[#0c0c0f] to-[#040405] text-[#e4e4e7] flex select-none selection:bg-zinc-800 selection:text-white overflow-hidden relative font-jakarta">
+    <div className="h-screen bg-gradient-to-br from-[#0c0c0f] to-[#040405] text-[#e4e4e7] flex flex-col select-none selection:bg-zinc-800 selection:text-white overflow-hidden relative font-jakarta">
+      {/* Background Image Layer */}
+      <div 
+        className="absolute inset-0 bg-cover bg-center opacity-25 pointer-events-none z-0" 
+        style={{ backgroundImage: "url('/authbg.png')" }} 
+      />
+
       {/* Desktop Drag Area */}
       <div className="absolute top-0 inset-x-0 h-8 z-[100] [-webkit-app-region:drag]" />
       {isElectronApp && (
@@ -429,469 +373,173 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
         </div>
       )}
       
-      {/* LEFT COLUMN: Clean Slate/Zinc background with interactive cartoon characters */}
-      <div className="hidden md:flex md:w-[50%] lg:w-[54%] relative flex-col justify-between p-12 overflow-hidden">
-        
-        {/* Subtle grid backdrop config matching Voyage look and feel but absolutely NO glows */}
-        <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle, #fff 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
-        
-        {/* Branding header in top left */}
-        <div className="flex items-center gap-4 z-10">
-          <img src="/cosmi.png" alt="cosmi logo" className="w-12 h-12 object-contain" />
-          <span className="text-[28px] font-bold tracking-tight text-white mb-1">cosmi</span>
-        </div>
-
-        {/* Cartoon character stage containing responsive animated layers exactly as proposed */}
-        <div className="relative z-10 flex items-end justify-center h-[520px] mb-8 select-none pointer-events-none">
-          <div className="relative" style={{ width: '600px', height: '480px' }}>
-            
-            {/* Purple taller character (Back side) */}
-            <div 
-              ref={purpleRef}
-              className="absolute bottom-0 transition-all duration-700 ease-in-out"
-              style={{
-                left: '80px',
-                width: '190px',
-                height: (isTyping || (password.length > 0 && !showPassword)) ? '480px' : '440px',
-                backgroundColor: '#6C3FF5',
-                borderRadius: '12px 12px 0 0',
-                zIndex: 1,
-                transform: (password.length > 0 && showPassword)
-                  ? `skewX(0deg)`
-                  : (isTyping || (password.length > 0 && !showPassword))
-                    ? `skewX(${(purplePos.bodySkew || 0) - 12}deg) translateX(40px)` 
-                    : `skewX(${purplePos.bodySkew || 0}deg)`,
-                transformOrigin: 'bottom center',
-              }}
-            >
-              {/* EyeBall setup */}
-              <div 
-                className="absolute flex gap-8 transition-all duration-700 ease-in-out"
-                style={{
-                  left: (password.length > 0 && showPassword) ? '30px' : isLookingAtEachOther ? '60px' : `${50 + purplePos.faceX}px`,
-                  top: (password.length > 0 && showPassword) ? '40px' : isLookingAtEachOther ? '70px' : `${45 + purplePos.faceY}px`,
-                }}
-              >
-                <EyeBall 
-                  size={20} 
-                  pupilSize={8} 
-                  maxDistance={6} 
-                  eyeColor="white" 
-                  pupilColor="#2D2D2D" 
-                  isBlinking={isPurpleBlinking}
-                  forceLookX={(password.length > 0 && showPassword) ? (isPurplePeeking ? 4 : -4) : isLookingAtEachOther ? 3 : undefined}
-                  forceLookY={(password.length > 0 && showPassword) ? (isPurplePeeking ? 5 : -4) : isLookingAtEachOther ? 4 : undefined}
-                />
-                <EyeBall 
-                  size={20} 
-                  pupilSize={8} 
-                  maxDistance={6} 
-                  eyeColor="white" 
-                  pupilColor="#2D2D2D" 
-                  isBlinking={isPurpleBlinking}
-                  forceLookX={(password.length > 0 && showPassword) ? (isPurplePeeking ? 4 : -4) : isLookingAtEachOther ? 3 : undefined}
-                  forceLookY={(password.length > 0 && showPassword) ? (isPurplePeeking ? 5 : -4) : isLookingAtEachOther ? 4 : undefined}
-                />
-              </div>
+      <div className="flex-1 flex flex-col md:flex-row relative z-10 w-full">
+        {/* LEFT COLUMN: Logo and title */}
+        <div className="flex-1 flex flex-col justify-center p-12 md:pl-28 relative">
+          <div className="flex flex-col relative z-10 leading-none">
+            <div className="flex items-center gap-5 -mb-2.5">
+              <img src="/cosmi.png" alt="cosmi logo" className="w-[72px] h-[72px] object-contain drop-shadow-md" />
+              <span className="text-[52px] font-bold text-white tracking-tight drop-shadow-md">cosmi</span>
             </div>
-
-            {/* Black taller rectangle character (Middle side) */}
-            <div 
-              ref={blackRef}
-              className="absolute bottom-0 transition-all duration-700 ease-in-out"
-              style={{
-                left: '260px',
-                width: '130px',
-                height: '340px',
-                backgroundColor: '#1E1E22',
-                borderRadius: '10px 10px 0 0',
-                zIndex: 2,
-                transform: (password.length > 0 && showPassword)
-                  ? `skewX(0deg)`
-                  : isLookingAtEachOther
-                    ? `skewX(${(blackPos.bodySkew || 0) * 1.5 + 10}deg) translateX(20px)`
-                    : (isTyping || (password.length > 0 && !showPassword))
-                      ? `skewX(${(blackPos.bodySkew || 0) * 1.5}deg)` 
-                      : `skewX(${blackPos.bodySkew || 0}deg)`,
-                transformOrigin: 'bottom center',
-              }}
-            >
-              {/* Black character eyes */}
-              <div 
-                className="absolute flex gap-6 transition-all duration-700 ease-in-out"
-                style={{
-                  left: (password.length > 0 && showPassword) ? '15px' : isLookingAtEachOther ? '35px' : `${28 + blackPos.faceX}px`,
-                  top: (password.length > 0 && showPassword) ? '35px' : isLookingAtEachOther ? '15px' : `${38 + blackPos.faceY}px`,
-                }}
-              >
-                <EyeBall 
-                  size={18} 
-                  pupilSize={7} 
-                  maxDistance={5} 
-                  eyeColor="white" 
-                  pupilColor="#2D2D2D" 
-                  isBlinking={isBlackBlinking}
-                  forceLookX={(password.length > 0 && showPassword) ? -4 : isLookingAtEachOther ? 0 : undefined}
-                  forceLookY={(password.length > 0 && showPassword) ? -4 : isLookingAtEachOther ? -4 : undefined}
-                />
-                <EyeBall 
-                  size={18} 
-                  pupilSize={7} 
-                  maxDistance={5} 
-                  eyeColor="white" 
-                  pupilColor="#2D2D2D" 
-                  isBlinking={isBlackBlinking}
-                  forceLookX={(password.length > 0 && showPassword) ? -4 : isLookingAtEachOther ? 0 : undefined}
-                  forceLookY={(password.length > 0 && showPassword) ? -4 : isLookingAtEachOther ? -4 : undefined}
-                />
-              </div>
-            </div>
-
-            {/* Orange character (Front left side) */}
-            <div 
-              ref={orangeRef}
-              className="absolute bottom-0 transition-all duration-700 ease-in-out"
-              style={{
-                left: '0px',
-                width: '240px',
-                height: '220px',
-                zIndex: 3,
-                backgroundColor: '#FF9B6B',
-                borderRadius: '130px 130px 0 0',
-                transform: (password.length > 0 && showPassword) ? `skewX(0deg)` : `skewX(${orangePos.bodySkew || 0}deg)`,
-                transformOrigin: 'bottom center',
-              }}
-            >
-              {/* Orange eyes */}
-              <div 
-                className="absolute flex gap-8 transition-all duration-200 ease-out"
-                style={{
-                  left: (password.length > 0 && showPassword) ? '55px' : `${85 + (orangePos.faceX || 0)}px`,
-                  top: (password.length > 0 && showPassword) ? '90px' : `${95 + (orangePos.faceY || 0)}px`,
-                }}
-              >
-                <Pupil size={14} maxDistance={6} pupilColor="#2D2D2D" forceLookX={(password.length > 0 && showPassword) ? -5 : undefined} forceLookY={(password.length > 0 && showPassword) ? -4 : undefined} />
-                <Pupil size={14} maxDistance={6} pupilColor="#2D2D2D" forceLookX={(password.length > 0 && showPassword) ? -5 : undefined} forceLookY={(password.length > 0 && showPassword) ? -4 : undefined} />
-              </div>
-            </div>
-
-            {/* Yellow character (Front right side) */}
-            <div 
-              ref={yellowRef}
-              className="absolute bottom-0 transition-all duration-700 ease-in-out"
-              style={{
-                left: '340px',
-                width: '160px',
-                height: '250px',
-                backgroundColor: '#E8D754',
-                borderRadius: '80px 80px 0 0',
-                zIndex: 4,
-                transform: (password.length > 0 && showPassword) ? `skewX(0deg)` : `skewX(${yellowPos.bodySkew || 0}deg)`,
-                transformOrigin: 'bottom center',
-              }}
-            >
-              {/* Yellow eyes */}
-              <div 
-                className="absolute flex gap-7 transition-all duration-200 ease-out"
-                style={{
-                  left: (password.length > 0 && showPassword) ? '25px' : `${55 + (yellowPos.faceX || 0)}px`,
-                  top: (password.length > 0 && showPassword) ? '40px' : `${45 + (yellowPos.faceY || 0)}px`,
-                }}
-              >
-                <Pupil size={14} maxDistance={6} pupilColor="#2D2D2D" forceLookX={(password.length > 0 && showPassword) ? -5 : undefined} forceLookY={(password.length > 0 && showPassword) ? -4 : undefined} />
-                <Pupil size={14} maxDistance={6} pupilColor="#2D2D2D" forceLookX={(password.length > 0 && showPassword) ? -5 : undefined} forceLookY={(password.length > 0 && showPassword) ? -4 : undefined} />
-              </div>
-              {/* Yellow mouth line */}
-              <div 
-                className="absolute w-20 h-[4px] bg-[#2D2D2D] rounded-full transition-all duration-200 ease-out"
-                style={{
-                  left: (password.length > 0 && showPassword) ? '15px' : `${42 + (yellowPos.faceX || 0)}px`,
-                  top: (password.length > 0 && showPassword) ? '98px' : `${98 + (yellowPos.faceY || 0)}px`,
-                }}
-              />
-            </div>
-
-          </div>
-        </div>
-
-        {/* Space below character stage */}
-        <div className="z-10 h-20" />
-
-        {/* Footer text is removed as requested by user */}
-        <div className="z-10 h-8" />
-
-      </div>
-
-      {/* RIGHT COLUMN: The Auth form cards */}
-      <div className="flex-1 flex flex-col items-center justify-start pt-[8vh] p-6 md:p-12 relative">
-        
-        {/* Simple back navigation if in forgot password mode */}
-        {authMode === 'forgot_password' && (
-          <button 
-            onClick={() => {
-              setAuthMode('login');
-              setErrorMessage('');
-              setSuccessMessage('');
-            }}
-            className="absolute top-8 left-8 flex items-center gap-2 text-zinc-400 hover:text-white text-xs font-semibold cursor-pointer transition-colors"
-          >
-            <MaterialIcon name="arrow_back" className="text-[14px]" />
-            <span>Back to Login</span>
-          </button>
-        )}
-
-        <motion.div 
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          className="w-full max-w-[420px] p-8 md:p-10 flex flex-col relative"
-          style={{ boxShadow: 'none' }} /* Strictly NO dynamic glowing shadows on the card */
-        >
-          {/* Header element */}
-          <div className="flex flex-col items-center text-center mb-8">
-            <div className="md:hidden flex items-center gap-4 mb-6 justify-center">
-              <img src="/cosmi.png" alt="cosmi logo" className="w-12 h-12 object-contain" />
-              <span className="text-[28px] font-bold tracking-tight text-white mb-1">cosmi</span>
-            </div>
-            
-            <h1 className="text-2xl font-bold text-white tracking-tight leading-tight mt-1">
-              {authMode === 'login' && 'Welcome Back'}
-              {authMode === 'register' && 'Create Account'}
-              {authMode === 'forgot_password' && 'Restore Access'}
+            <h1 className="text-[24px] text-white font-medium drop-shadow-sm ml-[92px] mt-2">
+              <TypewriterText text="Expand your horizon." />
             </h1>
-            
-            <p className="text-zinc-400 text-[13px] mt-1.5 font-medium">
-              {authMode === 'login' && ''}
-              {authMode === 'register' && 'Establish credentials to sign up'}
-              {authMode === 'forgot_password' && 'Verify your details to trigger recovery'}
-            </p>
           </div>
+        </div>
 
-          {/* Error messages banner with zero glow borders */}
-          {errorMessage && (
-            <div className="mb-6 p-3 rounded-xl bg-red-950/20 border border-red-900/30 text-red-400 text-[12px] flex items-start gap-2.5 text-left leading-relaxed">
-              <MaterialIcon name="error" fill={true} className="text-[16px] text-red-500 shrink-0 mt-0.5" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
-          {/* Success messages banner */}
-          {successMessage && (
-            <div className="mb-6 p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/30 text-emerald-400 text-[12px] flex items-start gap-2.5 text-left leading-relaxed">
-              <MaterialIcon name="check" className="text-[16px] text-emerald-500 shrink-0 mt-0.5" />
-              <span>{successMessage}</span>
-            </div>
-          )}
-
-          {/* Core Submit Auth Form with floating variables */}
-          <form onSubmit={handleEmailAuthSubmit} className="space-y-4">
-            
-            {/* Email Address */}
-            <div className="relative group">
-              <input
-                id="auth-email"
-                type="email"
-                required
-                disabled={isLoading}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onFocus={() => setIsTyping(true)}
-                onBlur={() => setIsTyping(false)}
-                placeholder=" "
-                className="peer w-full bg-[#0c0c0f] border border-[#27272a] hover:border-[#4b5563] focus:border-zinc-400 rounded-xl px-4 py-3.5 text-[14px] text-white outline-none transition-all duration-150 disabled:opacity-50"
-                style={{ boxShadow: 'none' }} /* Prevent glow rings */
-              />
-              <label 
-                htmlFor="auth-email"
-                className="absolute left-3.5 top-3.5 origin-[0] -translate-y-6 scale-90 bg-[#0c0c0f] px-1.5 text-xs text-zinc-500 tracking-wide font-medium transition-all pointer-events-none
-                peer-placeholder-shown:translate-y-0 peer-placeholder-shown:scale-100 peer-placeholder-shown:text-zinc-500
-                peer-focus:-translate-y-6 peer-focus:scale-90 peer-focus:text-zinc-200
-                group-hover:text-zinc-400 peer-focus:group-hover:text-zinc-200"
-              >
-                Email address*
-              </label>
-            </div>
-
-            {/* Password input block */}
-            {authMode !== 'forgot_password' && (
-              <div className="relative group">
-                <input
-                  id="auth-password"
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  disabled={isLoading}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onFocus={() => setIsTyping(true)}
-                  onBlur={() => setIsTyping(false)}
-                  placeholder=" "
-                  className="peer w-full bg-[#0c0c0f] border border-[#27272a] hover:border-[#4b5563] focus:border-zinc-400 rounded-xl px-4 py-3.5 pr-11 text-[14px] text-white outline-none transition-all duration-150 disabled:opacity-50"
-                  style={{ boxShadow: 'none' }}
-                />
-                <label 
-                  htmlFor="auth-password"
-                  className="absolute left-3.5 top-3.5 origin-[0] -translate-y-6 scale-90 bg-[#0c0c0f] px-1.5 text-xs text-zinc-500 tracking-wide font-medium transition-all pointer-events-none
-                  peer-placeholder-shown:translate-y-0 peer-placeholder-shown:scale-100 peer-placeholder-shown:text-zinc-500
-                  peer-focus:-translate-y-6 peer-focus:scale-90 peer-focus:text-zinc-200
-                  group-hover:text-zinc-400 peer-focus:group-hover:text-zinc-200"
-                >
-                  Password*
-                </label>
-                
-                {/* Visibility toggler button - NO GLOW */}
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-3.5 text-zinc-550 hover:text-zinc-200 transition-colors cursor-pointer select-none flex items-center justify-center pt-0.5"
-                  title={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showPassword ? <MaterialIcon name="visibility_off" className="text-[18px]" /> : <MaterialIcon name="visibility" className="text-[18px]" />}
-                </button>
-              </div>
-            )}
-
-            {/* Confirm password block (Register mode only) */}
-            {authMode === 'register' && (
-              <div className="relative group">
-                <input
-                  id="auth-confirm-password"
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  required
-                  disabled={isLoading}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  onFocus={() => setIsTyping(true)}
-                  onBlur={() => setIsTyping(false)}
-                  placeholder=" "
-                  className="peer w-full bg-[#0c0c0f] border border-[#27272a] hover:border-[#4b5563] focus:border-zinc-400 rounded-xl px-4 py-3.5 pr-11 text-[14px] text-white outline-none transition-all duration-150 disabled:opacity-50"
-                  style={{ boxShadow: 'none' }}
-                />
-                <label 
-                  htmlFor="auth-confirm-password"
-                  className="absolute left-3.5 top-3.5 origin-[0] -translate-y-6 scale-90 bg-[#0c0c0f] px-1.5 text-xs text-zinc-500 tracking-wide font-medium transition-all pointer-events-none
-                  peer-placeholder-shown:translate-y-0 peer-placeholder-shown:scale-100 peer-placeholder-shown:text-zinc-500
-                  peer-focus:-translate-y-6 peer-focus:scale-90 peer-focus:text-zinc-200
-                  group-hover:text-zinc-400 peer-focus:group-hover:text-zinc-200"
-                >
-                  Confirm password*
-                </label>
-                
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3.5 top-3.5 text-zinc-550 hover:text-zinc-200 transition-colors cursor-pointer select-none flex items-center justify-center pt-0.5"
-                  title={showConfirmPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showConfirmPassword ? <MaterialIcon name="visibility_off" className="text-[18px]" /> : <MaterialIcon name="visibility" className="text-[18px]" />}
-                </button>
-              </div>
-            )}
-
-            {/* Toggle Forgot Password / Reset view anchor link */}
-            {authMode === 'login' && (
-              <div className="flex justify-start">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('forgot_password');
-                    setErrorMessage('');
-                    setSuccessMessage('');
-                  }}
-                  className="text-zinc-450 hover:text-zinc-250 transition-colors text-[12px] font-semibold tracking-wide cursor-pointer text-left select-none"
-                >
-                  Forgot your password?
-                </button>
-              </div>
-            )}
-
-            {/* Submit button structure - STRICTLY NO GLOW EFFECTS OR BULGING SHADOW FILTERS */}
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full bg-[#f4f4f5] hover:bg-[#e4e4e7] active:bg-[#d4d4d8] text-[#09090b] font-semibold py-3.5 px-4 rounded-xl text-[14px] cursor-pointer transition-colors flex items-center justify-center gap-2 select-none h-12 disabled:opacity-50"
-              style={{ boxShadow: 'none' }}
-            >
-              {isLoading ? (
-                <div className="w-4 h-4 border-2 border-zinc-400/60 border-t-zinc-900 rounded-full animate-spin" />
-              ) : (
-                <span>
-                  {authMode === 'login' && 'Log In'}
-                  {authMode === 'register' && 'Create Account'}
-                  {authMode === 'forgot_password' && 'Trigger Reset Link'}
-                </span>
-              )}
-            </button>
-          </form>
-
-          {/* Toggle login vs registration views footnotes */}
-          <div className="mt-6 text-center text-xs">
-            {authMode === 'login' ? (
-              <span className="text-zinc-400">
-                Don't have an account?{' '}
-                <button
-                  onClick={() => {
-                    setAuthMode('register');
-                    setErrorMessage('');
-                    setSuccessMessage('');
-                  }}
-                  className="text-white hover:text-zinc-300 font-bold ml-1 transition-colors cursor-pointer select-none"
-                >
-                  Sign up
-                </button>
-              </span>
-            ) : (
-              <span className="text-zinc-400">
-                Already have an account?{' '}
-                <button
-                  onClick={() => {
-                    setAuthMode('login');
-                    setErrorMessage('');
-                    setSuccessMessage('');
-                  }}
-                  className="text-white hover:text-zinc-300 font-bold ml-1 transition-colors cursor-pointer select-none"
-                >
-                  Log in
-                </button>
-              </span>
-            )}
-          </div>
-
-          {/* Division Line separator with absolute flat styles */}
-          <div className="relative flex py-5 items-center">
-            <div className="flex-grow border-t border-zinc-805/80"></div>
-            <span className="flex-shrink mx-4 text-[10px] font-mono text-zinc-650 font-bold uppercase tracking-wider">OR</span>
-            <div className="flex-grow border-t border-zinc-805/80"></div>
-          </div>
-
-          {/* Google Single Sign On button - absolutely flat with zero glows */}
-          <button
-            onClick={handleGoogleSignIn}
-            disabled={isLoading}
-            className="w-full flex items-center justify-center gap-3 px-4 py-3.5 bg-zinc-900/20 hover:bg-zinc-800/30 text-white rounded-xl text-[13px] font-semibold transition-colors duration-150 border border-zinc-800/50 disabled:opacity-50 cursor-pointer"
-            style={{ boxShadow: 'none' }}
+        {/* RIGHT COLUMN: The Auth form card */}
+        <div className="w-full md:w-[500px] lg:w-[540px] flex items-center justify-center p-8 md:p-12 md:pr-24 relative z-10">
+          <motion.div 
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            className="w-full bg-[#121214] border border-[#27272a]/60 shadow-2xl p-10 flex flex-col rounded-2xl"
           >
-            <Icon icon="logos:google-icon" className="w-3.5 h-3.5 shrink-0" />
-            <span>Continue with Google</span>
-          </button>
+            {/* Header element */}
+            <h2 className="text-3xl font-bold text-white tracking-tight mb-8">
+              Sign in
+            </h2>
 
-        </motion.div>
+            {/* Error & Success Messages */}
+            {errorMessage && (
+              <div className="mb-6 p-3 rounded-md bg-red-950/30 border border-red-900/50 text-red-400 text-[13px] flex items-start gap-2.5 leading-relaxed">
+                <MaterialIcon name="error" fill={true} className="text-[16px] text-red-500 shrink-0 mt-0.5" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+            {successMessage && (
+              <div className="mb-6 p-3 rounded-md bg-emerald-950/30 border border-emerald-900/50 text-emerald-400 text-[13px] flex items-start gap-2.5 leading-relaxed">
+                <MaterialIcon name="check" className="text-[16px] text-emerald-500 shrink-0 mt-0.5" />
+                <span>{successMessage}</span>
+              </div>
+            )}
 
-        {/* --- PROFESSIONAL FOOTER --- */}
-        <div className="mt-auto w-full max-w-[420px] pb-8 pt-12 flex flex-col items-center">
-          <div className="flex items-center gap-6 mb-4">
-            <a href="https://genlang.vercel.app/#privacy" className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold no-underline">Privacy</a>
-            <a href="https://genlang.vercel.app/#terms" className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold no-underline">Terms</a>
-            <a href="https://genlang.vercel.app/#why-students" className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold no-underline">Why This?</a>
-            <a href="https://genlang.vercel.app/#blog" className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-widest font-bold no-underline">Blog</a>
-          </div>
-          <div className="text-[10px] text-zinc-600 font-medium tracking-wide flex items-center gap-1.5 uppercase">
-            <span>© 2026 Cosmi</span>
-            <span className="w-1 h-1 rounded-full bg-zinc-800"></span>
-            <span>All rights reserved</span>
-          </div>
+            {/* Core Submit Auth Form */}
+            <form onSubmit={handleEmailAuthSubmit} className="space-y-4">
+              <div className="flex flex-col gap-1.5 focus-within:text-[#3b82f6]">
+                <input
+                  id="auth-email"
+                  type="email"
+                  required
+                  disabled={isLoading}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Email address"
+                  className="w-full bg-transparent border border-[#3f3f46] hover:border-[#52525b] focus:border-[#3b82f6] focus:ring-1 focus:ring-[#3b82f6] text-[14px] text-white placeholder-zinc-500 outline-none transition-all duration-150 disabled:opacity-50 px-3.5 py-2.5 rounded-md shadow-sm"
+                />
+              </div>
+
+              {authMode !== 'forgot_password' && (
+                <div className="flex flex-col gap-1.5 focus-within:text-[#3b82f6]">
+                  <div className="relative">
+                    <input
+                      id="auth-password"
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      disabled={isLoading}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Password"
+                      className="w-full bg-transparent border border-[#3f3f46] hover:border-[#52525b] focus:border-[#3b82f6] focus:ring-1 focus:ring-[#3b82f6] text-[14px] text-white placeholder-zinc-500 outline-none transition-all duration-150 disabled:opacity-50 px-3.5 py-2.5 pr-10 rounded-md shadow-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-[11px] text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer select-none"
+                    >
+                      {showPassword ? <MaterialIcon name="visibility_off" className="text-[18px]" /> : <MaterialIcon name="visibility" className="text-[18px]" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {authMode === 'register' && (
+                <div className="flex flex-col gap-1.5 focus-within:text-[#3b82f6]">
+                  <div className="relative">
+                    <input
+                      id="auth-confirm-password"
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      required
+                      disabled={isLoading}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Confirm password"
+                      className="w-full bg-transparent border border-[#3f3f46] hover:border-[#52525b] focus:border-[#3b82f6] focus:ring-1 focus:ring-[#3b82f6] text-[14px] text-white placeholder-zinc-500 outline-none transition-all duration-150 disabled:opacity-50 px-3.5 py-2.5 pr-10 rounded-md shadow-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-[11px] text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer select-none"
+                    >
+                      {showConfirmPassword ? <MaterialIcon name="visibility_off" className="text-[18px]" /> : <MaterialIcon name="visibility" className="text-[18px]" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-row items-center justify-end pt-2">
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="bg-zinc-100 hover:bg-zinc-200 active:bg-zinc-300 text-zinc-950 font-semibold py-2 px-6 rounded-full text-[14px] cursor-pointer transition-colors flex items-center justify-center gap-2 select-none disabled:opacity-50"
+                  style={{ boxShadow: 'none' }}
+                >
+                  {isLoading ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <span>Continue</span>
+                  )}
+                </button>
+              </div>
+            </form>
+
+            {/* Division Line separator */}
+            <div className="relative flex py-6 items-center">
+              <div className="flex-grow border-t border-zinc-800"></div>
+              <span className="flex-shrink mx-4 text-sm text-zinc-500 font-medium">Or</span>
+              <div className="flex-grow border-t border-zinc-800"></div>
+            </div>
+
+            {/* Core Auth Methods */}
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isLoading}
+                className="w-full flex items-center justify-center gap-2.5 px-4 py-3 bg-transparent hover:bg-zinc-800/30 text-white rounded-full text-[14px] font-semibold transition-colors duration-150 border border-zinc-700 disabled:opacity-50 cursor-pointer"
+              >
+                <Icon icon="logos:google-icon" className="w-[24px] h-[24px] shrink-0" />
+                <span>Continue with Google</span>
+              </button>
+              
+              <button
+                type="button"
+                onClick={handleYahooSignIn}
+                disabled={isLoading}
+                className="w-full flex items-center justify-center gap-2.5 px-4 py-3 bg-transparent hover:bg-zinc-800/30 text-white rounded-full text-[14px] font-semibold transition-colors duration-150 border border-zinc-700 disabled:opacity-50 cursor-pointer"
+              >
+                <img src="/Logo.svg" alt="Yahoo" className="w-[24px] h-[24px] object-contain shrink-0" referrerPolicy="no-referrer" />
+                <span>Continue with Yahoo</span>
+              </button>
+            </div>
+          </motion.div>
         </div>
       </div>
 
+      {/* --- PROFESSIONAL FOOTER --- */}
+      <div className="relative z-20 w-full h-14 border-t border-zinc-800/60 bg-[#0c0c0f] flex flex-wrap items-center justify-center md:gap-4 px-6 gap-2 text-[12px] text-zinc-400 font-medium shrink-0">
+        <span className="md:border-none border-b border-transparent md:pr-2">Copyright © 2026 General Language. All rights reserved.</span>
+        <div className="flex items-center gap-4 hidden md:flex">
+          <div className="w-[1px] h-3.5 bg-zinc-700"></div>
+          <a href="#" className="hover:text-white transition-colors">Terms of Use</a>
+          <div className="w-[1px] h-3.5 bg-zinc-700"></div>
+          <a href="#" className="hover:text-white transition-colors">Cookie preferences</a>
+          <div className="w-[1px] h-3.5 bg-zinc-700"></div>
+          <a href="#" className="hover:text-white transition-colors">Privacy</a>
+          <div className="w-[1px] h-3.5 bg-zinc-700"></div>
+          <a href="#" className="hover:text-white transition-colors">Do not sell or share my personal information</a>
+        </div>
+      </div>
     </div>
   );
 };

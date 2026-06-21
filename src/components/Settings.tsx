@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Icon } from '@iconify/react';
+import { Icon } from './SolarIcon';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   auth, 

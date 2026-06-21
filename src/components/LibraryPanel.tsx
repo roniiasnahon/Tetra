@@ -1,8 +1,9 @@
 import React, { useState } from "react";
-import { Icon } from "@iconify/react";
+import { Icon } from "./SolarIcon";
 import { motion, AnimatePresence } from "motion/react";
 import ReactMarkdown from "react-markdown";
 import { Tab } from "../App";
+import { Notes, FolderWithFiles, PenNewRound, MinimalisticMagnifier, AddFolder, UploadMinimalistic } from "@solar-icons/react";
 
 interface FolderItem {
   id: string;
@@ -120,6 +121,10 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
   const [isDeleteSelectionConfirmOpen, setIsDeleteSelectionConfirmOpen] =
     useState(false);
 
+  // Renaming folder states
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [renamingFolderTempName, setRenamingFolderTempName] = useState("");
+
   // Viewing detail state manager
   const [activeViewingPaper, setActiveViewingPaper] = useState<PaperItem | null>(
     null
@@ -184,9 +189,9 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
           </div>
 
           <div className="relative w-64">
-            <Icon
-              icon="ph:magnifying-glass"
-              className="absolute left-3 top-2.5 w-4 h-4 text-zinc-500"
+            <MinimalisticMagnifier
+              weight="Linear"
+              className="absolute left-3 top-2.5 w-4 h-4 text-zinc-500 shrink-0"
             />
             <input
               type="text"
@@ -454,8 +459,8 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                         }}
                         className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                       >
-                        <Icon
-                          icon="ph:file-plus"
+                        <Notes
+                          weight="Linear"
                           className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300"
                         />
                         <span className="font-medium">New document</span>
@@ -468,9 +473,9 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                         }}
                         className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                       >
-                        <Icon
-                          icon="ph:upload-simple"
-                          className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300"
+                        <UploadMinimalistic
+                          weight="Linear"
+                          className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 shrink-0"
                         />
                         <span className="font-medium">File upload</span>
                       </button>
@@ -487,9 +492,9 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                         }}
                         className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
                       >
-                        <Icon
-                          icon="ph:folder-plus"
-                          className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300"
+                        <AddFolder
+                          weight="Linear"
+                          className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 shrink-0"
                         />
                         <span className="font-medium">New folder</span>
                       </button>
@@ -558,13 +563,47 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                             }`}
                           >
                             <div className="flex items-center gap-3">
-                              <Icon
-                                icon="ph:folder-open"
-                                className="w-4 h-4 text-zinc-400"
+                              <FolderWithFiles
+                                weight="Linear"
+                                className="w-4 h-4 text-zinc-400 shrink-0"
                               />
-                              <span className="text-[#f4f4f5] max-w-[300px] truncate">
-                                {folder.name}
-                              </span>
+                              {renamingFolderId === folder.id ? (
+                                <input
+                                  autoFocus
+                                  value={renamingFolderTempName}
+                                  onChange={(e) =>
+                                    setRenamingFolderTempName(e.target.value)
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      dbSetFolder({
+                                        ...folder,
+                                        name:
+                                          renamingFolderTempName.trim() ||
+                                          "Untitled Folder",
+                                      });
+                                      setRenamingFolderId(null);
+                                    } else if (e.key === "Escape") {
+                                      setRenamingFolderId(null);
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    dbSetFolder({
+                                      ...folder,
+                                      name:
+                                        renamingFolderTempName.trim() ||
+                                        "Untitled Folder",
+                                    });
+                                    setRenamingFolderId(null);
+                                  }}
+                                  className="bg-[#1a1a1a] border border-[#27272a] text-zinc-300 text-xs rounded px-2 py-0.5 focus:outline-none focus:border-zinc-500 w-full max-w-[200px]"
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              ) : (
+                                <span className="text-[#f4f4f5] max-w-[300px] truncate">
+                                  {folder.name}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td
@@ -587,6 +626,20 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                             }`}
                           >
                             <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRenamingFolderId(folder.id);
+                                  setRenamingFolderTempName(folder.name);
+                                }}
+                                className="p-1.5 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white transition-colors"
+                                title="Rename Folder"
+                              >
+                                <PenNewRound
+                                  weight="Linear"
+                                  className="w-3.5 h-3.5"
+                                />
+                              </button>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -628,9 +681,9 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                 </button>
                 <span className="text-[#27272a] text-xs">/</span>
                 <div className="flex items-center gap-2">
-                  <Icon
-                    icon="ph:folder-open"
-                    className="w-3.5 h-3.5 text-zinc-400"
+                  <FolderWithFiles
+                    weight="Linear"
+                    className="w-3.5 h-3.5 text-zinc-400 shrink-0"
                   />
                   <span className="text-xs font-semibold text-white">
                     {folders.find((f) => f.id === selectedFolderId)?.name ||
@@ -642,9 +695,9 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
               {/* Filtered Folder Papers */}
               {folderPapers.length === 0 ? (
                 <div className="py-20 text-center border border-dashed border-[#27272a] rounded-xl bg-[#161616]/20">
-                  <Icon
-                    icon="ph:folder"
-                    className="w-10 h-10 text-zinc-600 mx-auto mb-4"
+                  <FolderWithFiles
+                    weight="Linear"
+                    className="w-10 h-10 text-zinc-600 mx-auto mb-4 shrink-0"
                   />
                   <h3 className="text-[#e4e4e7] text-sm font-medium mb-1">
                     Folder is Empty
