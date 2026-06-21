@@ -567,10 +567,12 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
       </div>
 
       {/* --- PROFESSIONAL FOOTER --- */}
-      <div className="relative z-20 w-full h-14 border-t border-zinc-800/60 bg-[#0c0c0f] flex flex-wrap items-center justify-center md:gap-4 px-6 gap-2 text-[12px] text-zinc-400 font-medium shrink-0">
-        <span className="md:border-none border-b border-transparent md:pr-2">Copyright © 2026 General Language. All rights reserved.</span>
-        <div className="flex items-center gap-4 hidden md:flex">
-          <div className="w-[1px] h-3.5 bg-zinc-700"></div>
+      <div className="relative z-20 w-full h-14 border-t border-zinc-800/60 bg-[#0c0c0f] flex items-center justify-between px-8 text-[12px] text-zinc-400 font-medium shrink-0">
+        <div>
+          <span>Copyright © 2026 General Language. All rights reserved.</span>
+        </div>
+        
+        <div className="flex items-center gap-4">
           <a href="#" className="hover:text-white transition-colors">Terms of Use</a>
           <div className="w-[1px] h-3.5 bg-zinc-700"></div>
           <a href="#" className="hover:text-white transition-colors">Cookie preferences</a>

@@ -4,7 +4,7 @@ import path from 'path';
 import {defineConfig} from 'vite';
 import fs from 'fs';
 
-// Ensure the public directory exists and has cosmi.png, authbg.png, and Logo.svg for static asset serving and build output
+// Ensure the public directory exists and has cosmi.png, authbg.jpg, and Logo.svg for static asset serving and build output
 try {
   const publicDir = path.resolve(process.cwd(), 'public');
   if (!fs.existsSync(publicDir)) {
