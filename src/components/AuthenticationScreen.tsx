@@ -557,7 +557,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
                 disabled={isLoading}
                 className="w-full flex items-center justify-center gap-2.5 px-4 py-3 bg-transparent hover:bg-zinc-800/30 text-white rounded-full text-[14px] font-semibold transition-colors duration-150 border border-zinc-700 disabled:opacity-50 cursor-pointer"
               >
-                <img src="/Logo-v3.svg?v=4" alt="Yahoo" className="w-[24px] h-[24px] object-contain shrink-0" referrerPolicy="no-referrer" />
+                <img src="/Logo-v3.svg?v=fixed" alt="Yahoo" className="w-[24px] h-[24px] object-contain shrink-0" referrerPolicy="no-referrer" />
                 <span>Continue with Yahoo</span>
               </button>
             </div>

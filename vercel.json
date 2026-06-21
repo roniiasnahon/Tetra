@@ -27,7 +27,7 @@
       "dest": "/cosmi.png"
     },
     {
-      "src": "/(.*)",
+      "src": "/((?!.*\\.(?:png|svg|jpg|jpeg|webp|gif|ico|js|css|woff2|woff|ttf|otf|json)$|api/).*)",
       "dest": "/index.html"
     }
   ]

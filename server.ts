@@ -1160,13 +1160,16 @@ async function startServer() {
       for (const p of pathsToTry) {
         try {
           if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+            console.log(`[StaticServe] Serving ${urlPath} as ${mimeTypes[ext]} from ${p}`);
             res.setHeader('Content-Type', mimeTypes[ext]);
+            res.setHeader('Cache-Control', 'public, max-age=3600');
             return res.sendFile(p);
           }
         } catch (e) {
           // Skip
         }
       }
+      console.warn(`[StaticServe] Asset NOT FOUND for correctly matched extension: ${urlPath}. Tried: ${pathsToTry.join(', ')}`);
     }
     next();
   });
