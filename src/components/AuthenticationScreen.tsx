@@ -390,9 +390,10 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
   return (
     <div className="h-screen bg-gradient-to-br from-[#0c0c0f] to-[#040405] text-[#e4e4e7] flex flex-col select-none selection:bg-zinc-800 selection:text-white overflow-hidden relative font-jakarta">
       {/* Background Image Layer */}
-      <div 
-        className="absolute inset-0 bg-cover bg-center opacity-25 pointer-events-none z-0" 
-        style={{ backgroundImage: "url('/authbg.png')" }} 
+      <img 
+        src="/authbg.png" 
+        alt="Background" 
+        className="absolute inset-0 w-full h-full object-cover opacity-35 pointer-events-none z-0" 
       />
 
       {/* Desktop Drag Area */}
