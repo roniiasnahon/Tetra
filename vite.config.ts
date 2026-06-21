@@ -11,7 +11,7 @@ try {
     fs.mkdirSync(publicDir, { recursive: true });
   }
   
-  const filesToCopy = ['cosmi.png', 'authbg.png', 'Logo.svg', 'authbg-v3.png', 'Logo-v3.svg'];
+  const filesToCopy = ['cosmi.png', 'authbg.jpg', 'Logo.svg', 'Logo-v3.svg'];
   filesToCopy.forEach(filename => {
     const srcPath = path.resolve(process.cwd(), filename);
     const destPath = path.resolve(publicDir, filename);

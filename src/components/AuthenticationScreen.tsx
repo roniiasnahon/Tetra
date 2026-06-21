@@ -391,7 +391,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     <div className="h-screen bg-gradient-to-br from-[#0c0c0f] to-[#040405] text-[#e4e4e7] flex flex-col select-none selection:bg-zinc-800 selection:text-white overflow-hidden relative font-jakarta">
       {/* Background Image Layer */}
       <img 
-        src="/final-bg.png"
+        src="/authbg.jpg"
         alt="Background" 
         className="absolute inset-0 w-full h-full object-cover opacity-35 pointer-events-none z-0" 
         referrerPolicy="no-referrer"
