@@ -4,20 +4,24 @@ import path from 'path';
 import {defineConfig} from 'vite';
 import fs from 'fs';
 
-// Ensure the public directory exists and has cosmi.png for static asset serving and build output
+// Ensure the public directory exists and has cosmi.png, authbg.png, and Logo.svg for static asset serving and build output
 try {
   const publicDir = path.resolve(process.cwd(), 'public');
   if (!fs.existsSync(publicDir)) {
     fs.mkdirSync(publicDir, { recursive: true });
   }
-  const srcIcon = path.resolve(process.cwd(), 'cosmi.png');
-  const destIcon = path.resolve(publicDir, 'cosmi.png');
-  if (fs.existsSync(srcIcon)) {
-    fs.copyFileSync(srcIcon, destIcon);
-    console.log('[Vite config] Successfully copied cosmi.png to public/');
-  }
+  
+  const filesToCopy = ['cosmi.png', 'authbg.png', 'Logo.svg'];
+  filesToCopy.forEach(filename => {
+    const srcPath = path.resolve(process.cwd(), filename);
+    const destPath = path.resolve(publicDir, filename);
+    if (fs.existsSync(srcPath)) {
+      fs.copyFileSync(srcPath, destPath);
+      console.log(`[Vite config] Successfully copied ${filename} to public/`);
+    }
+  });
 } catch (e) {
-  console.error('[Vite config] Failed to copy cosmi.png to public:', e);
+  console.error('[Vite config] Failed to copy assets to public directory:', e);
 }
 
 export default defineConfig(() => {

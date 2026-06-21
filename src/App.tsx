@@ -16,7 +16,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Icon } from "./components/SolarIcon";
 import { MaterialIcon } from "./components/MaterialIcon";
 import { Sidebar, Plain2, PaperclipRounded2, Notes, FolderWithFiles, PenNewRound, FolderOpen, MinimalisticMagnifier, MenuDots, UploadMinimalistic, AddFolder, AddCircle, PaletteRound, NotebookBookmark } from "@solar-icons/react";
-import { Plus, X as XIcon } from "lucide-react";
+import { Plus, X as XIcon, Minus, Square } from "lucide-react";
 import html2pdf from "html2pdf.js";
 
 interface ShimProps extends React.HTMLAttributes<HTMLSpanElement> {
@@ -5093,14 +5093,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
         <>
           <div className="fixed top-0 left-0 right-0 h-[38px] z-[9998] [-webkit-app-region:drag] pointer-events-none" />
           <div className="fixed top-0 right-0 h-[38px] flex items-center z-[9999] [-webkit-app-region:no-drag]">
-            <button onClick={handleMinimize} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
-              <Icon icon="ph:minus" className="w-[14px] h-[14px]" />
+            <button onClick={handleMinimize} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
+              <Minus className="w-[14px] h-[14px]" />
             </button>
-            <button onClick={handleMaximize} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center">
-              <Icon icon="ph:square" className="w-[12px] h-[12px]" />
+            <button onClick={handleMaximize} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
+              <Square className="w-[12px] h-[12px]" />
             </button>
-            <button onClick={() => setIsExitConfirmOpen(true)} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-red-500 transition-colors cursor-pointer flex items-center justify-center">
-              <Icon icon="ph:x" className="w-[14px] h-[14px]" />
+            <button onClick={() => setIsExitConfirmOpen(true)} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-red-500 transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
+              <XIcon className="w-[14px] h-[14px]" />
             </button>
           </div>
         </>

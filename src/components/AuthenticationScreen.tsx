@@ -4,6 +4,7 @@ import { Icon } from './SolarIcon';
 import { MaterialIcon } from './MaterialIcon';
 import { auth, googleProvider, signInWithPopup } from '../firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import { Minus, Square, X } from 'lucide-react';
 
 // --- Pupil Sub-component ---
 interface PupilProps {
@@ -349,6 +350,43 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
       (window as any).process?.versions?.electron !== undefined
   );
 
+  const isTauri = typeof window !== 'undefined' && (
+    (window as any).___TAURI___ !== undefined ||
+    (window as any).__TAURI__ !== undefined
+  );
+
+  const isDesktopApp = isElectronApp || isTauri;
+
+  const handleMinimize = () => {
+    if (isTauri) {
+      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+        getCurrentWindow().minimize();
+      }).catch(console.error);
+    } else {
+      (window as any).electron?.minimize?.();
+    }
+  };
+
+  const handleMaximize = () => {
+    if (isTauri) {
+      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+        getCurrentWindow().toggleMaximize();
+      }).catch(console.error);
+    } else {
+      (window as any).electron?.maximize?.();
+    }
+  };
+
+  const handleClose = () => {
+    if (isTauri) {
+      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+        getCurrentWindow().close();
+      }).catch(console.error);
+    } else {
+      (window as any).electron?.close?.();
+    }
+  };
+
   return (
     <div className="h-screen bg-gradient-to-br from-[#0c0c0f] to-[#040405] text-[#e4e4e7] flex flex-col select-none selection:bg-zinc-800 selection:text-white overflow-hidden relative font-jakarta">
       {/* Background Image Layer */}
@@ -359,16 +397,16 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
 
       {/* Desktop Drag Area */}
       <div className="absolute top-0 inset-x-0 h-8 z-[100] [-webkit-app-region:drag]" />
-      {isElectronApp && (
+      {isDesktopApp && (
         <div className="absolute top-0 right-0 h-8 flex items-center z-[101] [-webkit-app-region:no-drag]">
-          <button onClick={() => (window as any).electron?.minimize?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
-            <Icon icon="ph:minus" className="w-[14px] h-[14px]" />
+          <button onClick={handleMinimize} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
+            <Minus className="w-[14px] h-[14px]" />
           </button>
-          <button onClick={() => (window as any).electron?.maximize?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
-            <Icon icon="ph:square" className="w-[12px] h-[12px]" />
+          <button onClick={handleMaximize} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
+            <Square className="w-[12px] h-[12px]" />
           </button>
-          <button onClick={() => (window as any).electron?.close?.()} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-red-500 hover:text-white transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
-            <Icon icon="ph:x" className="w-[14px] h-[14px]" />
+          <button onClick={handleClose} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-red-500 hover:text-white transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
+            <X className="w-[14px] h-[14px]" />
           </button>
         </div>
       )}
