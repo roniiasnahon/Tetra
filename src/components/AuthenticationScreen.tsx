@@ -391,7 +391,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     <div className="h-screen bg-gradient-to-br from-[#0c0c0f] to-[#040405] text-[#e4e4e7] flex flex-col select-none selection:bg-zinc-800 selection:text-white overflow-hidden relative font-jakarta">
       {/* Background Image Layer */}
       <img 
-        src="/authbg.png" 
+        src="/authbg.png?v=2" 
         alt="Background" 
         className="absolute inset-0 w-full h-full object-cover opacity-35 pointer-events-none z-0" 
       />
@@ -557,7 +557,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
                 disabled={isLoading}
                 className="w-full flex items-center justify-center gap-2.5 px-4 py-3 bg-transparent hover:bg-zinc-800/30 text-white rounded-full text-[14px] font-semibold transition-colors duration-150 border border-zinc-700 disabled:opacity-50 cursor-pointer"
               >
-                <img src="/Logo.svg" alt="Yahoo" className="w-[24px] h-[24px] object-contain shrink-0" referrerPolicy="no-referrer" />
+                <img src="/Logo.svg?v=2" alt="Yahoo" className="w-[24px] h-[24px] object-contain shrink-0" referrerPolicy="no-referrer" />
                 <span>Continue with Yahoo</span>
               </button>
             </div>
