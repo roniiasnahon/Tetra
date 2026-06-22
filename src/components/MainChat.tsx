@@ -31,10 +31,11 @@ interface MainChatProps {
 }
 
 export const modelsList = [
-  { id: 'auto', label: 'Composition I', desc: 'Fastest answers & multi-modal' },
-  { id: 'mistral-large-latest', label: 'Sift II', desc: 'Advanced multi-lingual logic' },
-  { id: 'codestral-latest', label: 'Kindle Preview', desc: 'Optimized for scripting & automation' },
-  { id: 'command-a-plus-05-2026', label: 'Raisee V', desc: 'Cohere high-performance language engine' },
+  { id: 'auto', label: 'Composition I', desc: 'Fast and versatile; great for daily homework and file analysis' },
+  { id: 'hokku-iv', label: 'Hokku IV', desc: 'Deep reasoning for complex physics, math, and philosophy' },
+  { id: 'mistral-large-latest', label: 'Sift II', desc: 'Advanced logic and excellent for language translation' },
+  { id: 'codestral-latest', label: 'Kindle Preview', desc: 'Technical specialist for coding, math, and logic puzzles' },
+  { id: 'command-a-plus-05-2026', label: 'Raisee V', desc: 'Creative partner for writing, brainstorming, and essay drafts' },
 ];
 
 const renderLinkifiedText = (text: string) => {

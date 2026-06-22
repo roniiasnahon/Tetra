@@ -666,25 +666,25 @@ import OpenAI from "openai";
 // Port must be 3000
 const PORT = 3000;
 
-let openaiClient: OpenAI | null = null;
+let basetenClient: OpenAI | null = null;
 let mistralClient: OpenAI | null = null;
 let groqClient: OpenAI | null = null;
 let cohereClient: OpenAI | null = null;
 
 function getBasetenClient(): OpenAI {
-  if (!openaiClient) {
+  if (!basetenClient) {
     const apiKey = process.env.BASETEN_API_KEY;
     if (!apiKey) {
       throw new Error(
         "BASETEN_API_KEY is not configured. Please set it in the Secrets panel."
       );
     }
-    openaiClient = new OpenAI({
+    basetenClient = new OpenAI({
       apiKey: apiKey,
       baseURL: "https://inference.baseten.co/v1",
     });
   }
-  return openaiClient;
+  return basetenClient;
 }
 
 function getMistralClient(): OpenAI {
@@ -3144,26 +3144,68 @@ ${researchContext}
 
       let completionStream;
       let usedGeminiFallback = !!(attachment && attachment.mimetype?.startsWith("image/"));
-      let tryMistralFirst = !usedGeminiFallback && !requestedModel.includes("cohere") && !requestedModel.includes("command-a");
-      let tryCohereFirst = !usedGeminiFallback && (requestedModel.includes("cohere") || requestedModel.includes("command-a"));
+      let tryBasetenFirst = !usedGeminiFallback && requestedModel === "hokku-iv";
+      let tryMistralFirst = !usedGeminiFallback && !tryBasetenFirst && !requestedModel.includes("cohere") && !requestedModel.includes("command-a");
+      let tryCohereFirst = !usedGeminiFallback && !tryBasetenFirst && (requestedModel.includes("cohere") || requestedModel.includes("command-a"));
       let mistralModelToUse = "mistral-large-latest";
       let cohereModelToUse = "command-a-plus-05-2026";
+      let basetenModelToUse = process.env.BASETEN_MODEL || "llama-3-1-70b-instruct";
 
       if (requestedModel && requestedModel !== "auto") {
         if (requestedModel.includes("mistral")) {
           tryMistralFirst = true;
           tryCohereFirst = false;
+          tryBasetenFirst = false;
           usedGeminiFallback = false;
           mistralModelToUse = requestedModel;
         } else if (requestedModel.includes("gemini")) {
           tryMistralFirst = false;
           tryCohereFirst = false;
+          tryBasetenFirst = false;
           usedGeminiFallback = true;
         } else if (requestedModel.includes("cohere") || requestedModel.includes("command-a")) {
           tryMistralFirst = false;
           tryCohereFirst = true;
+          tryBasetenFirst = false;
           usedGeminiFallback = false;
           cohereModelToUse = requestedModel;
+        } else if (requestedModel === "hokku-iv") {
+          tryMistralFirst = false;
+          tryCohereFirst = false;
+          tryBasetenFirst = true;
+          usedGeminiFallback = false;
+        }
+      }
+
+      if (tryBasetenFirst) {
+        try {
+          console.log(`[LLM] Streaming chat with Baseten (${basetenModelToUse})...`);
+          const client = getBasetenClient();
+          completionStream = await client.chat.completions.create({
+            model: basetenModelToUse,
+            messages: messagesPayload,
+            temperature: 0.7,
+            stream: true
+          });
+        } catch (err: any) {
+          console.warn(`[LLM] Baseten streaming failed (${basetenModelToUse}):`, err.message || err);
+          
+          if (err.message?.includes("BASETEN_API_KEY") || err.message?.includes("configured")) {
+             throw new Error("BASETEN_API_KEY is not defined. Please configure it in your Settings.");
+          }
+
+          const modelError = err.message || JSON.stringify(err);
+          if (modelError.includes("404") || modelError.includes("model")) {
+             throw new Error(`Baseten Model ID error: "${basetenModelToUse}" was not found (404). Please check your BASETEN_MODEL secret and ensure it matches the model slug on your Baseten dashboard.`);
+          }
+
+          if (requestedModel !== "hokku-iv") {
+            console.warn("[LLM] Falling back to Gemini...");
+            tryBasetenFirst = false;
+            usedGeminiFallback = true;
+          } else {
+             throw new Error(`Baseten LLM failed: ${modelError || "Unknown error during streaming."}`);
+          }
         }
       }
 
@@ -3224,7 +3266,7 @@ ${researchContext}
 
       let mainChatCollectedText = "";
 
-      if ((!tryMistralFirst && !tryCohereFirst) || usedGeminiFallback) {
+      if ((!tryMistralFirst && !tryCohereFirst && !tryBasetenFirst) || usedGeminiFallback) {
         console.log(`[LLM] Streaming chat with Gemini...`);
         
         // Convert messages list to Gemini alternated format
