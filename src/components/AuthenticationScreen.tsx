@@ -220,6 +220,73 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
+  const [isVerifyingEmail, setIsVerifyingEmail] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  const handleVerificationCodeChange = (index: number, value: string) => {
+    const newCode = verificationCode.padEnd(6, ' ').split('');
+    
+    // Ignore non-digits (unless they are clearing the box)
+    if (value && !/^[0-9]+$/.test(value)) return;
+
+    // Handle paste
+    if (value.length > 1) {
+       const digits = value.slice(0, 6).split('');
+       for (let i = 0; i < digits.length; i++) {
+         if (index + i < 6) newCode[index + i] = digits[i];
+       }
+       setVerificationCode(newCode.join(''));
+       const nextIndex = Math.min(index + digits.length, 5);
+       inputRefs.current[nextIndex]?.focus();
+       return;
+    }
+
+    newCode[index] = value || ' ';
+    setVerificationCode(newCode.join(''));
+    
+    if (value && index < 5) {
+      inputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleVerificationKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace') {
+      const currentCode = verificationCode.padEnd(6, ' ').split('');
+      
+      // If current box is already empty, focus the previous one and clear it
+      if (currentCode[index] === ' ' && index > 0) {
+        inputRefs.current[index - 1]?.focus();
+        currentCode[index - 1] = ' ';
+        setVerificationCode(currentCode.join(''));
+      }
+    }
+  };
+
+  const resendVerificationCode = async () => {
+    setIsLoading(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+    try {
+      const response = await fetch('/api/send-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send confirmation code.');
+      }
+      setSuccessMessage(data.mocked ? `${data.message}` : 'A new verification code has been dispatched to your email.');
+    } catch (err: any) {
+      console.error('Failed to resend code:', err);
+      setErrorMessage(err.message || 'Failed to resend verification code.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
     setErrorMessage('');
@@ -286,6 +353,46 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
     setErrorMessage('');
     setSuccessMessage('');
 
+    if (isVerifyingEmail) {
+      const cleanCode = verificationCode.replace(/\s/g, '');
+      if (cleanCode.length !== 6) {
+        setErrorMessage('Please input the complete 6-digit confirmation code.');
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const verifyResp = await fetch('/api/verify-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.trim(), code: cleanCode }),
+        });
+        const verifyData = await verifyResp.json();
+        
+        if (!verifyResp.ok) {
+          setErrorMessage(verifyData.error || 'Incorrect code. Please double check and try again.');
+          setIsLoading(false);
+          return;
+        }
+
+        // Code verification matches! Proceed block with Firebase registration
+        await createUserWithEmailAndPassword(auth, email.trim(), password);
+        setSuccessMessage('Account created successfully! Welcome to cosmi.');
+        setIsVerifyingEmail(false);
+        onSuccess?.();
+      } catch (err: any) {
+        console.error("Verification confirmation or registration failed:", err);
+        if (err.code === 'auth/email-already-in-use') {
+          setErrorMessage('An account with this email address already exists. Try signing in helper instead.');
+        } else {
+          setErrorMessage(err.message || 'We encountered an error verifying or registering you. Please try again.');
+        }
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     try {
       if (authMode === 'login') {
         if (!password) {
@@ -311,9 +418,21 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
           setIsLoading(false);
           return;
         }
-        await createUserWithEmailAndPassword(auth, email.trim(), password);
-        setSuccessMessage('Account created successfully! Welcome to cosmi.');
-        onSuccess?.();
+
+        // Dispatch Resend email verification code
+        const response = await fetch('/api/send-verification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.trim() }),
+        });
+        const resData = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(resData.error || 'Failed to dispatch verification code.');
+        }
+
+        setIsVerifyingEmail(true);
+        setSuccessMessage(resData.mocked ? `${resData.message}` : 'A 6-digit verification code has been dispatched to your email.');
       } else {
         await sendPasswordResetEmail(auth, email.trim());
         setSuccessMessage('Password reset link sent! Check your email inbox.');
@@ -336,7 +455,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
       } else if (err.code === 'auth/weak-password') {
         setErrorMessage('For your security, please choose a stronger password with at least 6 characters.');
       } else {
-        setErrorMessage('We ran into an unexpected issue while signing you in. Please verify your details or try again in a moment.');
+        setErrorMessage(err.message || 'We ran into an unexpected issue while signing you in. Please verify your details or try again in a moment.');
       }
     } finally {
       setIsLoading(false);
@@ -428,140 +547,465 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
         </div>
 
         {/* RIGHT COLUMN: The Auth form card */}
-        <div className="w-full md:w-[500px] lg:w-[540px] flex items-center justify-center p-8 md:p-12 md:pr-24 relative z-10">
+        <div className="w-full md:w-[500px] lg:w-[540px] flex items-center justify-center p-8 md:p-12 md:pr-24 relative z-10 font-sans">
           <motion.div 
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-            className="w-full bg-[#121214] border border-[#27272a]/60 shadow-2xl p-10 flex flex-col rounded-2xl"
+            initial={{ opacity: 0, scale: 0.98, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="w-full bg-[#0c0c0f]/85 border border-zinc-800/80 p-10 flex flex-col rounded-3xl backdrop-blur-xl"
+            style={{ boxShadow: 'none' }}
           >
-            {/* Header element */}
-            <h2 className="text-3xl font-bold text-white tracking-tight mb-8">
-              Sign in
-            </h2>
-
-            {/* Error & Success Messages */}
-            {errorMessage && (
-              <div className="mb-6 p-3 rounded-md bg-red-950/30 border border-red-900/50 text-red-400 text-[13px] flex items-start gap-2.5 leading-relaxed">
-                <MaterialIcon name="error" fill={true} className="text-[16px] text-red-500 shrink-0 mt-0.5" />
-                <span>{errorMessage}</span>
-              </div>
-            )}
-            {successMessage && (
-              <div className="mb-6 p-3 rounded-md bg-emerald-950/30 border border-emerald-900/50 text-emerald-400 text-[13px] flex items-start gap-2.5 leading-relaxed">
-                <MaterialIcon name="check" className="text-[16px] text-emerald-500 shrink-0 mt-0.5" />
-                <span>{successMessage}</span>
-              </div>
-            )}
-
-            {/* Core Submit Auth Form */}
-            <form onSubmit={handleEmailAuthSubmit} className="space-y-4">
-              <div className="flex flex-col gap-1.5 focus-within:text-[#3b82f6]">
-                <input
-                  id="auth-email"
-                  type="email"
-                  required
-                  disabled={isLoading}
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Email address"
-                  className="w-full bg-transparent border border-[#3f3f46] hover:border-[#52525b] focus:border-[#3b82f6] focus:ring-1 focus:ring-[#3b82f6] text-[14px] text-white placeholder-zinc-500 outline-none transition-all duration-150 disabled:opacity-50 px-3.5 py-2.5 rounded-md shadow-sm"
-                />
-              </div>
-
-              {authMode !== 'forgot_password' && (
-                <div className="flex flex-col gap-1.5 focus-within:text-[#3b82f6]">
-                  <div className="relative">
-                    <input
-                      id="auth-password"
-                      type={showPassword ? 'text' : 'password'}
-                      required
-                      disabled={isLoading}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Password"
-                      className="w-full bg-transparent border border-[#3f3f46] hover:border-[#52525b] focus:border-[#3b82f6] focus:ring-1 focus:ring-[#3b82f6] text-[14px] text-white placeholder-zinc-500 outline-none transition-all duration-150 disabled:opacity-50 px-3.5 py-2.5 pr-10 rounded-md shadow-sm"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-[11px] text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer select-none"
-                    >
-                      {showPassword ? <MaterialIcon name="visibility_off" className="text-[18px]" /> : <MaterialIcon name="visibility" className="text-[18px]" />}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {authMode === 'register' && (
-                <div className="flex flex-col gap-1.5 focus-within:text-[#3b82f6]">
-                  <div className="relative">
-                    <input
-                      id="auth-confirm-password"
-                      type={showConfirmPassword ? 'text' : 'password'}
-                      required
-                      disabled={isLoading}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      placeholder="Confirm password"
-                      className="w-full bg-transparent border border-[#3f3f46] hover:border-[#52525b] focus:border-[#3b82f6] focus:ring-1 focus:ring-[#3b82f6] text-[14px] text-white placeholder-zinc-500 outline-none transition-all duration-150 disabled:opacity-50 px-3.5 py-2.5 pr-10 rounded-md shadow-sm"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-3 top-[11px] text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer select-none"
-                    >
-                      {showConfirmPassword ? <MaterialIcon name="visibility_off" className="text-[18px]" /> : <MaterialIcon name="visibility" className="text-[18px]" />}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex flex-row items-center justify-end pt-2">
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="bg-zinc-100 hover:bg-zinc-200 active:bg-zinc-300 text-zinc-950 font-semibold py-2 px-6 rounded-full text-[14px] cursor-pointer transition-colors flex items-center justify-center gap-2 select-none disabled:opacity-50"
-                  style={{ boxShadow: 'none' }}
+            <AnimatePresence mode="wait" initial={false}>
+              {isVerifyingEmail ? (
+                <motion.div
+                  key="verify-email"
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                  className="flex flex-col"
                 >
-                  {isLoading ? (
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <span>Continue</span>
+                  <h2 id="auth-title" className="text-3xl font-bold text-white tracking-tight font-sans">
+                    Verify your email
+                  </h2>
+                  <p className="text-[14px] text-zinc-400 mt-2.5 mb-8 leading-relaxed font-sans">
+                    We sent a 6-digit confirmation code to{' '}
+                    <span className="text-zinc-200 font-semibold">{email}</span>. Please enter it below to complete your registration.
+                  </p>
+                  
+                  {errorMessage && (
+                    <div className="mb-6 p-3.5 rounded-xl bg-red-950/20 border border-red-900/30 text-red-400 text-[13px] flex items-start gap-2.5 leading-relaxed font-sans">
+                      <MaterialIcon name="error" fill={true} className="text-[16px] text-red-500 shrink-0 mt-0.5" />
+                      <span>{errorMessage}</span>
+                    </div>
                   )}
-                </button>
-              </div>
-            </form>
+                  {successMessage && (
+                    <div className="mb-6 p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-900/30 text-emerald-400 text-[13px] flex items-start gap-2.5 leading-relaxed font-sans">
+                      <MaterialIcon name="check" className="text-[16px] text-emerald-500 shrink-0 mt-0.5" />
+                      <span>{successMessage}</span>
+                    </div>
+                  )}
 
-            {/* Division Line separator */}
-            <div className="relative flex py-6 items-center">
-              <div className="flex-grow border-t border-zinc-800"></div>
-              <span className="flex-shrink mx-4 text-sm text-zinc-500 font-medium">Or</span>
-              <div className="flex-grow border-t border-zinc-800"></div>
-            </div>
+                  <form onSubmit={handleEmailAuthSubmit} className="space-y-6">
+                    <div className="flex gap-2 justify-between">
+                      {[0, 1, 2, 3, 4, 5].map((index) => {
+                        const digits = verificationCode.padEnd(6, ' ').split('');
+                        return (
+                          <input
+                            key={index}
+                            ref={(el) => (inputRefs.current[index] = el)}
+                            type="text"
+                            maxLength={6}
+                            required
+                            disabled={isLoading}
+                            value={digits[index] === ' ' ? '' : digits[index]}
+                            onChange={(e) => handleVerificationCodeChange(index, e.target.value)}
+                            onKeyDown={(e) => handleVerificationKeyDown(index, e)}
+                            className="w-12 h-14 text-center font-sans font-bold text-2xl bg-zinc-900/40 border border-zinc-800 hover:border-zinc-700 focus:border-zinc-500 text-white outline-none transition-all duration-150 disabled:opacity-50 rounded-xl"
+                          />
+                        );
+                      })}
+                    </div>
+                    
+                    <p className="text-xs text-zinc-500 leading-relaxed text-center font-sans">
+                      If you don't see the email in your inbox, please check your spam or junk folder.
+                    </p>
 
-            {/* Core Auth Methods */}
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={handleGoogleSignIn}
-                disabled={isLoading}
-                className="w-full flex items-center justify-center gap-2.5 px-4 py-3 bg-transparent hover:bg-zinc-800/30 text-white rounded-full text-[14px] font-semibold transition-colors duration-150 border border-zinc-700 disabled:opacity-50 cursor-pointer"
-              >
-                <Icon icon="logos:google-icon" className="w-[24px] h-[24px] shrink-0" />
-                <span>Continue with Google</span>
-              </button>
-              
-              <button
-                type="button"
-                onClick={handleYahooSignIn}
-                disabled={isLoading}
-                className="w-full flex items-center justify-center gap-2.5 px-4 py-3 bg-transparent hover:bg-zinc-800/30 text-white rounded-full text-[14px] font-semibold transition-colors duration-150 border border-zinc-700 disabled:opacity-50 cursor-pointer"
-              >
-                <img src="/Logo-v3.svg?v=fixed" alt="Yahoo" className="w-[24px] h-[24px] object-contain shrink-0" referrerPolicy="no-referrer" />
-                <span>Continue with Yahoo</span>
-              </button>
-            </div>
+                    <div className="flex items-center justify-between pt-2">
+                      <button
+                        id="switch-back-to-register"
+                        type="button"
+                        disabled={isLoading}
+                        onClick={() => {
+                          setIsVerifyingEmail(false);
+                          setErrorMessage('');
+                          setSuccessMessage('');
+                          setVerificationCode('');
+                        }}
+                        className="text-xs text-zinc-400 hover:text-white transition-colors font-medium bg-transparent border-0 p-0 cursor-pointer outline-none disabled:opacity-50"
+                      >
+                        Change credentials
+                      </button>
+                      <button
+                        id="resend-code-btn"
+                        type="button"
+                        disabled={isLoading}
+                        onClick={resendVerificationCode}
+                        className="text-xs text-[#3b82f6] hover:text-[#60a5fa] transition-colors font-medium bg-transparent border-0 p-0 cursor-pointer outline-none disabled:opacity-50"
+                      >
+                        Resend code
+                      </button>
+                    </div>
+
+                    <div className="flex flex-row items-center justify-end pt-2">
+                      <button
+                        type="submit"
+                        disabled={isLoading}
+                        className="bg-zinc-100 hover:bg-zinc-200 active:bg-zinc-300 text-zinc-950 font-semibold py-2.5 px-6 rounded-full text-[14px] cursor-pointer transition-colors flex items-center justify-center gap-2 select-none disabled:opacity-50 font-sans"
+                        style={{ boxShadow: 'none' }}
+                      >
+                        {isLoading ? (
+                          <div className="w-4 h-4 border-2 border-zinc-950/30 border-t-zinc-950 rounded-full animate-spin" />
+                        ) : (
+                          <span>Verify & Register</span>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
+              ) : authMode === 'login' ? (
+                <motion.div
+                  key="login"
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                  className="flex flex-col"
+                >
+                  <h2 id="auth-title" className="text-3xl font-bold text-white tracking-tight font-sans">
+                    Sign in
+                  </h2>
+                  <p className="text-[14px] text-zinc-400 mt-2 mb-8 font-sans">
+                    New here?{' '}
+                    <button
+                      id="switch-to-register"
+                      type="button"
+                      onClick={() => {
+                        setAuthMode('register');
+                        setErrorMessage('');
+                        setSuccessMessage('');
+                      }}
+                      className="text-[#3b82f6] hover:text-[#60a5fa] transition-colors font-medium bg-transparent border-0 p-0 cursor-pointer outline-none"
+                    >
+                      Create an account
+                    </button>
+                  </p>
+
+                  {errorMessage && (
+                    <div className="mb-6 p-3.5 rounded-xl bg-red-950/20 border border-red-900/30 text-red-400 text-[13px] flex items-start gap-2.5 leading-relaxed font-sans">
+                      <MaterialIcon name="error" fill={true} className="text-[16px] text-red-500 shrink-0 mt-0.5" />
+                      <span>{errorMessage}</span>
+                    </div>
+                  )}
+                  {successMessage && (
+                    <div className="mb-6 p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-900/30 text-emerald-400 text-[13px] flex items-start gap-2.5 leading-relaxed font-sans">
+                      <MaterialIcon name="check" className="text-[16px] text-emerald-500 shrink-0 mt-0.5" />
+                      <span>{successMessage}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleEmailAuthSubmit} className="space-y-4">
+                    <div className="flex flex-col gap-1.5 focus-within:text-[#3b82f6]">
+                      <input
+                        id="auth-email"
+                        type="email"
+                        required
+                        disabled={isLoading}
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="Email address"
+                        className="w-full bg-zinc-900/40 border border-zinc-800 hover:border-zinc-700 focus:border-zinc-500 text-[14px] text-white placeholder-zinc-500 outline-none transition-all duration-150 disabled:opacity-50 px-4 py-3 rounded-xl font-sans"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 ">
+                      <div className="relative focus-within:text-[#3b82f6]">
+                        <input
+                          id="auth-password"
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          disabled={isLoading}
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="Password"
+                          className="w-full bg-zinc-900/40 border border-zinc-800 hover:border-zinc-700 focus:border-zinc-500 text-[14px] text-white placeholder-zinc-500 outline-none transition-all duration-150 disabled:opacity-50 px-4 py-3 pr-11 rounded-xl font-sans"
+                        />
+                        <button
+                          id="toggle-password"
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3.5 top-[13px] text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer select-none"
+                        >
+                          {showPassword ? <MaterialIcon name="visibility_off" className="text-[18px]" /> : <MaterialIcon name="visibility" className="text-[18px]" />}
+                        </button>
+                      </div>
+                      <div className="flex justify-end pt-1">
+                        <button
+                          id="switch-to-forgot-pw"
+                          type="button"
+                          onClick={() => {
+                            setAuthMode('forgot_password');
+                            setErrorMessage('');
+                            setSuccessMessage('');
+                          }}
+                          className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors font-medium bg-transparent border-0 p-0 cursor-pointer outline-none"
+                        >
+                          Forgot password?
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-row items-center justify-end pt-4">
+                      <button
+                        type="submit"
+                        disabled={isLoading}
+                        className="bg-zinc-100 hover:bg-zinc-200 active:bg-zinc-300 text-zinc-950 font-semibold py-2.5 px-6 rounded-full text-[14px] cursor-pointer transition-colors flex items-center justify-center gap-2 select-none disabled:opacity-50 font-sans"
+                        style={{ boxShadow: 'none' }}
+                      >
+                        {isLoading ? (
+                          <div className="w-4 h-4 border-2 border-zinc-950/30 border-t-zinc-950 rounded-full animate-spin" />
+                        ) : (
+                          <span>Continue</span>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="relative flex py-6 items-center">
+                    <div className="flex-grow border-t border-zinc-800/80"></div>
+                    <span className="flex-shrink mx-4 text-xs text-zinc-500 font-medium font-sans uppercase tracking-wider">Or</span>
+                    <div className="flex-grow border-t border-zinc-800/80"></div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <button
+                      type="button"
+                      onClick={handleGoogleSignIn}
+                      disabled={isLoading}
+                      className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 bg-zinc-900/40 hover:bg-zinc-800/50 text-white rounded-full text-[14px] font-semibold transition-colors duration-150 border border-zinc-800 disabled:opacity-50 cursor-pointer font-sans"
+                    >
+                      <Icon icon="logos:google-icon" className="w-[20px] h-[20px] shrink-0" />
+                      <span>Continue with Google</span>
+                    </button>
+                    
+                    <button
+                      type="button"
+                      onClick={handleYahooSignIn}
+                      disabled={isLoading}
+                      className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 bg-zinc-900/40 hover:bg-zinc-800/50 text-white rounded-full text-[14px] font-semibold transition-colors duration-150 border border-zinc-800 disabled:opacity-50 cursor-pointer font-sans"
+                    >
+                      <img src="/Logo-v3.svg?v=fixed" alt="Yahoo" className="w-[20px] h-[20px] object-contain shrink-0" referrerPolicy="no-referrer" />
+                      <span>Continue with Yahoo</span>
+                    </button>
+                  </div>
+                </motion.div>
+              ) : authMode === 'register' ? (
+                <motion.div
+                  key="register"
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                  className="flex flex-col"
+                >
+                  <h2 id="auth-title" className="text-3xl font-bold text-white tracking-tight font-sans">
+                    Create an account
+                  </h2>
+                  <p className="text-[14px] text-zinc-400 mt-2 mb-8 font-sans">
+                    Already have an account?{' '}
+                    <button
+                      id="switch-to-login"
+                      type="button"
+                      onClick={() => {
+                        setAuthMode('login');
+                        setErrorMessage('');
+                        setSuccessMessage('');
+                      }}
+                      className="text-[#3b82f6] hover:text-[#60a5fa] transition-colors font-medium bg-transparent border-0 p-0 cursor-pointer outline-none"
+                    >
+                      Sign in
+                    </button>
+                  </p>
+
+                  {errorMessage && (
+                    <div className="mb-6 p-3.5 rounded-xl bg-red-950/20 border border-red-900/30 text-red-400 text-[13px] flex items-start gap-2.5 leading-relaxed font-sans">
+                      <MaterialIcon name="error" fill={true} className="text-[16px] text-red-500 shrink-0 mt-0.5" />
+                      <span>{errorMessage}</span>
+                    </div>
+                  )}
+                  {successMessage && (
+                    <div className="mb-6 p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-900/30 text-emerald-400 text-[13px] flex items-start gap-2.5 leading-relaxed font-sans">
+                      <MaterialIcon name="check" className="text-[16px] text-emerald-500 shrink-0 mt-0.5" />
+                      <span>{successMessage}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleEmailAuthSubmit} className="space-y-4">
+                    <div className="flex flex-col gap-1.5 focus-within:text-[#3b82f6]">
+                      <input
+                        id="auth-email"
+                        type="email"
+                        required
+                        disabled={isLoading}
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="Email address"
+                        className="w-full bg-zinc-900/40 border border-zinc-800 hover:border-zinc-700 focus:border-zinc-500 text-[14px] text-white placeholder-zinc-500 outline-none transition-all duration-150 disabled:opacity-50 px-4 py-3 rounded-xl font-sans"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 focus-within:text-[#3b82f6]">
+                      <div className="relative">
+                        <input
+                          id="auth-password"
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          disabled={isLoading}
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="Password"
+                          className="w-full bg-zinc-900/40 border border-zinc-800 hover:border-zinc-700 focus:border-zinc-500 text-[14px] text-white placeholder-zinc-500 outline-none transition-all duration-150 disabled:opacity-50 px-4 py-3 pr-11 rounded-xl font-sans"
+                        />
+                        <button
+                          id="toggle-password"
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3.5 top-[13px] text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer select-none"
+                        >
+                          {showPassword ? <MaterialIcon name="visibility_off" className="text-[18px]" /> : <MaterialIcon name="visibility" className="text-[18px]" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 focus-within:text-[#3b82f6]">
+                      <div className="relative">
+                        <input
+                          id="auth-confirm-password"
+                          type={showConfirmPassword ? 'text' : 'password'}
+                          required
+                          disabled={isLoading}
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          placeholder="Confirm password"
+                          className="w-full bg-zinc-900/40 border border-zinc-800 hover:border-zinc-700 focus:border-zinc-500 text-[14px] text-white placeholder-zinc-500 outline-none transition-all duration-150 disabled:opacity-50 px-4 py-3 pr-11 rounded-xl font-sans"
+                        />
+                        <button
+                          id="toggle-confirm-password"
+                          type="button"
+                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                          className="absolute right-3.5 top-[13px] text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer select-none"
+                        >
+                          {showConfirmPassword ? <MaterialIcon name="visibility_off" className="text-[18px]" /> : <MaterialIcon name="visibility" className="text-[18px]" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-row items-center justify-end pt-4">
+                      <button
+                        type="submit"
+                        disabled={isLoading}
+                        className="bg-zinc-100 hover:bg-zinc-200 active:bg-zinc-300 text-zinc-950 font-semibold py-2.5 px-6 rounded-full text-[14px] cursor-pointer transition-colors flex items-center justify-center gap-2 select-none disabled:opacity-50 font-sans"
+                        style={{ boxShadow: 'none' }}
+                      >
+                        {isLoading ? (
+                          <div className="w-4 h-4 border-2 border-zinc-950/30 border-t-zinc-950 rounded-full animate-spin" />
+                        ) : (
+                          <span>Continue</span>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="relative flex py-6 items-center">
+                    <div className="flex-grow border-t border-zinc-800/80"></div>
+                    <span className="flex-shrink mx-4 text-xs text-zinc-500 font-medium font-sans uppercase tracking-wider">Or</span>
+                    <div className="flex-grow border-t border-zinc-800/80"></div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <button
+                      type="button"
+                      onClick={handleGoogleSignIn}
+                      disabled={isLoading}
+                      className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 bg-zinc-900/40 hover:bg-zinc-800/50 text-white rounded-full text-[14px] font-semibold transition-colors duration-150 border border-zinc-800 disabled:opacity-50 cursor-pointer font-sans"
+                    >
+                      <Icon icon="logos:google-icon" className="w-[20px] h-[20px] shrink-0" />
+                      <span>Continue with Google</span>
+                    </button>
+                    
+                    <button
+                      type="button"
+                      onClick={handleYahooSignIn}
+                      disabled={isLoading}
+                      className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 bg-zinc-900/40 hover:bg-zinc-800/50 text-white rounded-full text-[14px] font-semibold transition-colors duration-150 border border-zinc-800 disabled:opacity-50 cursor-pointer font-sans"
+                    >
+                      <img src="/Logo-v3.svg?v=fixed" alt="Yahoo" className="w-[20px] h-[20px] object-contain shrink-0" referrerPolicy="no-referrer" />
+                      <span>Continue with Yahoo</span>
+                    </button>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="forgot_password"
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                  className="flex flex-col"
+                >
+                  <h2 id="auth-title" className="text-3xl font-bold text-white tracking-tight font-sans">
+                    Reset password
+                  </h2>
+                  <p className="text-[14px] text-zinc-400 mt-2 mb-8 font-sans">
+                    <button
+                      id="switch-to-login-forgot"
+                      type="button"
+                      onClick={() => {
+                        setAuthMode('login');
+                        setErrorMessage('');
+                        setSuccessMessage('');
+                      }}
+                      className="text-[#3b82f6] hover:text-[#60a5fa] transition-colors font-medium bg-transparent border-0 p-0 cursor-pointer outline-none"
+                    >
+                      Back to Sign in
+                    </button>
+                  </p>
+
+                  {errorMessage && (
+                    <div className="mb-6 p-3.5 rounded-xl bg-red-950/20 border border-red-900/30 text-red-400 text-[13px] flex items-start gap-2.5 leading-relaxed font-sans">
+                      <MaterialIcon name="error" fill={true} className="text-[16px] text-red-500 shrink-0 mt-0.5" />
+                      <span>{errorMessage}</span>
+                    </div>
+                  )}
+                  {successMessage && (
+                    <div className="mb-6 p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-900/30 text-emerald-400 text-[13px] flex items-start gap-2.5 leading-relaxed font-sans">
+                      <MaterialIcon name="check" className="text-[16px] text-emerald-500 shrink-0 mt-0.5" />
+                      <span>{successMessage}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleEmailAuthSubmit} className="space-y-4">
+                    <div className="flex flex-col gap-1.5 focus-within:text-[#3b82f6]">
+                      <input
+                        id="auth-email"
+                        type="email"
+                        required
+                        disabled={isLoading}
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="Email address"
+                        className="w-full bg-zinc-900/40 border border-zinc-800 hover:border-zinc-700 focus:border-zinc-500 text-[14px] text-white placeholder-zinc-500 outline-none transition-all duration-150 disabled:opacity-50 px-4 py-3 rounded-xl font-sans"
+                      />
+                    </div>
+
+                    <div className="flex flex-row items-center justify-end pt-4">
+                      <button
+                        type="submit"
+                        disabled={isLoading}
+                        className="bg-zinc-100 hover:bg-zinc-200 active:bg-zinc-300 text-zinc-950 font-semibold py-2.5 px-6 rounded-full text-[14px] cursor-pointer transition-colors flex items-center justify-center gap-2 select-none disabled:opacity-50 font-sans"
+                        style={{ boxShadow: 'none' }}
+                      >
+                        {isLoading ? (
+                          <div className="w-4 h-4 border-2 border-zinc-950/30 border-t-zinc-950 rounded-full animate-spin" />
+                        ) : (
+                          <span>Continue</span>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         </div>
       </div>

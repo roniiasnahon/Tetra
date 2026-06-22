@@ -230,7 +230,7 @@ export const MainChat: React.FC<MainChatProps> = ({
           )}
         </div>
 
-        <div className="shrink-0 p-6 flex flex-col items-center gap-4">
+        <div className="shrink-0 px-6 pb-5 pt-1 flex flex-col items-center gap-2">
           <div className="w-full max-w-2xl bg-[#1a1a1a] rounded-[28px] p-2 flex flex-col transition-all">
             {attachedFile && (
               <div className="mx-2 mt-1 mb-2 animate-fade-in w-fit">
@@ -542,6 +542,18 @@ export const MainChat: React.FC<MainChatProps> = ({
             </div>
           </div>
         </div>
+        <p className="text-xs text-zinc-500 font-normal leading-none font-sans text-center select-none pt-1">
+          Cosmi is AI. For guidance,{' '}
+          <a 
+            href="https://genlang.vercel.app/#blog-post/why-human-authorship-matters" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="text-zinc-400 hover:text-white transition-colors underline decoration-zinc-750 hover:decoration-zinc-400 underline-offset-2 font-medium"
+          >
+            learn more
+          </a>
+          .
+        </p>
       </div>
     </div>
 

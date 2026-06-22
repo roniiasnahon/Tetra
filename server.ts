@@ -1184,6 +1184,138 @@ async function startServer() {
 
   app.use(express.json({ limit: "15mb" }));
 
+  // Helper to retrieve the current Firestore instance
+  const getDbInstance = () => {
+    const customDbId = (firebaseConfig as any).firestoreDatabaseId;
+    return customDbId ? getFirestore(admin.apps[0] || admin.app(), customDbId) : admin.firestore();
+  };
+
+  // In-memory verification code storage (bypasses Firestore rules and IAM issues for ephemeral email codes)
+  const verificationCodesData = new Map<string, { code: string, expiresAt: number }>();
+
+  // Resend API: Send 6-digit confirmation code
+  app.post("/api/send-verification", async (req, res) => {
+    const { email } = req.body;
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: "Email address is required." });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    // Generate a 6-digit number code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    try {
+      // Save code in memory (15 min expiration)
+      verificationCodesData.set(normalizedEmail, {
+        code,
+        expiresAt: Date.now() + 15 * 60 * 1000
+      });
+
+      console.log(`[VERIFICATION-MEMORY] Code saved for: ${normalizedEmail}`);
+
+      const gmailUser = process.env.GMAIL_USER;
+      const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
+
+      if (!gmailUser || !gmailAppPassword) {
+        console.log(`\n=============================================================`);
+        console.log(`[VERIFICATION CODE MOCK] NO GMAIL_USER OR GMAIL_APP_PASSWORD DETECTED!`);
+        console.log(`FOR TESTING, USE THIS VERIFICATION CODE FOR: ${normalizedEmail}`);
+        console.log(`CODE: ${code}`);
+        console.log(`=============================================================\n`);
+        return res.json({ 
+          success: true, 
+          mocked: true, 
+          message: "No Gmail credentials found. For testing, the verification code has been printed to the server command line console." 
+        });
+      }
+
+      const nodemailer = await import('nodemailer');
+      
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: gmailUser,
+          pass: gmailAppPassword,
+        },
+      });
+
+      const mailOptions = {
+        from: `"Cosmi" <${gmailUser}>`,
+        to: normalizedEmail,
+        subject: 'Verify your Cosmi account',
+        html: `
+<!DOCTYPE html>
+<html>
+<head>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body style="background-color: #f9fafb; padding: 40px 0; margin: 0; font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; -webkit-font-smoothing: antialiased;">
+          <div style="max-width: 440px; margin: 0 auto; padding: 44px 36px; border: 1px solid #e4e4e7; border-radius: 12px; background-color: #ffffff; color: #09090b; text-align: center; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);">
+            <div style="margin-bottom: 28px;">
+              <span style="font-family: 'DM Sans', sans-serif; font-weight: 800; font-size: 24px; letter-spacing: -0.05em; color: #09090b;">cosmi</span>
+            </div>
+            <h2 style="font-size: 21px; font-weight: 600; margin: 0 0 10px 0; color: #09090b; letter-spacing: -0.025em; line-height: 1.2;">Verify your email</h2>
+            <p style="font-size: 14px; line-height: 1.6; color: #4b5563; margin: 0 0 32px 0;">Please enter the 6-digit confirmation code below to complete your registration.</p>
+            
+            <div style="text-align: center; margin-bottom: 32px; white-space: nowrap;">
+              ${code.split('').map(digit => `<div style="display: inline-block; width: 44px; height: 52px; margin: 0 4px; line-height: 52px; font-size: 22px; font-weight: 600; color: #09090b; background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; text-align: center;">${digit}</div>`).join('')}
+            </div>
+
+            <p style="font-size: 12px; line-height: 1.6; color: #71717a; margin: 24px 0 0 0;">If you don't see this email in your inbox, please check your spam or junk folder.</p>
+            <p style="font-size: 11px; line-height: 1.6; color: #a1a1aa; margin: 12px 0 0 0;">This code is valid for 15 minutes. If you did not request this, you can ignore this security email.</p>
+          </div>
+</body>
+</html>
+        `
+      };
+
+      await transporter.sendMail(mailOptions);
+
+      console.log(`[NODEMAILER] Emailed verification code successfully to: ${normalizedEmail}`);
+      return res.json({ success: true });
+    } catch (err: any) {
+      console.error("[VERIFICATION-SEND-ERROR] Failed to send email:", err);
+      return res.status(500).json({ error: `Verification delivery failed: ${err.message || err}` });
+    }
+  });
+
+  // Resend API: Verify 6-digit confirmation code
+  app.post("/api/verify-code", async (req, res) => {
+    const { email, code } = req.body;
+    if (!email || !code) {
+      return res.status(400).json({ error: "Email address and code are both required." });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedCode = code.trim();
+
+    try {
+      const record = verificationCodesData.get(normalizedEmail);
+
+      if (!record) {
+        return res.status(400).json({ error: "No active verification request found for this email address. Please request a new code." });
+      }
+
+      // Expire codes after 15 minutes
+      if (Date.now() > record.expiresAt) {
+        verificationCodesData.delete(normalizedEmail);
+        return res.status(400).json({ error: "This confirmation code has expired. Please request a new one." });
+      }
+
+      if (record.code !== normalizedCode) {
+        return res.status(400).json({ error: "Invalid confirmation code. Please check and retype." });
+      }
+
+      // Valid and verified! Delete from memory to prevent multi-use
+      verificationCodesData.delete(normalizedEmail);
+      console.log(`[VERIFICATION-SUCCESS] ${normalizedEmail} successfully validated.`);
+      return res.json({ success: true, verified: true });
+    } catch (err: any) {
+      console.error("[VERIFICATION-CHECK-ERROR] Validation query failed:", err);
+      return res.status(500).json({ error: `Validation check failed: ${err.message || err}` });
+    }
+  });
+
   // Dynamic public metadata resolver for rich inline link-previews
   app.get("/api/link-preview", async (req, res) => {
     const { url } = req.query;
