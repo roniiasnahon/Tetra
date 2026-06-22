@@ -4247,6 +4247,7 @@ export default function App() {
   const [thinkingLevel, setThinkingLevel] = useState<'Standard' | 'Deep' | 'Instant'>('Standard');
   const [isAgentModelMenuOpen, setIsAgentModelMenuOpen] = useState(false);
   const [isAgentThinkingMenuOpen, setIsAgentThinkingMenuOpen] = useState(false);
+  const [isAgentMoreModelsOpen, setIsAgentMoreModelsOpen] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => {
     return localStorage.getItem("cosmi_settings_web_search") === "true";
   });
@@ -10087,10 +10088,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             onClick={() => {
                               setIsAgentModelMenuOpen(false);
                               setIsAgentThinkingMenuOpen(false);
+                              setIsAgentMoreModelsOpen(false);
                             }}
                           />
-                          <div className="absolute bottom-full right-0 mb-2 w-[280px] bg-[#1e1e22] border border-zinc-800/80 rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
-                            {modelsList.map((m) => {
+                          <motion.div 
+                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                            transition={{ duration: 0.15, ease: "easeOut" }}
+                            className="absolute bottom-full right-0 mb-2 w-[280px] bg-[#1e1e22] border border-zinc-800/80 rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5"
+                          >
+                            {modelsList.filter(m => !['mistral-large-latest', 'codestral-latest'].includes(m.id)).map((m) => {
                               const isSelected = selectedModel === m.id;
                               return (
                                 <button
@@ -10099,6 +10107,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     setSelectedModel(m.id);
                                     setIsAgentModelMenuOpen(false);
                                     setIsAgentThinkingMenuOpen(false);
+                                    setIsAgentMoreModelsOpen(false);
                                   }}
                                   className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                                     isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
@@ -10123,11 +10132,99 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               );
                             })}
 
+                            {/* More Models nested menu */}
+                            <div 
+                              onClick={() => {
+                                setIsAgentMoreModelsOpen(!isAgentMoreModelsOpen);
+                                setIsAgentThinkingMenuOpen(false);
+                              }}
+                              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                isAgentMoreModelsOpen ? 'bg-zinc-800/30' : ''
+                              }`}
+                            >
+                              <div className="flex items-start gap-2.5">
+                                <div className="w-4 shrink-0 flex items-center justify-center pt-0.5">
+                                  {['mistral-large-latest', 'codestral-latest'].includes(selectedModel) ? (
+                                    <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
+                                  ) : (
+                                    <div className="w-3.5" />
+                                  )}
+                                </div>
+                                <div className="flex flex-col gap-0.5 text-left">
+                                  <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">More models</span>
+                                  <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
+                                    {['mistral-large-latest', 'codestral-latest'].includes(selectedModel) 
+                                      ? modelsList.find(m => m.id === selectedModel)?.label 
+                                      : 'Advanced reasoning & coding specials'}
+                                  </span>
+                                </div>
+                              </div>
+                              <Icon icon="ph:caret-right-bold" className="w-3 h-3 text-zinc-500 mr-1.5 shrink-0" />
+                            </div>
+
+                            <AnimatePresence>
+                              {isAgentMoreModelsOpen && (
+                                <motion.div 
+                                  initial={{ opacity: 0, x: 10, scale: 0.95 }}
+                                  animate={{ opacity: 1, x: 0, scale: 1 }}
+                                  exit={{ opacity: 0, x: 10, scale: 0.95 }}
+                                  transition={{ duration: 0.15, ease: "easeOut" }}
+                                  className="absolute inset-0 bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[101] flex flex-col gap-0.5"
+                                >
+                                  <div className="flex items-center px-1 mb-1 border-b border-zinc-800/50 pb-1.5">
+                                    <button 
+                                      onClick={() => setIsAgentMoreModelsOpen(false)}
+                                      className="p-1.5 hover:bg-zinc-800/60 rounded-lg text-zinc-400 hover:text-white transition-colors"
+                                    >
+                                      <Icon icon="ph:caret-left-bold" className="w-3.5 h-3.5" />
+                                    </button>
+                                    <span className="text-[12px] font-bold text-zinc-400 uppercase tracking-widest ml-1">More Models</span>
+                                  </div>
+                                  <div className="overflow-y-auto max-h-[300px]">
+                                    {modelsList.filter(m => ['mistral-large-latest', 'codestral-latest'].includes(m.id)).map((m) => {
+                                      const isSelected = selectedModel === m.id;
+                                      return (
+                                        <button
+                                          key={m.id}
+                                          onClick={() => {
+                                            setSelectedModel(m.id);
+                                            setIsAgentModelMenuOpen(false);
+                                            setIsAgentThinkingMenuOpen(false);
+                                            setIsAgentMoreModelsOpen(false);
+                                          }}
+                                          className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                            isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
+                                          }`}
+                                        >
+                                          <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
+                                            {isSelected ? (
+                                              <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
+                                            ) : (
+                                              <div className="w-3.5" />
+                                            )}
+                                          </div>
+                                          <div className="flex flex-col gap-0.5 text-left min-w-0">
+                                            <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
+                                              {m.label}
+                                            </span>
+                                            <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
+                                              {m.desc}
+                                            </span>
+                                          </div>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+
                             <div className="border-t border-[#2d2d30]/60 my-1" />
 
                             <div 
                               onClick={() => {
                                 setIsAgentThinkingMenuOpen(!isAgentThinkingMenuOpen);
+                                setIsAgentMoreModelsOpen(false);
                               }}
                               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                                 isAgentThinkingMenuOpen ? 'bg-zinc-800/30' : ''
@@ -10143,46 +10240,64 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               <Icon icon="ph:caret-right-bold" className="w-3 h-3 text-zinc-500 mr-1.5 shrink-0" />
                             </div>
 
-                            {isAgentThinkingMenuOpen && (
-                              <div className="absolute right-full bottom-0 mr-2 w-[260px] bg-[#1e1e22] border border-zinc-800/80 rounded-2xl p-1.5 shadow-2xl z-[101] flex flex-col gap-0.5">
-                                {[
-                                  { id: 'Standard', label: 'Standard', desc: 'Balanced intelligence & speed' },
-                                  { id: 'Deep', label: 'Deep thinking', desc: 'Extensive reasoning for complex queries' },
-                                  { id: 'Instant', label: 'Instant', desc: 'Direct responses without deep reasoning' }
-                                ].map((opt) => {
-                                  const isSelected = thinkingLevel === opt.id;
-                                  return (
-                                    <button
-                                      key={opt.id}
-                                      onClick={() => {
-                                        setThinkingLevel(opt.id as any);
-                                        setIsAgentThinkingMenuOpen(false);
-                                      }}
-                                      className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
-                                        isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
-                                      }`}
+                            <AnimatePresence>
+                              {isAgentThinkingMenuOpen && (
+                                <motion.div 
+                                  initial={{ opacity: 0, x: 10, scale: 0.95 }}
+                                  animate={{ opacity: 1, x: 0, scale: 1 }}
+                                  exit={{ opacity: 0, x: 10, scale: 0.95 }}
+                                  transition={{ duration: 0.15, ease: "easeOut" }}
+                                  className="absolute inset-0 bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[101] flex flex-col gap-0.5"
+                                >
+                                  <div className="flex items-center px-1 mb-1 border-b border-zinc-800/50 pb-1.5">
+                                    <button 
+                                      onClick={() => setIsAgentThinkingMenuOpen(false)}
+                                      className="p-1.5 hover:bg-zinc-800/60 rounded-lg text-zinc-400 hover:text-white transition-colors"
                                     >
-                                      <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
-                                        {isSelected ? (
-                                          <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
-                                        ) : (
-                                          <div className="w-3.5" />
-                                        )}
-                                      </div>
-                                      <div className="flex flex-col gap-0.5 text-left min-w-0">
-                                        <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
-                                          {opt.label}
-                                        </span>
-                                        <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
-                                          {opt.desc}
-                                        </span>
-                                      </div>
+                                      <Icon icon="ph:caret-left-bold" className="w-3.5 h-3.5" />
                                     </button>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
+                                    <span className="text-[12px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Thinking Level</span>
+                                  </div>
+                                  {[
+                                    { id: 'Standard', label: 'Standard', desc: 'Balanced intelligence & speed' },
+                                    { id: 'Deep', label: 'Deep thinking', desc: 'Extensive reasoning for complex queries' },
+                                    { id: 'Instant', label: 'Instant', desc: 'Direct responses without deep reasoning' }
+                                  ].map((opt) => {
+                                    const isSelected = thinkingLevel === opt.id;
+                                    return (
+                                      <button
+                                        key={opt.id}
+                                        onClick={() => {
+                                          setThinkingLevel(opt.id as any);
+                                          setIsAgentThinkingMenuOpen(false);
+                                          setIsAgentModelMenuOpen(false);
+                                        }}
+                                        className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                          isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
+                                        }`}
+                                      >
+                                        <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
+                                          {isSelected ? (
+                                            <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
+                                          ) : (
+                                            <div className="w-3.5" />
+                                          )}
+                                        </div>
+                                        <div className="flex flex-col gap-0.5 text-left min-w-0">
+                                          <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
+                                            {opt.label}
+                                          </span>
+                                          <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
+                                            {opt.desc}
+                                          </span>
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </motion.div>
                         </>
                       )}
                     </div>

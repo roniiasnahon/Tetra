@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import { motion, AnimatePresence } from "motion/react";
 import TextareaAutosize from 'react-textarea-autosize';
 import ReactMarkdown from 'react-markdown';
 import { Icon } from './SolarIcon';
@@ -78,6 +79,7 @@ export const MainChat: React.FC<MainChatProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isThinkingMenuOpen, setIsThinkingMenuOpen] = useState(false);
+  const [isMoreModelsOpen, setIsMoreModelsOpen] = useState(false);
   const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
   const chatScrollContainerRef = useRef<HTMLDivElement>(null);
   const chatScrollPositionsRef = useRef<Record<string, number>>({});
@@ -408,11 +410,12 @@ export const MainChat: React.FC<MainChatProps> = ({
                       onClick={() => {
                         setIsModelMenuOpen(false);
                         setIsThinkingMenuOpen(false);
+                        setIsMoreModelsOpen(false);
                       }}
                     />
                     {/* Dropdown Menu */}
                     <div className="absolute bottom-full right-0 mb-2 w-[280px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
-                      {modelsList.map((m) => {
+                      {modelsList.filter(m => !['mistral-large-latest', 'codestral-latest'].includes(m.id)).map((m) => {
                         const isSelected = selectedModel === m.id;
                         return (
                           <button
@@ -421,6 +424,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                               setSelectedModel(m.id);
                               setIsModelMenuOpen(false);
                               setIsThinkingMenuOpen(false);
+                              setIsMoreModelsOpen(false);
                             }}
                             className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                               isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
@@ -447,6 +451,85 @@ export const MainChat: React.FC<MainChatProps> = ({
                         );
                       })}
 
+                      {/* More Models nested menu */}
+                      <div 
+                        onClick={() => {
+                          setIsMoreModelsOpen(!isMoreModelsOpen);
+                          setIsThinkingMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                          isMoreModelsOpen ? 'bg-zinc-800/30' : ''
+                        }`}
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <div className="w-4 shrink-0 flex items-center justify-center pt-0.5">
+                            {['mistral-large-latest', 'codestral-latest'].includes(selectedModel) ? (
+                              <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
+                            ) : (
+                              <div className="w-3.5" />
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-0.5 text-left">
+                            <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">More models</span>
+                            <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
+                              {['mistral-large-latest', 'codestral-latest'].includes(selectedModel) 
+                                ? modelsList.find(m => m.id === selectedModel)?.label 
+                                : 'Advanced reasoning & coding specials'}
+                            </span>
+                          </div>
+                        </div>
+                        <Icon icon="ph:caret-right-bold" className="w-3 h-3 text-zinc-500 mr-1.5 shrink-0" />
+                      </div>
+
+                      {/* Nested Flyout Menu for More Models */}
+                      <AnimatePresence>
+                        {isMoreModelsOpen && (
+                          <motion.div 
+                            initial={{ opacity: 0, x: -10, scale: 0.95 }}
+                            animate={{ opacity: 1, x: 0, scale: 1 }}
+                            exit={{ opacity: 0, x: -10, scale: 0.95 }}
+                            transition={{ duration: 0.15, ease: "easeOut" }}
+                            className="absolute left-full bottom-8 ml-2 w-[280px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[101] flex flex-col gap-0.5"
+                          >
+                            {modelsList.filter(m => ['mistral-large-latest', 'codestral-latest'].includes(m.id)).map((m) => {
+                              const isSelected = selectedModel === m.id;
+                              return (
+                                <button
+                                  key={m.id}
+                                  onClick={() => {
+                                    setSelectedModel(m.id);
+                                    setIsModelMenuOpen(false);
+                                    setIsThinkingMenuOpen(false);
+                                    setIsMoreModelsOpen(false);
+                                  }}
+                                  className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                    isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
+                                  }`}
+                                >
+                                  {/* Left check col */}
+                                  <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
+                                    {isSelected ? (
+                                      <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
+                                    ) : (
+                                      <div className="w-3.5" />
+                                    )}
+                                  </div>
+                                  {/* Right aligned text block */}
+                                  <div className="flex flex-col gap-0.5 text-left min-w-0">
+                                    <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
+                                      {m.label}
+                                    </span>
+                                    <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
+                                      {m.desc}
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
                       {/* Divider */}
                       <div className="border-t border-[#2d2d30]/60 my-1" />
 
@@ -454,6 +537,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                       <div 
                         onClick={() => {
                           setIsThinkingMenuOpen(!isThinkingMenuOpen);
+                          setIsMoreModelsOpen(false);
                         }}
                         className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                           isThinkingMenuOpen ? 'bg-zinc-800/30' : ''
@@ -470,48 +554,56 @@ export const MainChat: React.FC<MainChatProps> = ({
                       </div>
 
                       {/* Nested Flyout Menu */}
-                      {isThinkingMenuOpen && (
-                        <div className="absolute right-full bottom-0 mr-2 w-[260px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[101] flex flex-col gap-0.5">
-                          {/* Thinking Options List */}
-                          {[
-                            { id: 'Standard', label: 'Standard', desc: 'Balanced intelligence & speed' },
-                            { id: 'Deep', label: 'Deep thinking', desc: 'Extensive reasoning for complex queries' },
-                            { id: 'Instant', label: 'Instant', desc: 'Direct responses without deep reasoning' }
-                          ].map((opt) => {
-                            const isSelected = thinkingLevel === opt.id;
-                            return (
-                              <button
-                                key={opt.id}
-                                onClick={() => {
-                                  setThinkingLevel(opt.id as any);
-                                  setIsThinkingMenuOpen(false);
-                                }}
-                                className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
-                                  isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
-                                }`}
-                              >
-                                {/* Left Check col */}
-                                <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
-                                  {isSelected ? (
-                                    <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
-                                  ) : (
-                                    <div className="w-3.5" />
-                                  )}
-                                </div>
-                                {/* Options text block */}
-                                <div className="flex flex-col gap-0.5 text-left min-w-0 font-jakarta">
-                                  <span className="text-[13.5px] font-semibold text-zinc-100 leading-tight">
-                                    {opt.label}
-                                  </span>
-                                  <span className="text-[11.5px] text-zinc-400 leading-tight">
-                                    {opt.desc}
-                                  </span>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+                      <AnimatePresence>
+                        {isThinkingMenuOpen && (
+                          <motion.div 
+                            initial={{ opacity: 0, x: -10, scale: 0.95 }}
+                            animate={{ opacity: 1, x: 0, scale: 1 }}
+                            exit={{ opacity: 0, x: -10, scale: 0.95 }}
+                            transition={{ duration: 0.15, ease: "easeOut" }}
+                            className="absolute left-full bottom-0 ml-2 w-[260px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[101] flex flex-col gap-0.5"
+                          >
+                            {/* Thinking Options List */}
+                            {[
+                              { id: 'Standard', label: 'Standard', desc: 'Balanced intelligence & speed' },
+                              { id: 'Deep', label: 'Deep thinking', desc: 'Extensive reasoning for complex queries' },
+                              { id: 'Instant', label: 'Instant', desc: 'Direct responses without deep reasoning' }
+                            ].map((opt) => {
+                              const isSelected = thinkingLevel === opt.id;
+                              return (
+                                <button
+                                  key={opt.id}
+                                  onClick={() => {
+                                    setThinkingLevel(opt.id as any);
+                                    setIsThinkingMenuOpen(false);
+                                  }}
+                                  className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                    isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
+                                  }`}
+                                >
+                                  {/* Left Check col */}
+                                  <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
+                                    {isSelected ? (
+                                      <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
+                                    ) : (
+                                      <div className="w-3.5" />
+                                    )}
+                                  </div>
+                                  {/* Options text block */}
+                                  <div className="flex flex-col gap-0.5 text-left min-w-0 font-jakarta">
+                                    <span className="text-[13.5px] font-semibold text-zinc-100 leading-tight">
+                                      {opt.label}
+                                    </span>
+                                    <span className="text-[11.5px] text-zinc-400 leading-tight">
+                                      {opt.desc}
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
                   </>
                 )}
