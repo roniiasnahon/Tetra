@@ -677,40 +677,6 @@ export const Settings = ({
                   <h3 className="text-[18px] font-bold text-[#e1e1e0]">Preferences</h3>
                   
                   <div className="space-y-8">
-                    {/* Appearance theme select */}
-                    <div className="flex items-center justify-between border-b border-[#3f3f3f]/60 pb-6">
-                      <span className="text-[13px] font-medium text-[#e1e1e0]">Appearance</span>
-                      <div className="flex items-center bg-[#3a3a3a] border border-[#4a4a4a] rounded-lg p-0.5 shadow-sm">
-                        <button 
-                          onClick={() => {
-                            setAppearanceTheme("system");
-                            localStorage.setItem("cosmi_settings_appearance", "system");
-                          }}
-                          className={`p-1.5 rounded-md transition-colors ${appearanceTheme === "system" ? "bg-[#4f4f4f] text-[#e1e1e0]" : "text-zinc-400 hover:text-[#e1e1e0]"}`}
-                        >
-                          <Icon icon="ph:desktop" className="w-[16px] h-[16px]" />
-                        </button>
-                        <button 
-                          onClick={() => {
-                            setAppearanceTheme("light");
-                            localStorage.setItem("cosmi_settings_appearance", "light");
-                          }}
-                          className={`p-1.5 rounded-md transition-colors ${appearanceTheme === "light" ? "bg-[#4f4f4f] text-[#e1e1e0]" : "text-zinc-400 hover:text-[#e1e1e0]"}`}
-                        >
-                          <Icon icon="ph:sun" className="w-[16px] h-[16px]" />
-                        </button>
-                        <button 
-                          onClick={() => {
-                            setAppearanceTheme("dark");
-                            localStorage.setItem("cosmi_settings_appearance", "dark");
-                          }}
-                          className={`p-1.5 rounded-md transition-colors ${appearanceTheme === "dark" ? "bg-[#4f4f4f] text-[#e1e1e0]" : "text-zinc-400 hover:text-[#e1e1e0]"}`}
-                        >
-                          <Icon icon="ph:moon" className="w-[16px] h-[16px]" />
-                        </button>
-                      </div>
-                    </div>
-
                     {/* Chat Editor Font drop-down with matching design */}
                     <div className="flex items-center justify-between border-b border-[#3f3f3f]/60 pb-6 relative">
                       <span className="text-[13px] font-medium text-[#e1e1e0]">Chat font</span>

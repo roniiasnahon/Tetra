@@ -230,7 +230,7 @@ export const MainChat: React.FC<MainChatProps> = ({
           )}
         </div>
 
-        <div className="shrink-0 px-6 pb-5 pt-1 flex flex-col items-center gap-2">
+        <div className="shrink-0 px-6 pb-1.5 pt-1 flex flex-col items-center gap-2">
           <div className="w-full max-w-2xl bg-[#1a1a1a] rounded-[28px] p-2 flex flex-col transition-all">
             {attachedFile && (
               <div className="mx-2 mt-1 mb-2 animate-fade-in w-fit">

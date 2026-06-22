@@ -593,7 +593,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
                         return (
                           <input
                             key={index}
-                            ref={(el) => (inputRefs.current[index] = el)}
+                            ref={(el) => { inputRefs.current[index] = el; }}
                             type="text"
                             maxLength={6}
                             required

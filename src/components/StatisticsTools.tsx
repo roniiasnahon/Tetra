@@ -164,19 +164,117 @@ function MathLaTex({ math, displayMode = false }: { math: string; displayMode?: 
   }
 }
 
+const TOOLS_TRANSLATIONS: Record<string, Record<string, string>> = {
+  en: {
+    toolParam: "Tool Parameters",
+    calcBreakdown: "Calculation Breakdown",
+    saveHistory: "Save to Tools History",
+    interpretation: "Interpretation Guide",
+    populat: "Population Size (N)",
+    margin: "Margin of Error (e)",
+    slovinDesc: "Used when estimating sample sizes from a known finite population size. It provides a simple approximation of the target sample count."
+  },
+  es: {
+    toolParam: "Parámetros de la Herramienta",
+    calcBreakdown: "Desglose del Cálculo",
+    saveHistory: "Guardar en Historial",
+    interpretation: "Guía de Interpretación",
+    populat: "Tamaño de Población (N)",
+    margin: "Margen de Error (e)",
+    slovinDesc: "Se utiliza al calcular tamaños de muestra de una población conocida finita. Proporciona una aproximación sencilla."
+  },
+  fr: {
+    toolParam: "Paramètres de Outil",
+    calcBreakdown: "Répartition du calcul",
+    saveHistory: "Enregistrer l'historique",
+    interpretation: "Guide d'interprétation",
+    populat: "Taille de la population (N)",
+    margin: "Marge d'erreur (e)",
+    slovinDesc: "Utilisé pour estimer la taille des échantillons..."
+  },
+  de: {
+    toolParam: "Werkzeugparameter",
+    calcBreakdown: "Berechnungsaufschlüsselung",
+    saveHistory: "Im Verlauf speichern",
+    interpretation: "Interpretationsleitfaden",
+    populat: "Populationsgröße (N)",
+    margin: "Fehlertoleranz (e)",
+    slovinDesc: "Wird verwendet, um Probengrößen zu schätzen..."
+  },
+  it: {
+    toolParam: "Parametri Strumento",
+    calcBreakdown: "Ripartizione Calcolo",
+    saveHistory: "Salva in Cronologia",
+    interpretation: "Guida Interpretazione",
+    populat: "Dimensione Popolazione (N)",
+    margin: "Margine di Errore (e)",
+    slovinDesc: "Utilizzato per stimare dimensioni campione..."
+  },
+  pt: {
+    toolParam: "Parâmetros da Ferramenta",
+    calcBreakdown: "Detalhamento do Cálculo",
+    saveHistory: "Salvar no Histórico",
+    interpretation: "Guia de Interpretação",
+    populat: "Tamanho da População (N)",
+    margin: "Margem de Erro (e)",
+    slovinDesc: "Usado para estimar tamanhos de amostra..."
+  },
+  ar: {
+    toolParam: "معلمات الأداة",
+    calcBreakdown: "تفصيل الحساب",
+    saveHistory: "حفظ في السجل",
+    interpretation: "دليل التفسير",
+    populat: "حجم السكان (N)",
+    margin: "هامش الخطأ (e)",
+    slovinDesc: "تُستخدم عند تقدير أحجام العينة..."
+  },
+  zh: {
+    toolParam: "工具参数",
+    calcBreakdown: "计算分类",
+    saveHistory: "保存到历史记录",
+    interpretation: "解释指南",
+    populat: "人口规模 (N)",
+    margin: "误差范围 (e)",
+    slovinDesc: "用于从已知有限总体估计样本量。它提供了目标样本数的简单近似值。"
+  },
+  ja: {
+    toolParam: "ツール パラメータ",
+    calcBreakdown: "計算の内訳",
+    saveHistory: "履歴に保存",
+    interpretation: "解釈ガイド",
+    populat: "母集団のサイズ (N)",
+    margin: "許容誤差 (e)",
+    slovinDesc: "既知の有限母集団からサンプルサイズを推定する場合に使用します。目標のサンプル数の簡単な近似値を提供します。"
+  },
+  hi: {
+    toolParam: "उपकरण पैरामीटर",
+    calcBreakdown: "गणना विवरण",
+    saveHistory: "इतिहास में सहेजें",
+    interpretation: "व्याख्या मार्गदर्शिका",
+    populat: "जनसंख्या आकार (N)",
+    margin: "त्रुटि का मार्जिन (e)",
+    slovinDesc: "ज्ञात सीमित जनसंख्या आकार से नमूना आकारों का अनुमान लगाते समय उपयोग किया जाता है।"
+  }
+};
+
 export function StatisticsTools({
   onAddHistory,
   selectedHistoryItem,
   onClearSelectedHistoryItem,
   activeTab: controlledActiveTab,
-  onChangeActiveTab
+  onChangeActiveTab,
+  appLanguage
 }: {
   onAddHistory?: (item: any) => void;
   selectedHistoryItem?: any;
   onClearSelectedHistoryItem?: () => void;
   activeTab?: 'slovin' | 'percentage' | 'weighted' | 'likert' | 'ai' | 'citation';
   onChangeActiveTab?: (tab: 'slovin' | 'percentage' | 'weighted' | 'likert' | 'ai' | 'citation') => void;
+  appLanguage?: string;
 } = {}) {
+  const currentLang = appLanguage || "en";
+  const st = (key: string, defaultText: string) => TOOLS_TRANSLATIONS[currentLang]?.[key] || TOOLS_TRANSLATIONS["en"][key] || defaultText;
+
   const [internalActiveTab, setInternalActiveTab] = useState<'slovin' | 'percentage' | 'weighted' | 'likert' | 'ai' | 'citation'>('slovin');
 
   const activeTab = controlledActiveTab !== undefined ? controlledActiveTab : internalActiveTab;
@@ -981,7 +1079,7 @@ export function StatisticsTools({
     return (
       <div className="space-y-4">
         <div>
-          <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Population Size (N)</label>
+          <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">{st("populat", "Population Size (N)")}</label>
           <CustomNumberInput
             value={population}
             min={1}
@@ -991,7 +1089,7 @@ export function StatisticsTools({
           />
         </div>
         <div>
-          <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Margin of Error (e)</label>
+          <label className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">{st("margin", "Margin of Error (e)")}</label>
           <CustomNumberInput
             value={marginOfError}
             step={0.01}
@@ -1006,7 +1104,7 @@ export function StatisticsTools({
           <div className="font-semibold text-[#a1a1aa] mb-1">
             Slovin's Formula Indicator
           </div>
-          Used when estimating sample sizes from a known finite population size. It provides a simple approximation of the target sample count necessary for confidence limits.
+          {st("slovinDesc", "Used when estimating sample sizes from a known finite population size. It provides a simple approximation of the target sample count necessary for confidence limits.")}
         </div>
       </div>
     );
@@ -1033,7 +1131,7 @@ export function StatisticsTools({
       <div className="flex flex-col h-full overflow-hidden">
         <div className="flex items-center justify-between px-8 pt-8 pb-3 shrink-0">
           <h3 className="text-xs font-semibold text-[#e4e4e7] uppercase tracking-wide">
-            Calculation Breakdown
+            {st("calcBreakdown", "Calculation Breakdown")}
           </h3>
           {valid && (
             <button
@@ -1048,7 +1146,7 @@ export function StatisticsTools({
               className="py-1 px-2.5 hover:bg-zinc-800 border border-zinc-700/60 hover:text-white text-[10px] text-zinc-300 rounded-lg transition-colors font-bold select-none cursor-pointer flex items-center gap-1.5 bg-transparent shadow-none border-none outline-none active:scale-95"
             >
               <Icon icon="ph:bookmark-bold" className="w-3.5 h-3.5" />
-              Save to Tools History
+              {st("saveHistory", "Save to Tools History")}
             </button>
           )}
         </div>
@@ -1065,7 +1163,7 @@ export function StatisticsTools({
                   onClick={() => setShowSlovinInterpretation(!showSlovinInterpretation)}
                   className="w-fit px-0 py-3 flex items-center gap-2 hover:opacity-80 transition-opacity group cursor-pointer border-none bg-transparent outline-none"
                 >
-                  <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest group-hover:text-zinc-200 transition-colors">Interpretation Guide</span>
+                  <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest group-hover:text-zinc-200 transition-colors">{st("interpretation", "Interpretation Guide")}</span>
                   <Icon 
                     icon="ph:caret-down-bold" 
                     className={`w-3 h-3 text-zinc-500 transition-transform duration-300 ${showSlovinInterpretation ? 'rotate-180' : ''}`} 
@@ -2612,7 +2710,7 @@ export function StatisticsTools({
          {/* Left Side: Parameters / Files */}
          <div className="w-full md:w-4/12 flex flex-col justify-start overflow-hidden mb-8 md:mb-0 border-b md:border-b-0 border-[#222225] h-full">
             <h3 className="text-xs font-semibold text-[#e4e4e7] pt-8 pb-3 uppercase tracking-wide px-8 shrink-0">
-              Tool Parameters
+              {st("toolParam", "Tool Parameters")}
             </h3>
             <div className="px-8 pt-6 pb-6 space-y-4 overflow-y-auto scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
               {activeTab === 'slovin' && renderSlovinLeft()}

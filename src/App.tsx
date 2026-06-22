@@ -15,7 +15,7 @@ import { UploadsManager, UploadTask } from "./components/UploadsManager";
 import { motion, AnimatePresence } from "motion/react";
 import { Icon } from "./components/SolarIcon";
 import { MaterialIcon } from "./components/MaterialIcon";
-import { Sidebar, Plain2, PaperclipRounded2, Notes, FolderWithFiles, PenNewRound, FolderOpen, MinimalisticMagnifier, MenuDots, UploadMinimalistic, AddFolder, AddCircle, PaletteRound, NotebookBookmark } from "@solar-icons/react";
+import { Sidebar, Plain2, PaperclipRounded2, Notes, FolderWithFiles, PenNewRound, FolderOpen, MinimalisticMagnifier, MenuDots, UploadMinimalistic, AddFolder, AddCircle, PaletteRound, NotebookBookmark, SidebarMinimalistic, HandStars } from "@solar-icons/react";
 import { Plus, X as XIcon, Minus, Square } from "lucide-react";
 import html2pdf from "html2pdf.js";
 
@@ -59,7 +59,7 @@ const Edit2 = makeIcon('edit');
 const ExternalLink = makeIcon('open_in_new');
 const Unlink = makeIcon('link_off');
 const LinkIcon = makeIcon('link');
-const PanelRight = makeIcon('view_sidebar');
+
 const Coffee = makeIcon('coffee');
 const X = makeIcon('close');
 import { StatisticsTools } from "./components/StatisticsTools";
@@ -786,7 +786,698 @@ export const formatAbstractText = (text: string) => {
   return formatted.trim();
 };
 
+const TRANSLATIONS = {
+  en: {
+    newChat: "New Chat",
+    searchPlaceholder: "Search Chats / Docs...",
+    noRecentChats: "No recent chats",
+    settings: "Settings",
+    help: "Help",
+    language: "Language",
+    learnMore: "Learn more",
+    logOut: "Log out",
+    library: "Library",
+    files: "Files",
+    uploads: "Uploads",
+    statistics: "Statistics",
+    home: "Home",
+    untitled: "Untitled",
+    collapseSidePanel: "Collapse Side Panel",
+    expandSidePanel: "Expand Side Panel",
+    untitledFolder: "Untitled Folder",
+    newFolder: "New Folder",
+    saveMessage: "Saved a few seconds ago",
+    activeChats: "Active Chats",
+    documents: "Documents",
+    tools: "Tools",
+    chatWithPaperPilot: "Chat with PaperPilot",
+    selectLanguage: "Select Language",
+    chooseLanguageDesc: "Choose your preferred primary interface display language.",
+    english: "English",
+    french: "French (Français)",
+    spanish: "Spanish (Español)",
+    german: "German (Deutsch)",
+    italian: "Italian (Italiano)",
+    portuguese: "Portuguese (Português)",
+    arabic: "Arabic (العربية)",
+    chinese: "Chinese (简体中文)",
+    japanese: "Japanese (日本語)",
+    hindi: "Hindi (हिन्दी)",
+    close: "Close",
+    uploadFile: "Upload File",
+    searchCollection: "Search collection...",
+    createDocument: "Create Document",
+    chatsTab: "Chats",
+    allFiles: "All Files",
+    itemsCount: "items",
+    allLibraryItems: "All Library Items",
+    recentDocuments: "Recent Documents",
+    emptyLibrary: "Your library is empty. Upload documents or start a chat!",
+    dropFilesHere: "Drop files here to upload",
+    signInWithGoogle: "Sign in with Google",
+    saving: "Saving...",
+    savedJustNow: "Saved just now",
+    slovinLabel: "Slovin's Formula",
+    percentageLabel: "Percentage Calc",
+    weightedLabel: "Weighted Mean",
+    likertLabel: "Likert Scale",
+    analysisLabel: "Data Analysis",
+    citationsLabel: "Citations",
+    history: "History",
+    clearAll: "clear all",
+    noComputations: "No computations saved",
+    slovinTitle: "Slovin's Margin of Error & Sample Size",
+    percentageTitle: "Percentage Calculator & Distribution",
+    weightedTitle: "Weighted Arithmetic Mean",
+    likertTitle: "Likert Scale",
+    citationsTitle: "Citations",
+    analysisTitle: "Data Analysis"
+  },
+  es: {
+    newChat: "Nuevo Chat",
+    searchPlaceholder: "Buscar chats / documentos...",
+    noRecentChats: "Sin chats recientes",
+    settings: "Configuración",
+    help: "Ayuda",
+    language: "Idioma",
+    learnMore: "Más información",
+    logOut: "Cerrar sesión",
+    library: "Biblioteca",
+    files: "Archivos",
+    uploads: "Cargas",
+    statistics: "Estadísticas",
+    home: "Inicio",
+    untitled: "Sin título",
+    collapseSidePanel: "Contraer panel lateral",
+    expandSidePanel: "Expandir panel lateral",
+    untitledFolder: "Carpeta sin título",
+    newFolder: "Nueva carpeta",
+    saveMessage: "Guardado hace unos segundos",
+    activeChats: "Chats activos",
+    documents: "Documentos",
+    tools: "Herramientas",
+    chatWithPaperPilot: "Chatea con PaperPilot",
+    selectLanguage: "Seleccionar idioma",
+    chooseLanguageDesc: "Elige tu idioma de visualización de la interfaz.",
+    english: "Inglés (English)",
+    french: "Francés (Français)",
+    spanish: "Español (Spanish)",
+    german: "Alemán (Deutsch)",
+    italian: "Italiano (Italian)",
+    portuguese: "Portugués (Português)",
+    arabic: "Árabe (العربية)",
+    chinese: "Chino (简体中文)",
+    japanese: "Japonés (日本語)",
+    hindi: "Hindi (हिन्दी)",
+    close: "Cerrar",
+    uploadFile: "Cargar archivo",
+    searchCollection: "Buscar colección...",
+    createDocument: "Crear documento",
+    chatsTab: "Chats",
+    allFiles: "Todos los archivos",
+    itemsCount: "elementos",
+    allLibraryItems: "Todos los elementos",
+    recentDocuments: "Documentos recientes",
+    emptyLibrary: "Tu biblioteca está vacía. ¡Sube documentos o inicia un chat!",
+    dropFilesHere: "Suelte los archivos aquí para cargarlos",
+    signInWithGoogle: "Iniciar sesión con Google",
+    saving: "Guardando...",
+    savedJustNow: "Guardado ahora mismo",
+    slovinLabel: "Fórmula de Slovin",
+    percentageLabel: "Cálculo de Porcentajes",
+    weightedLabel: "Media Ponderada",
+    likertLabel: "Escala de Likert",
+    analysisLabel: "Análisis de Datos",
+    citationsLabel: "Citas",
+    history: "Historial",
+    clearAll: "borrar todo",
+    noComputations: "No hay cómputos guardados",
+    slovinTitle: "Margen de Error y Tamaño de la Muestra de Slovin",
+    percentageTitle: "Calculadora de Porcentajes y Distribución",
+    weightedTitle: "Media Aritmética Ponderada",
+    likertTitle: "Escala de Likert",
+    citationsTitle: "Citas",
+    analysisTitle: "Análisis de Datos"
+  },
+  fr: {
+    newChat: "Nouvelle discussion",
+    searchPlaceholder: "Rechercher discussions / docs...",
+    noRecentChats: "Pas de discussions récentes",
+    settings: "Paramètres",
+    help: "Aide",
+    language: "Langue",
+    learnMore: "En savoir plus",
+    logOut: "Se déconnecter",
+    library: "Bibliothèque",
+    files: "Fichiers",
+    uploads: "Téléversements",
+    statistics: "Statistiques",
+    home: "Accueil",
+    untitled: "Sans titre",
+    collapseSidePanel: "Réduire le panneau",
+    expandSidePanel: "Agrandir le panneau",
+    untitledFolder: "Dossier sans titre",
+    newFolder: "Nouveau dossier",
+    saveMessage: "Enregistré il y a quelques secondes",
+    activeChats: "Discussions actives",
+    documents: "Documents",
+    tools: "Outils",
+    chatWithPaperPilot: "Discuter avec PaperPilot",
+    selectLanguage: "Sélectionner la langue",
+    chooseLanguageDesc: "Choisissez votre langue d'affichage préférée.",
+    english: "Anglais (English)",
+    french: "Français (French)",
+    spanish: "Espagnol (Español)",
+    german: "Allemand (Deutsch)",
+    italian: "Italien (Italiano)",
+    portuguese: "Portugais (Português)",
+    arabic: "Arabe (العربية)",
+    chinese: "Chinois (简体中文)",
+    japanese: "Japonais (日本語)",
+    hindi: "Hindi (हिन्दी)",
+    close: "Fermer",
+    uploadFile: "Téléverser un fichier",
+    searchCollection: "Rechercher la collection...",
+    createDocument: "Créer un document",
+    chatsTab: "Discussions",
+    allFiles: "Tous les fichiers",
+    itemsCount: "éléments",
+    allLibraryItems: "Tous les éléments de la bibliothèque",
+    recentDocuments: "Documents récents",
+    emptyLibrary: "Votre bibliothèque est vide. Téléversez des documents ou lancez une discussion !",
+    dropFilesHere: "Déposez des fichiers ici pour les téléverser",
+    signInWithGoogle: "Se connecter avec Google",
+    saving: "Enregistrement...",
+    savedJustNow: "Enregistré à l'instant",
+    slovinLabel: "Formule de Slovin",
+    percentageLabel: "Calcul Pourcentage",
+    weightedLabel: "Moyenne Pondérée",
+    likertLabel: "Échelle de Likert",
+    analysisLabel: "Analyse des Données",
+    citationsLabel: "Citations",
+    history: "Historique",
+    clearAll: "tout effacer",
+    noComputations: "Aucun calcul enregistré",
+    slovinTitle: "Marge d'erreur et taille de l'échantillon de Slovin",
+    percentageTitle: "Calculateur de pourcentage et distribution",
+    weightedTitle: "Moyenne arithmétique pondérée",
+    likertTitle: "Échelle de Likert",
+    citationsTitle: "Citations",
+    analysisTitle: "Analyse des données"
+  },
+  de: {
+    newChat: "Neuer Chat",
+    searchPlaceholder: "Chats / Dokumente durchsuchen...",
+    noRecentChats: "Keine letzten Chats",
+    settings: "Einstellungen",
+    help: "Hilfe",
+    language: "Sprache",
+    learnMore: "Mehr erfahren",
+    logOut: "Abmelden",
+    library: "Bibliothek",
+    files: "Dateien",
+    uploads: "Uploads",
+    statistics: "Statistiken",
+    home: "Startseite",
+    untitled: "Unbenannt",
+    collapseSidePanel: "Seitenleiste einklappen",
+    expandSidePanel: "Seitenleiste ausklappen",
+    untitledFolder: "Unbenannter Ordner",
+    newFolder: "Neuer Ordner",
+    saveMessage: "Vor wenigen Sekunden gespeichert",
+    activeChats: "Aktive Chats",
+    documents: "Dokumente",
+    tools: "Werkzeuge",
+    chatWithPaperPilot: "Mit PaperPilot chatten",
+    selectLanguage: "Sprache auswählen",
+    chooseLanguageDesc: "Wählen Sie Ihre bevorzugte Anzeigesprache.",
+    english: "Englisch (English)",
+    french: "Französisch (Français)",
+    spanish: "Spanisch (Español)",
+    german: "Deutsch (German)",
+    italian: "Italienisch (Italiano)",
+    portuguese: "Portugiesisch (Português)",
+    arabic: "Arabisch (العربية)",
+    chinese: "Chinesisch (简体中文)",
+    japanese: "Japanisch (日本語)",
+    hindi: "Hindi (हिन्दी)",
+    close: "Schließen",
+    uploadFile: "Datei hochladen",
+    searchCollection: "Kollektion durchsuchen...",
+    createDocument: "Dokument erstellen",
+    chatsTab: "Chats",
+    allFiles: "Alle Dateien",
+    itemsCount: "Elemente",
+    allLibraryItems: "Alle Bibliothekselemente",
+    recentDocuments: "Letzte Dokumente",
+    emptyLibrary: "Ihre Bibliothek ist leer. Laden Sie Dokumente hoch oder starten Sie einen Chat!",
+    dropFilesHere: "Dateien zum Hochladen hier ablegen",
+    signInWithGoogle: "Mit Google anmelden",
+    saving: "Speichern...",
+    savedJustNow: "Gerade eben gespeichert",
+    slovinLabel: "Slovins Formel",
+    percentageLabel: "Prozentrechnung",
+    weightedLabel: "Gewichtetes Mittel",
+    likertLabel: "Likert-Skala",
+    analysisLabel: "Datenanalyse",
+    citationsLabel: "Zitate",
+    history: "Verlauf",
+    clearAll: "alles löschen",
+    noComputations: "Keine Berechnungen gespeichert",
+    slovinTitle: "Slovins Fehlergrenze & Stichprobengröße",
+    percentageTitle: "Prozentrechner & Verteilung",
+    weightedTitle: "Gewichtetes arithmetisches Mittel",
+    likertTitle: "Likert-Skala",
+    citationsTitle: "Zitate",
+    analysisTitle: "Datenanalyse"
+  },
+  it: {
+    newChat: "Nuova Chat",
+    searchPlaceholder: "Cerca chat / documenti...",
+    noRecentChats: "Nessuna chat recente",
+    settings: "Impostazioni",
+    help: "Aiuto",
+    language: "Lingua",
+    learnMore: "Scopri di più",
+    logOut: "Disconnetti",
+    library: "Libreria",
+    files: "File",
+    uploads: "Caricamenti",
+    statistics: "Statistiche",
+    home: "Home",
+    untitled: "Senza titolo",
+    collapseSidePanel: "Riduci barra laterale",
+    expandSidePanel: "Espandi barra laterale",
+    untitledFolder: "Cartella senza titolo",
+    newFolder: "Nuova cartella",
+    saveMessage: "Salvato pochi secondi fa",
+    activeChats: "Chat attive",
+    documents: "Documenti",
+    tools: "Strumenti",
+    chatWithPaperPilot: "Chatta con PaperPilot",
+    selectLanguage: "Seleziona lingua",
+    chooseLanguageDesc: "Scegli la tua lingua preferita dell'interfaccia.",
+    english: "Inglese (English)",
+    french: "Francese (Français)",
+    spanish: "Spagnolo (Español)",
+    german: "Tedesco (Deutsch)",
+    italian: "Italiano (Italian)",
+    portuguese: "Portoghese (Português)",
+    arabic: "Arabo (العربية)",
+    chinese: "Cinese (简体中文)",
+    japanese: "Giapponese (日本語)",
+    hindi: "Hindi (हिन्दी)",
+    close: "Chiudi",
+    uploadFile: "Carica file",
+    searchCollection: "Cerca collezione...",
+    createDocument: "Crea documento",
+    chatsTab: "Chat",
+    allFiles: "Tutti i file",
+    itemsCount: "elementi",
+    allLibraryItems: "Tutti gli elementi della libreria",
+    recentDocuments: "Documenti recenti",
+    emptyLibrary: "La tua libreria è vuota. Carica documenti o avvia una chat!",
+    dropFilesHere: "Rilascia i file qui per caricarli",
+    signInWithGoogle: "Accedi con Google",
+    saving: "Salvataggio...",
+    savedJustNow: "Salvato ora",
+    slovinLabel: "Formula di Slovin",
+    percentageLabel: "Calcolo Percentuale",
+    weightedLabel: "Media Ponderata",
+    likertLabel: "Scala Likert",
+    analysisLabel: "Analisi dei Dati",
+    citationsLabel: "Citazioni",
+    history: "Cronologia",
+    clearAll: "cancella tutto",
+    noComputations: "Nessun calcolo salvato",
+    slovinTitle: "Margine di Errore e Dimensione del Campione di Slovin",
+    percentageTitle: "Calcolatore Percentuali e Distribuzione",
+    weightedTitle: "Media Aritmetica Ponderata",
+    likertTitle: "Scala Likert",
+    citationsTitle: "Citazioni",
+    analysisTitle: "Analisi dei Dati"
+  },
+  pt: {
+    newChat: "Nova Conversa",
+    searchPlaceholder: "Pesquisar conversas / docs...",
+    noRecentChats: "Sem conversas recentes",
+    settings: "Configurações",
+    help: "Ajuda",
+    language: "Idioma",
+    learnMore: "Saber mais",
+    logOut: "Sair",
+    library: "Biblioteca",
+    files: "Arquivos",
+    uploads: "Uploads",
+    statistics: "Estatísticas",
+    home: "Início",
+    untitled: "Sem título",
+    collapseSidePanel: "Recolher painel lateral",
+    expandSidePanel: "Expandir painel lateral",
+    untitledFolder: "Pasta sem título",
+    newFolder: "Nova pasta",
+    saveMessage: "Salvo há poucos segundos",
+    activeChats: "Conversas ativas",
+    documents: "Documentos",
+    tools: "Ferramentas",
+    chatWithPaperPilot: "Conversar com PaperPilot",
+    selectLanguage: "Selecionar Idioma",
+    chooseLanguageDesc: "Escolha o seu idioma de preferência para a interface.",
+    english: "Inglês (English)",
+    french: "Francés (Français)",
+    spanish: "Espanhol (Español)",
+    german: "Alemão (Deutsch)",
+    italian: "Italiano (Italiano)",
+    portuguese: "Português (Portuguese)",
+    arabic: "Árabe (العربية)",
+    chinese: "Chinês (简体中文)",
+    japanese: "Japonês (日本語)",
+    hindi: "Hindi (हिन्दी)",
+    close: "Fechar",
+    uploadFile: "Enviar arquivo",
+    searchCollection: "Pesquisar coleção...",
+    createDocument: "Criar documento",
+    chatsTab: "Conversas",
+    allFiles: "Todos os arquivos",
+    itemsCount: "itens",
+    allLibraryItems: "Todos os itens de biblioteca",
+    recentDocuments: "Documentos recentes",
+    emptyLibrary: "Sua biblioteca está vazia. Envie documentos ou inicie uma conversa!",
+    dropFilesHere: "Arraste os arquivos aqui para enviá-los",
+    signInWithGoogle: "Entrar com Google",
+    saving: "Salvando...",
+    savedJustNow: "Salvo agora mesmo",
+    slovinLabel: "Fórmula de Slovin",
+    percentageLabel: "Cálculo de Porcentagem",
+    weightedLabel: "Média Ponderada",
+    likertLabel: "Escala Likert",
+    analysisLabel: "Análise de Dados",
+    citationsLabel: "Citações",
+    history: "Histórico",
+    clearAll: "limpar tudo",
+    noComputations: "Nenhum cálculo salvo",
+    slovinTitle: "Margen de Erro e Tamanho da Amostra de Slovin",
+    percentageTitle: "Calculadora de Porcentagem e Distribuição",
+    weightedTitle: "Média Aritmética Ponderada",
+    likertTitle: "Escala Likert",
+    citationsTitle: "Citações",
+    analysisTitle: "Análise de Dados"
+  },
+  ar: {
+    newChat: "محادثة جديدة",
+    searchPlaceholder: "البحث في المحادثات / المستندات...",
+    noRecentChats: "لا توجد محادثات أخيرة",
+    settings: "الإعدادات",
+    help: "المساعدة",
+    language: "اللغة",
+    learnMore: "تعرف على المزيد",
+    logOut: "تسجيل الخروج",
+    library: "المكتبة",
+    files: "الملفات",
+    uploads: "المرفوعات",
+    statistics: "الإحصائيات",
+    home: "الرئيسية",
+    untitled: "بدون عنوان",
+    collapseSidePanel: "طي الشريط الجانبي",
+    expandSidePanel: "توسيع الشريط الجانبي",
+    untitledFolder: "مجلد بدون عنوان",
+    newFolder: "مجلد جديد",
+    saveMessage: "تم الحفظ قبل ثوانٍ",
+    activeChats: "المحادثات النشطة",
+    documents: "المستندات",
+    tools: "الأدوات",
+    chatWithPaperPilot: "التحدث مع PaperPilot",
+    selectLanguage: "اختر اللغة",
+    chooseLanguageDesc: "اختر لغة واجهة العرض المفضلة لديك.",
+    english: "الانجليزية (English)",
+    french: "الفرنسية (Français)",
+    spanish: "الإسبانية (Español)",
+    german: "الألمانية (Deutsch)",
+    italian: "الإيطالية (Italiano)",
+    portuguese: "البرتغالية (Português)",
+    arabic: "العربية (Arabic)",
+    chinese: "الصينية (简体中文)",
+    japanese: "اليابانية (日本語)",
+    hindi: "الهندية (हिन्दी)",
+    close: "إغلاق",
+    uploadFile: "رفع ملف",
+    searchCollection: "البحث في المجموعة...",
+    createDocument: "إنشاء مستند",
+    chatsTab: "المحادثات",
+    allFiles: "كل الملفات",
+    itemsCount: "عناصر",
+    allLibraryItems: "كل عناصر المكتبة",
+    recentDocuments: "المستندات الأخيرة",
+    emptyLibrary: "المكتبة فارغة. قم برفع مستندات أو ابدأ محادثة!",
+    dropFilesHere: "أفلت الملفات هنا لرفعها",
+    signInWithGoogle: "تسجيل الدخول باستخدام Google",
+    saving: "جاري الحفظ...",
+    savedJustNow: "تم الحفظ الآن",
+    slovinLabel: "صيغة سلوفين",
+    percentageLabel: "حساب النسب",
+    weightedLabel: "الوسط المرجح",
+    likertLabel: "مقياس ليكرت",
+    analysisLabel: "تحليل البيانات",
+    citationsLabel: "الاستشهادات",
+    history: "السجل",
+    clearAll: "مسح الكل",
+    noComputations: "لا توجد حسابات محفوظة",
+    slovinTitle: "هامش الخطأ وحجم العينة لسلوفين",
+    percentageTitle: "حاسبة النسب والتوزيع",
+    weightedTitle: "الوسط الحسابي المرجح",
+    likertTitle: "مقياس ليكرت",
+    citationsTitle: "الاستشهادات",
+    analysisTitle: "تحليل البيانات"
+  },
+  zh: {
+    newChat: "新建对话",
+    searchPlaceholder: "搜索对话 / 文档...",
+    noRecentChats: "暂无最近对话",
+    settings: "设置",
+    help: "帮助",
+    language: "语言",
+    learnMore: "了解更多",
+    logOut: "退出登录",
+    library: "图书馆",
+    files: "文件",
+    uploads: "上传",
+    statistics: "统计数据",
+    home: "首页",
+    untitled: "无标题",
+    collapseSidePanel: "折叠侧边栏",
+    expandSidePanel: "展开侧边栏",
+    untitledFolder: "无标题文件夹",
+    newFolder: "新建文件夹",
+    saveMessage: "几秒前已保存",
+    activeChats: "活跃对话",
+    documents: "文档",
+    tools: "工具",
+    chatWithPaperPilot: "与 PaperPilot 对话",
+    selectLanguage: "选择语言",
+    chooseLanguageDesc: "选择您偏好的主要界面显示语言。",
+    english: "英语 (English)",
+    french: "法语 (Français)",
+    spanish: "西班牙语 (Español)",
+    german: "德语 (Deutsch)",
+    italian: "意大利语 (Italiano)",
+    portuguese: "葡萄牙语 (Português)",
+    arabic: "阿拉伯语 (العربية)",
+    chinese: "中文 (Chinese)",
+    japanese: "日本語 (Japanese)",
+    hindi: "印地语 (हिन्दी)",
+    close: "关闭",
+    uploadFile: "上传文件",
+    searchCollection: "搜索集合...",
+    createDocument: "创建文档",
+    chatsTab: "对话",
+    allFiles: "所有文件",
+    itemsCount: "个项目",
+    allLibraryItems: "所有图书馆项目",
+    recentDocuments: "最近文档",
+    emptyLibrary: "您的图书馆为空。请上传文档或开始对话！",
+    dropFilesHere: "将文件拖放到此处上传",
+    signInWithGoogle: "使用 Google 登录",
+    saving: "保存中...",
+    savedJustNow: "刚刚已保存",
+    slovinLabel: "斯洛文公式",
+    percentageLabel: "百分比计算",
+    weightedLabel: "加权平均",
+    likertLabel: "李克特量表",
+    analysisLabel: "数据分析",
+    citationsLabel: "文献引用",
+    history: "历史记录",
+    clearAll: "清除全部",
+    noComputations: "没有保存的计算",
+    slovinTitle: "斯洛文误差范围与样本量计算",
+    percentageTitle: "百分比计算器与分布",
+    weightedTitle: "加权算术平均数",
+    likertTitle: "李克特量表",
+    citationsTitle: "文献引用",
+    analysisTitle: "数据分析"
+  },
+  ja: {
+    newChat: "新規チャット",
+    searchPlaceholder: "チャット / 文書を検索...",
+    noRecentChats: "最近のチャットはありません",
+    settings: "設定",
+    help: "ヘルプ",
+    language: "言語",
+    learnMore: "詳細を見る",
+    logOut: "ログアウト",
+    library: "ライブラリ",
+    files: "ファイル",
+    uploads: "アップロード",
+    statistics: "統計",
+    home: "ホーム",
+    untitled: "無題",
+    collapseSidePanel: "サイドパネルを折りたたむ",
+    expandSidePanel: "サイドパネルを展開する",
+    untitledFolder: "無題のフォルダー",
+    newFolder: "新規フォルダー",
+    saveMessage: "数秒前に保存されました",
+    activeChats: "アクティブなチャット",
+    documents: "ドキュメント",
+    tools: "ツール",
+    chatWithPaperPilot: "PaperPilotとチャット",
+    selectLanguage: "言語を選択",
+    chooseLanguageDesc: "インターフェースの表示言語を選択してください。",
+    english: "英語 (English)",
+    french: "フランス語 (Français)",
+    spanish: "スペイン語 (Español)",
+    german: "ドイツ語 (Deutsch)",
+    italian: "イタリア語 (Italiano)",
+    portuguese: "ポルトガル語 (Português)",
+    arabic: "アラビア語 (العربية)",
+    chinese: "中国語 (简体中文)",
+    japanese: "日本語 (Japanese)",
+    hindi: "ヒンディー語 (हिन्दी)",
+    close: "閉じる",
+    uploadFile: "ファイルをアップロード",
+    searchCollection: "コレクションを検索...",
+    createDocument: "ドキュメントを作成",
+    chatsTab: "チャット",
+    allFiles: "すべてのファイル",
+    itemsCount: "個のアイテム",
+    allLibraryItems: "すべてのライブラリアイテム",
+    recentDocuments: "最近のドキュメント",
+    emptyLibrary: "ライブラリが空です。ドキュメントをアップロードするか、チャットを開始してください！",
+    dropFilesHere: "ここにファイルをドロップしてアップロード",
+    signInWithGoogle: "Googleでログイン",
+    saving: "保存中...",
+    savedJustNow: "今保存されました",
+    slovinLabel: "スロビンの公式",
+    percentageLabel: "パーセント計算",
+    weightedLabel: "加重平均",
+    likertLabel: "リカート尺度",
+    analysisLabel: "データ分析",
+    citationsLabel: "引用文献",
+    history: "履歴",
+    clearAll: "すべてクリア",
+    noComputations: "保存された計算はありません",
+    slovinTitle: "スロビンの許容誤差とサンプルサイズ",
+    percentageTitle: "パーセント計算機と分布",
+    weightedTitle: "加重算術平均",
+    likertTitle: "リカート尺度",
+    citationsTitle: "引用文献",
+    analysisTitle: "データ分析"
+  },
+  hi: {
+    newChat: "नया चैट",
+    searchPlaceholder: "चैट / दस्तावेज़ खोजें...",
+    noRecentChats: "कोई हालिया चैट नहीं",
+    settings: "सेटिंग्स",
+    help: "सहायता",
+    language: "भाषा",
+    learnMore: "अधिक जानें",
+    logOut: "लॉग आउट",
+    library: "पुस्तकालय",
+    files: "फ़ाइलें",
+    uploads: "अपलोड",
+    statistics: "आँकड़े",
+    home: "होम",
+    untitled: "बिना शीर्षक",
+    collapseSidePanel: "साइड पैनल समेटें",
+    expandSidePanel: "साइड पैनल फैलाएं",
+    untitledFolder: "बिना शीर्षक वाला फ़ोल्डर",
+    newFolder: "नया फ़ोल्डर",
+    saveMessage: "अभी कुछ सेकंड पहले सहेजा गया",
+    activeChats: "सक्रिय चैट",
+    documents: "दस्तावेज़",
+    tools: "उपकरण",
+    chatWithPaperPilot: "PaperPilot के साथ चैट करें",
+    selectLanguage: "भाषा चुनें",
+    chooseLanguageDesc: "अपनी पसंदीदा मुख्य इंटरफ़ेस प्रदर्शन भाषा चुनें।",
+    english: "अंग्रेज़ी (English)",
+    french: "फ़्रेंच (Français)",
+    spanish: "स्पैनिश (Español)",
+    german: "जर्मन (Deutsch)",
+    italian: "इतालवी (Italiano)",
+    portuguese: "पुर्तगाली (Português)",
+    arabic: "अरबी (العربية)",
+    chinese: "चीनी (简体中文)",
+    japanese: "जापानी (日本語)",
+    hindi: "हिन्दी (Hindi)",
+    close: "बंद करें",
+    uploadFile: "फ़ाइल अपलोड करें",
+    searchCollection: "संग्रह खोजें...",
+    createDocument: "दस्तावेज़ बनाएं",
+    chatsTab: "चैट",
+    allFiles: "सभी फ़ाइलें",
+    itemsCount: "आइटम",
+    allLibraryItems: "पुस्तकालय की सभी वस्तुएं",
+    recentDocuments: "हाल के दस्तावेज़",
+    emptyLibrary: "आपका पुस्तकालय खाली है। दस्तावेज़ अपलोड करें या चैट शुरू करें!",
+    dropFilesHere: "अपलोड करने के लिए फ़ाइलें यहाँ छोड़ें",
+    signInWithGoogle: "Google के साथ साइन इन करें",
+    saving: "सहेज रहा है...",
+    savedJustNow: "अभी सहेजा गया",
+    slovinLabel: "स्लोविन का सूत्र",
+    percentageLabel: "प्रतिशत गणना",
+    weightedLabel: "भारित माध्य",
+    likertLabel: "लिकर्ट पैमाना",
+    analysisLabel: "डेटा विश्लेषण",
+    citationsLabel: "उद्धरण",
+    history: "इतिहास",
+    clearAll: "सभी साफ़ करें",
+    noComputations: "कोई गणना सहेजी नहीं गई",
+    slovinTitle: "स्लोविन की त्रुटि सीमा और नमूना आकार",
+    percentageTitle: "प्रतिशत कैलकुलेटर और वितरण",
+    weightedTitle: "भारित अंकगणितीय माध्य",
+    likertTitle: "लिकर्ट पैमाना",
+    citationsTitle: "उद्धरण",
+    analysisTitle: "डेटा विश्लेषण"
+  }
+};
+
 export default function App() {
+  const [appLanguage, setAppLanguage] = useState<"en" | "fr" | "es" | "de" | "it" | "pt" | "ar" | "zh" | "ja" | "hi">(() => {
+    return (localStorage.getItem("cosmi_language") as any) || "en";
+  });
+
+  const t = (key: keyof typeof TRANSLATIONS["en"]) => {
+    return TRANSLATIONS[appLanguage]?.[key] || TRANSLATIONS["en"][key];
+  };
+
+  const getUniqueTabs = (tabList: Tab[]) => {
+    const seen = new Set<string>();
+    return tabList.filter((t) => {
+      if (!t.id) return false;
+      if (seen.has(t.id)) return false;
+      seen.add(t.id);
+      return true;
+    });
+  };
+
+  const getUniqueChats = (chatList: Tab[]) => {
+    const seen = new Set<string>();
+    return chatList.filter((c) => {
+      if (!c.id) return false;
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    });
+  };
+
   const isReadOnly = false;
   const isElectronApp = typeof window !== 'undefined' && (
     (window as any).electron !== undefined || 
@@ -797,6 +1488,20 @@ export default function App() {
   const isDesktopApp = isElectronApp || (typeof window !== 'undefined' && (window as any).__TAURI__ !== undefined);
   const cleanTitleStr = (t?: string) =>
     t ? t.replace(/[*#]/g, "").trim() : "";
+
+  const translateDynamicTitle = (title?: string) => {
+    if (!title) return t("untitled");
+    const trimmed = title.trim();
+    if (trimmed === "Untitled") return t("untitled");
+    if (trimmed === "Untitled Document") return t("untitled");
+    if (trimmed === "Untitled Folder") return t("untitledFolder");
+    if (trimmed === "New Folder") return t("newFolder");
+    if (trimmed === "New Chat") return t("newChat");
+    if (trimmed === "Library") return t("library");
+    if (trimmed === "Home") return t("home");
+    if (trimmed === "Statistics Tools" || trimmed === "Tools") return t("tools");
+    return cleanTitleStr(title);
+  };
 
   const handleMinimize = () => {
     if ((window as any).__TAURI__) {
@@ -5238,7 +5943,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         transition={{ duration: 0.2, ease: "easeOut" }}
                         className="text-[12px] font-bold tracking-tight whitespace-nowrap pointer-events-none"
                       >
-                        {item.label}
+                        {item.label === "Home" ? t("home") : item.label === "Library" ? t("library") : t("tools")}
                       </motion.span>
                     )}
                   </AnimatePresence>
@@ -5266,7 +5971,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         icon="ph:file-text"
                         className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300"
                       />
-                      <span className="font-medium">New Document</span>
+                      <span className="font-medium">{t("createDocument")}</span>
                     </button>
                     <button
                       onClick={() => {
@@ -5284,7 +5989,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         icon="ph:chat-circle"
                         className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300"
                       />
-                      <span className="font-medium">New Chat</span>
+                      <span className="font-medium">{t("newChat")}</span>
                     </button>
                     <button
                       onClick={() => {
@@ -5317,7 +6022,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         weight="Linear"
                         className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 shrink-0"
                       />
-                      <span className="font-medium">New Folder</span>
+                      <span className="font-medium">{t("newFolder")}</span>
                     </button>
                     <button
                       onClick={() => fileInputRef.current?.click()}
@@ -5327,7 +6032,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         weight="Linear"
                         className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 shrink-0"
                       />
-                      <span className="font-medium">Upload File</span>
+                      <span className="font-medium">{t("uploadFile")}</span>
                     </button>
                   </motion.div>
                 )}
@@ -5345,7 +6050,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       : "text-zinc-400 hover:text-zinc-200"
                   }`}
                 >
-                  Files
+                  {t("files")}
                   {sidebarView === "files" && (
                     <motion.div
                       layoutId="sidebarTabUnderline"
@@ -5362,7 +6067,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       : "text-zinc-400 hover:text-zinc-200"
                   }`}
                 >
-                  Chats
+                  {t("chatsTab")}
                   {sidebarView === "chats" && (
                     <motion.div
                       layoutId="sidebarTabUnderline"
@@ -5555,7 +6260,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       className="p-1 hover:bg-[#27272a] rounded text-[#71717a] hover:text-[#f4f4f5] transition-colors cursor-pointer"
                       title="New Chat"
                     >
-                      <Icon icon="ph:plus" className="w-3.5 h-3.5" />
+                      <MaterialIcon name="add" className="text-[18px] shrink-0" />
                     </button>
                   </div>
                   {allChats.length === 0 ? (
@@ -5570,7 +6275,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </div>
                   ) : (
                     <div className="space-y-1">
-                      {allChats.map((chatTab) => {
+                      {getUniqueChats(allChats).map((chatTab) => {
                         const isCurrent = chatTab.id === activeTabId;
                         const isOpen = tabs.some((t) => t.id === chatTab.id);
                         return (
@@ -5594,7 +6299,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               className="flex-1 flex items-center gap-2 min-w-0 text-left cursor-pointer"
                             >
                               <span className="text-xs truncate font-medium">
-                                {cleanTitleStr(chatTab.title)}
+                                {translateDynamicTitle(chatTab.title)}
                               </span>
                             </button>
                             <button
@@ -5679,7 +6384,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     >
                       <div className="flex items-center gap-1.5">
                         <PaletteRound weight="Linear" className="w-3.5 h-3.5 shrink-0" />
-                        <span>Tools</span>
+                        <span>{t("tools")}</span>
                       </div>
                       <Icon
                         icon="ph:caret-down"
@@ -5752,7 +6457,19 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                   className={`w-3.5 h-3.5 ${item.color}`}
                                 />
                               )}
-                              <span className="truncate">{item.label}</span>
+                              <span className="truncate">
+                                {item.id === "slovin"
+                                  ? t("slovinLabel")
+                                  : item.id === "percentage"
+                                    ? t("percentageLabel")
+                                    : item.id === "weighted"
+                                      ? t("weightedLabel")
+                                      : item.id === "likert"
+                                        ? t("likertLabel")
+                                        : item.id === "ai"
+                                          ? t("analysisLabel")
+                                          : t("citationsLabel")}
+                              </span>
                             </button>
                           );
                         })}
@@ -5773,7 +6490,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           icon="ph:clock-counter-clockwise-fill"
                           className="w-3.5 h-3.5"
                         />
-                        <span>History</span>
+                        <span>{t("history")}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         {toolsHistory.length > 0 && (
@@ -5785,7 +6502,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             }}
                             className="text-[9px] text-[#52525b] hover:text-[#a1a1aa] transition-colors cursor-pointer lowercase font-normal tracking-normal"
                           >
-                            clear all
+                            {t("clearAll")}
                           </span>
                         )}
                         <Icon
@@ -5800,7 +6517,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         {toolsHistory.length === 0 ? (
                           <div className="px-2 py-4 border border-dashed border-[#27272a]/60 rounded-xl text-center bg-[#0c0c0d]/40 my-1">
                             <p className="text-[10px] text-[#52525b]">
-                              No computations saved
+                              {t("noComputations")}
                             </p>
                           </div>
                         ) : (
@@ -5933,10 +6650,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.95, y: -10 }}
                             transition={{ duration: 0.15 }}
-                            className="absolute left-2 bottom-full mb-2 z-[120] bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 overflow-hidden w-[280px]"
+                            className="absolute left-2 bottom-full mb-2 z-[120] bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 w-[280px]"
                           >
                             <div className="px-3 py-3 flex items-center gap-3 border-b border-[#2d2d30]/50 mb-1">
-                              <div className="w-10 h-10 rounded bg-[#27272a] flex-shrink-0 flex items-center justify-center overflow-hidden border border-[#3f3f46]">
+                              <div className="w-10 h-10 rounded-full bg-[#27272a] flex-shrink-0 flex items-center justify-center overflow-hidden border border-[#3f3f46]">
                                 <img
                                   src={
                                     localStorage.getItem("cosmi_settings_avatar_url") ||
@@ -5954,9 +6671,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     currentUser.displayName ||
                                     "Ron Asnahon's"}
                                 </p>
-                                <p className="text-[12px] text-[#71717a] truncate font-medium">
-                                  Free Plan · 1 member
-                                </p>
                               </div>
                             </div>
 
@@ -5969,24 +6683,138 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 className="w-full text-left px-2.5 py-2 text-[13px] text-[#e4e4e7] hover:bg-[#27272a]/50 transition-colors rounded-lg flex items-center gap-3 cursor-pointer"
                               >
                                 <Icon icon="ph:gear" className="w-[18px] h-[18px] text-[#71717a]" />
-                                <span className="font-medium">Settings</span>
+                                <span className="font-medium">{t("settings")}</span>
                               </button>
 
-                              <button 
-                                onClick={() => setIsProfileDropdownOpen(false)}
-                                className="w-full text-left px-2.5 py-2 text-[13px] text-[#e4e4e7] hover:bg-[#27272a]/50 transition-colors rounded-lg flex items-center gap-3 cursor-pointer"
-                              >
-                                <Icon icon="ph:envelope-simple" className="w-[18px] h-[18px] text-[#71717a]" />
-                                <span className="font-medium">Invite members</span>
-                              </button>
+                              {/* Hover triggers Learn More foldout submenu */}
+                              <div className="relative group/learn">
+                                <button 
+                                  className="w-full text-left px-2.5 py-2 text-[13px] text-[#e4e4e7] group-hover/learn:bg-[#27272a]/50 transition-colors rounded-lg flex items-center justify-between cursor-pointer"
+                                  onClick={(e) => e.preventDefault()}
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <Icon icon="ph:info" className="w-[18px] h-[18px] text-[#71717a]" />
+                                    <span className="font-medium">{t("learnMore")}</span>
+                                  </div>
+                                  <Icon icon="ph:caret-right" className="w-[14px] h-[14px] text-[#71717a]" />
+                                </button>
+
+                                <div className="absolute left-full translate-x-1.5 bottom-0 hidden group-hover/learn:block bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 w-[240px] shadow-[0_8px_32px_rgba(0,0,0,0.65)] z-[130] before:absolute before:content-[''] before:top-0 before:-left-4 before:w-4 before:h-full cursor-default animate-fade-in">
+                                  <div className="px-1 py-1 max-h-[320px] overflow-y-auto space-y-0.5 custom-scrollbar">
+                                    {[
+                                      { label: "Supporting Students", url: "https://genlang.vercel.app/#why-students" },
+                                      { label: "Academic Systems", url: "https://genlang.vercel.app/#policy/academic-systems" },
+                                      { label: "Risks", url: "https://genlang.vercel.app/#policy/risks" },
+                                      { label: "Reasoning", url: "https://genlang.vercel.app/#policy/step-by-step-reasoning" },
+                                      { label: "AI In Education", url: "https://genlang.vercel.app/#policy/benefits" },
+                                      { label: "Education", url: "https://genlang.vercel.app/#policy/support-in-lesson-planning" },
+                                      { label: "Engines We Use", url: "https://genlang.vercel.app/#llm-learning" },
+                                      { label: "Compliances", url: "https://genlang.vercel.app/#compliance" }
+                                    ].map((item, idx) => (
+                                      <button
+                                        key={idx}
+                                        onClick={() => {
+                                          window.open(item.url, "_blank", "noopener,noreferrer");
+                                          setIsProfileDropdownOpen(false);
+                                        }}
+                                        className="w-full flex items-center justify-between px-2.5 py-1.5 text-[12.5px] rounded-lg transition-colors text-left text-[#e4e4e7] hover:bg-[#27272a]/30 cursor-pointer select-none"
+                                      >
+                                        <span className="font-medium">{item.label}</span>
+                                        <Icon
+                                          icon="ph:arrow-square-out"
+                                          className="w-3.5 h-3.5 text-zinc-500 shrink-0"
+                                        />
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
 
                               <button 
-                                onClick={() => setIsProfileDropdownOpen(false)}
-                                className="w-full text-left px-2.5 py-2 text-[13px] text-[#e4e4e7] hover:bg-[#27272a]/50 transition-colors rounded-lg flex items-center gap-3 cursor-pointer"
+                                onClick={() => {
+                                  window.open("https://genlang.vercel.app/#support", "_blank", "noopener,noreferrer");
+                                  setIsProfileDropdownOpen(false);
+                                }}
+                                className="w-full text-left px-2.5 py-2 text-[13px] text-[#e4e4e7] hover:bg-[#27272a]/50 transition-colors rounded-lg flex items-center gap-3 cursor-pointer select-none"
                               >
-                                <Icon icon="ph:user-plus" className="w-[18px] h-[18px] text-[#71717a]" />
-                                <span className="font-medium">Add account</span>
+                                <HandStars weight="BoldDuotone" className="w-[18px] h-[18px] text-[#71717a] shrink-0" />
+                                <span className="font-medium">{t("help")}</span>
                               </button>
+
+                              {/* Hover triggers language foldout submenu */}
+                              <div className="relative group/lang">
+                                <button 
+                                  className="w-full text-left px-2.5 py-2 text-[13px] text-[#e4e4e7] group-hover/lang:bg-[#27272a]/50 transition-colors rounded-lg flex items-center justify-between cursor-pointer"
+                                  onClick={(e) => e.preventDefault()}
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <Icon icon="ph:globe" className="w-[18px] h-[18px] text-[#71717a]" />
+                                    <span className="font-medium">{t("language")}</span>
+                                  </div>
+                                  <Icon icon="ph:caret-right" className="w-[14px] h-[14px] text-[#71717a]" />
+                                </button>
+
+                                {/* Nested language dropdown list that pops out to the right */}
+                                <div className="absolute left-full translate-x-1.5 bottom-0 hidden group-hover/lang:block bg-[#161616] border border-[#2d2d30] rounded-xl py-1.5 w-[240px] shadow-[0_8px_32px_rgba(0,0,0,0.65)] z-[130] before:absolute before:content-[''] before:top-0 before:-left-4 before:w-4 before:h-full cursor-default animate-fade-in">
+                                  <div className="px-1 py-1 max-h-[240px] overflow-y-auto space-y-0.5 custom-scrollbar">
+                                        {[
+                                          { code: "en" as const, label: t("english"), icon: "🇬🇧" },
+                                          { code: "fr" as const, label: t("french"), icon: "🇫🇷" },
+                                          { code: "es" as const, label: t("spanish"), icon: "🇪🇸" },
+                                          { code: "de" as const, label: t("german"), icon: "🇩🇪" },
+                                          { code: "it" as const, label: t("italian"), icon: "🇮🇹" },
+                                          { code: "pt" as const, label: t("portuguese"), icon: "🇵🇹" },
+                                          { code: "ar" as const, label: t("arabic"), icon: "🇸🇦" },
+                                          { code: "zh" as const, label: t("chinese"), icon: "🇨🇳" },
+                                          { code: "ja" as const, label: t("japanese"), icon: "🇯🇵" },
+                                          { code: "hi" as const, label: t("hindi"), icon: "🇮🇳" }
+                                        ].map((lang) => {
+                                          const isActive = appLanguage === lang.code;
+                                          return (
+                                            <button
+                                              key={lang.code}
+                                              onClick={() => {
+                                                setAppLanguage(lang.code);
+                                                localStorage.setItem("cosmi_language", lang.code);
+                                                
+                                                const toastMsgs: Record<string, string> = {
+                                                  en: "Language updated to English!",
+                                                  fr: "Langue changée en Français !",
+                                                  es: "¡Idioma cambiado a Español!",
+                                                  de: "Sprache auf Deutsch aktualisiert!",
+                                                  it: "Lingua aggiornata in Italiano!",
+                                                  pt: "Idioma atualizado para Português!",
+                                                  ar: "تم تحديث اللغة إلى العربية!",
+                                                  zh: "语言已更新为中文！",
+                                                  ja: "日本語に更新されました！",
+                                                  hi: "भाषा हिंदी में अपडेट की गई!"
+                                                };
+                                                
+                                                showToast(toastMsgs[lang.code] || "Language updated!", "success");
+                                                setIsProfileDropdownOpen(false);
+                                              }}
+                                              className={`w-full flex items-center justify-between px-2.5 py-1.5 text-[12.5px] rounded-lg transition-colors text-left cursor-pointer ${
+                                                isActive
+                                                  ? "bg-[#27272a]/50 text-white font-medium"
+                                                  : "text-[#e4e4e7] hover:bg-[#27272a]/30"
+                                              }`}
+                                            >
+                                              <div className="flex items-center gap-3">
+                                                <span className="text-base select-none">{lang.icon}</span>
+                                                <span className="font-medium">{lang.label}</span>
+                                              </div>
+                                              {isActive && (
+                                                <Icon
+                                                  icon="ph:check"
+                                                  className="w-4 h-4 text-emerald-500 font-bold shrink-0"
+                                                />
+                                              )}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <div className="px-1.5 pt-1 border-t border-[#2d2d30]/50">
@@ -6008,7 +6836,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 className="w-full text-left px-2.5 py-2 text-[13px] text-[#e4e4e7] hover:bg-[#27272a]/50 transition-colors rounded-lg flex items-center gap-3 cursor-pointer"
                               >
                                 <Icon icon="ph:sign-out" className="w-[18px] h-[18px] text-[#71717a]" />
-                                <span className="font-medium">Log out</span>
+                                <span className="font-medium">{t("logOut")}</span>
                               </button>
                             </div>
                           </motion.div>
@@ -6079,7 +6907,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     : "none"),
             }}
           >
-            {tabs.map((tab, index) => (
+            {getUniqueTabs(tabs).map((tab, index) => (
               <div
                 key={tab.id}
                 draggable={true}
@@ -6112,16 +6940,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 )}
                 <span className="truncate max-w-[130px]">
                   {tab.type === "home"
-                    ? "Home"
+                    ? t("home")
                     : tab.type === "library"
-                      ? "Library"
+                      ? t("library")
                       : tab.type === "tools"
-                        ? "Tools"
+                        ? t("tools")
                         : (tab.id === activeTabId &&
                           tab.type === "document" &&
                           (!tab.fileId || tab.mimetype !== "application/pdf")
-                            ? documentTitle
-                            : cleanTitleStr(tab.title)) || "Untitled"}
+                            ? translateDynamicTitle(documentTitle)
+                            : translateDynamicTitle(tab.title)) || t("untitled")}
                 </span>
 
                 {tabs.length > 1 && (
@@ -6205,7 +7033,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           className="flex items-center gap-1.5 text-[#e4e4e7] hover:bg-[#1a1a1a] px-3 py-1.5 rounded-xl transition-colors cursor-pointer group"
                         >
                           <span className="font-medium text-[13px]">
-                            {cleanTitleStr(activeTab.title)}
+                            {translateDynamicTitle(activeTab.title)}
                           </span>
                           <Icon
                             icon="ph:caret-down"
@@ -6241,7 +7069,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     className="w-4 h-4 shrink-0 text-zinc-500"
                                   />
                                   <span className="text-xs font-medium truncate">
-                                    {cleanTitleStr(chatTab.title)}
+                                    {translateDynamicTitle(chatTab.title)}
                                   </span>
                                 </button>
                               ))}
@@ -6289,7 +7117,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       className="p-2 text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#1a1a1a] rounded-xl transition-colors cursor-pointer flex items-center justify-center shrink-0"
                       title="New Chat"
                     >
-                      <AddCircle weight="Linear" className="w-4 h-4 shrink-0" />
+                      <MaterialIcon name="add" className="text-[20px] shrink-0" />
                     </button>
 
                     <div className="relative">
@@ -6400,6 +7228,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 setDragOverRootLibrary={setDragOverRootLibrary}
                 handlePaperClick={handlePaperClick}
                 formatAbstractText={formatAbstractText}
+                appLanguage={appLanguage}
               />
             ) : (activeTab.type as string) === "library_LEGACY" ? (
               <div className="flex-1 overflow-y-auto focus:outline-none bg-[#121212] flex flex-col">
@@ -7279,16 +8108,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <div className="w-full h-full flex flex-col min-h-0">
                   <h1 className="text-xl text-[#f4f4f5] font-semibold tracking-tight pb-4 border-b border-[#222225] px-8 shrink-0">
                     {activeToolsTab === "slovin"
-                      ? "Slovin's Margin of Error & Sample Size"
+                      ? t("slovinTitle")
                       : activeToolsTab === "percentage"
-                        ? "Percentage Calculator & Distribution"
+                        ? t("percentageTitle")
                         : activeToolsTab === "weighted"
-                          ? "Weighted Arithmetic Mean"
+                          ? t("weightedTitle")
                           : activeToolsTab === "likert"
-                            ? "Likert Scale"
+                            ? t("likertTitle")
                             : activeToolsTab === "citation"
-                              ? "Citations"
-                              : "Data Analysis"}
+                              ? t("citationsTitle")
+                              : t("analysisTitle")}
                   </h1>
                   <div className="flex-1 min-h-0 flex flex-col">
                     <StatisticsTools
@@ -7299,6 +8128,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       }
                       activeTab={activeToolsTab}
                       onChangeActiveTab={setActiveToolsTab}
+                      appLanguage={appLanguage}
                     />
                   </div>
                 </div>
@@ -7384,7 +8214,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         title="Toggle Side Panel"
                         id="pdf-panel-toggle"
                       >
-                        <PanelRight className="w-[18px] h-[18px]" />
+                        <SidebarMinimalistic weight="BoldDuotone" color="currentColor" className="w-[20px] h-[20px]" />
                       </button>
                     )}
                   </div>
@@ -7903,33 +8733,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   className="absolute top-2.5 right-3 z-30 flex items-center gap-3 select-none"
                 >
                   <span className="text-zinc-500 text-[11px] font-medium mr-1 select-none hidden sm:inline-block">
-                    {saveMessage}
+                    {saveMessage === "Saving..." ? (appLanguage === "fr" ? "Enregistrement..." : "Saving...") :
+                     saveMessage === "Saved just now" || saveMessage === "Saved a few seconds ago" ? t("saveMessage") :
+                     saveMessage.startsWith("Saved ") ? 
+                       (appLanguage === "fr" ? saveMessage.replace("Saved ", "Enregistré il y a ").replace("m ago", " min") : saveMessage) : 
+                     saveMessage}
                   </span>
-                  
-                  <button
-                    onClick={() => setIsShareModalOpen(true)}
-                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[#e4e4e6] hover:bg-white text-black text-xs font-semibold select-none transition-colors cursor-pointer h-[28px] border-none"
-                  >
-                    <Icon icon="ph:lock-bold" className="w-[14px] h-[14px] text-zinc-700" />
-                    <span>Share</span>
-                  </button>
 
                   <div className="flex items-center gap-0.5">
-                    <button 
-                      onClick={() => {
-                        const url = `${window.location.origin}/?tab=${activeTabId}`;
-                        navigator.clipboard.writeText(url).then(() => {
-                          showToast("Copied shareable link to clipboard!", "success");
-                        }).catch((err) => {
-                          console.error("Failed to copy link:", err);
-                        });
-                      }}
-                      className="p-1.5 rounded-[6px] text-zinc-400 hover:text-zinc-200 hover:bg-[#27272a] transition-colors cursor-pointer" 
-                      title="Copy Link"
-                    >
-                      <Icon icon="ph:link-bold" className="w-[18px] h-[18px]" />
-                    </button>
-                    
                     <button 
                       onClick={() => {
                         setTabs((prev) =>
@@ -8111,7 +8922,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       }`}
                       title={isSidePanelOpen ? "Collapse Side Panel" : "Expand Side Panel"}
                     >
-                      <PanelRight className="w-[18px] h-[18px]" />
+                      <SidebarMinimalistic weight="BoldDuotone" color="currentColor" className="w-[20px] h-[20px]" />
                     </button>
                   </div>
                 </div>
@@ -8958,7 +9769,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       onClick={() => setIsAssistantChatDropdownOpen(false)}
                     />
                     <div className="absolute top-full left-0 mt-1.5 w-[200px] bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1.5 flex flex-col gap-0.5 max-h-72 overflow-y-auto shadow-2xl">
-                      {allChats.map((chatTab) => (
+                      {getUniqueChats(allChats).map((chatTab) => (
                         <button
                           key={chatTab.id}
                           onClick={() => {
@@ -8988,7 +9799,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             className="w-4 h-4 shrink-0 text-zinc-500"
                           />
                           <span className="text-xs font-medium truncate">
-                            {cleanTitleStr(chatTab.title)}
+                            {translateDynamicTitle(chatTab.title)}
                           </span>
                         </button>
                       ))}
@@ -9011,9 +9822,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-[#222222] transition-colors cursor-pointer"
                         title="New Chat"
                       >
-                        <Icon
-                          icon="ph:plus"
-                          className="w-4 h-4 shrink-0 text-zinc-500"
+                        <MaterialIcon
+                          name="add"
+                          className="text-[18px] shrink-0 text-zinc-500"
                         />
                         <span className="text-xs font-semibold">New Chat</span>
                       </button>
@@ -10130,6 +10941,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
           </motion.div>
         </div>
       )}
+
+
 
       {/* Zero-Glow Multi-User Share Modal */}
       {isShareModalOpen && (

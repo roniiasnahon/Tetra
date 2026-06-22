@@ -64,7 +64,461 @@ interface LibraryPanelProps {
 
   handlePaperClick: (paper: PaperItem) => void;
   formatAbstractText: (text: string) => string;
+  appLanguage?: string;
 }
+
+const LIBRARY_TRANSLATIONS: Record<string, Record<string, string>> = {
+  en: {
+    library: "Library",
+    desc: "Files, research assets, and citation repository",
+    search: "Search collection...",
+    display: "Display",
+    density: "Density",
+    comfortable: "Comfortable",
+    compact: "Compact",
+    sort: "Sort",
+    title: "Title",
+    added: "Added",
+    viewed: "Viewed",
+    type: "Type",
+    filter: "Filter",
+    all: "All Files",
+    documents: "Documents",
+    folders: "Folders",
+    name: "Name",
+    items: "items",
+    item: "item",
+    authors: "Authors",
+    folder: "Folder",
+    summary: "Summary",
+    add: "Add",
+    newFolder: "New folder",
+    addDoc: "New document",
+    fileUpload: "File upload",
+    researchFolders: "Research Folders",
+    folderName: "Folder Name",
+    size: "Size",
+    created: "Created",
+    actions: "Actions",
+    allFolders: "All Folders",
+    browsingDir: "Browsing Directory",
+    folderEmpty: "Folder is Empty",
+    folderEmptyDesc: "No assets have been added here yet. Create some research notes or export Summaries to fill it!",
+    uploadPdf: "Upload PDF File",
+    dateAdded: "Date Added",
+    lastViewed: "Last Viewed",
+    ascending: "Ascending",
+    descending: "Descending",
+    filesInLibrary: "{num} files in library",
+    notes: "Notes",
+    learnFileTypes: "Learn about File Types"
+  },
+  fr: {
+    library: "Bibliothèque",
+    desc: "Répertoire de fichiers, ressources de recherche et citations",
+    search: "Rechercher dans la collection...",
+    display: "Affichage",
+    density: "Densité",
+    comfortable: "Confortable",
+    compact: "Compact",
+    sort: "Trier",
+    title: "Titre",
+    added: "Ajouté",
+    viewed: "Vu",
+    type: "Type",
+    filter: "Filtrer",
+    all: "Tous les fichiers",
+    documents: "Documents",
+    folders: "Dossiers",
+    name: "Nom",
+    items: "éléments",
+    item: "élément",
+    authors: "Auteurs",
+    folder: "Dossier",
+    summary: "Résumé",
+    add: "Ajouter",
+    newFolder: "Nouveau dossier",
+    addDoc: "Nouveau document",
+    fileUpload: "Téléchargement",
+    researchFolders: "Dossiers de recherche",
+    folderName: "Nom du dossier",
+    size: "Taille",
+    created: "Créé le",
+    actions: "Actions",
+    allFolders: "Tous les dossiers",
+    browsingDir: "Navigation dans le répertoire",
+    folderEmpty: "Le dossier est vide",
+    folderEmptyDesc: "Aucune ressource n'a encore été ajoutée ici. Créez des notes de recherche ou exportez des résumés pour le remplir !",
+    uploadPdf: "Télécharger un fichier PDF",
+    dateAdded: "Date d'ajout",
+    lastViewed: "Dernière consultation",
+    ascending: "Croissant",
+    descending: "Décroissant",
+    filesInLibrary: "{num} fichiers dans la bibliothèque",
+    notes: "Notes",
+    learnFileTypes: "En savoir plus sur les types de fichiers"
+  },
+  es: {
+    library: "Biblioteca",
+    desc: "Archivo de documentos, activos de investigación y citas",
+    search: "Buscar en la colección...",
+    display: "Mostrar",
+    density: "Densidad",
+    comfortable: "Cómodo",
+    compact: "Compacto",
+    sort: "Ordenar",
+    title: "Título",
+    added: "Añadido",
+    viewed: "Visto",
+    type: "Tipo",
+    filter: "Filtrar",
+    all: "Todos los archivos",
+    documents: "Documentos",
+    folders: "Carpetas",
+    name: "Nombre",
+    items: "elementos",
+    item: "elemento",
+    authors: "Autores",
+    folder: "Carpeta",
+    summary: "Resumen",
+    add: "Añadir",
+    newFolder: "Nueva carpeta",
+    addDoc: "Nuevo documento",
+    fileUpload: "Subir archivo",
+    researchFolders: "Carpetas de investigación",
+    folderName: "Nombre de carpeta",
+    size: "Tamaño",
+    created: "Creado",
+    actions: "Acciones",
+    allFolders: "Todas las carpetas",
+    browsingDir: "Dirección de exploración",
+    folderEmpty: "La carpeta está vacía",
+    folderEmptyDesc: "Aún no se han añadido activos aquí. ¡Cree notas de investigación o exporte resúmenes para llenarla!",
+    uploadPdf: "Subir archivo PDF",
+    dateAdded: "Fecha añadida",
+    lastViewed: "Última vista",
+    ascending: "Ascendente",
+    descending: "Descendente",
+    filesInLibrary: "{num} archivos en la biblioteca",
+    notes: "Notas",
+    learnFileTypes: "Aprenda sobre los tipos de archivos"
+  },
+  de: {
+    library: "Bibliothek",
+    desc: "Verzeichnis für Dateien, Forschungsressourcen und Zitate",
+    search: "Sammlung durchsuchen...",
+    display: "Anzeige",
+    density: "Dichte",
+    comfortable: "Komfortabel",
+    compact: "Kompakt",
+    sort: "Sortieren",
+    title: "Titel",
+    added: "Hinzugefügt",
+    viewed: "Angesehen",
+    type: "Typ",
+    filter: "Filtern",
+    all: "Alle Dateien",
+    documents: "Dokumente",
+    folders: "Ordner",
+    name: "Name",
+    items: "Elemente",
+    item: "Element",
+    authors: "Autoren",
+    folder: "Ordner",
+    summary: "Zusammenfassung",
+    add: "Hinzufügen",
+    newFolder: "Neuer Ordner",
+    addDoc: "Neues Dokument",
+    fileUpload: "Datei hochladen",
+    researchFolders: "Forschungsordner",
+    folderName: "Ordnername",
+    size: "Größe",
+    created: "Erstellt",
+    actions: "Aktionen",
+    allFolders: "Alle Ordner",
+    browsingDir: "Verzeichnis durchsuchen",
+    folderEmpty: "Ordner ist leer",
+    folderEmptyDesc: "Hier wurden noch keine Ressourcen hinzugefügt. Erstellen Sie Forschungsnotizen oder exportieren Sie Zusammenfassungen, um ihn zu füllen!",
+    uploadPdf: "PDF-Datei hochladen",
+    dateAdded: "Hinzufüge-Datum",
+    lastViewed: "Zuletzt angesehen",
+    ascending: "Aufsteigend",
+    descending: "Absteigend",
+    filesInLibrary: "{num} Dateien in der Bibliothek",
+    notes: "Notizen",
+    learnFileTypes: "Erfahren Sie mehr über Dateitypen"
+  },
+  it: {
+    library: "Biblioteca",
+    desc: "Archivio di file, risorse di ricerca e citazioni",
+    search: "Cerca nella raccolta...",
+    display: "Visualizza",
+    density: "Densità",
+    comfortable: "Comodo",
+    compact: "Compatto",
+    sort: "Ordina",
+    title: "Titolo",
+    added: "Aggiunto",
+    viewed: "Visualizzato",
+    type: "Tipo",
+    filter: "Filtra",
+    all: "Tutti i file",
+    documents: "Documenti",
+    folders: "Cartelle",
+    name: "Nome",
+    items: "elementi",
+    item: "elemento",
+    authors: "Autori",
+    folder: "Cartella",
+    summary: "Sommario",
+    add: "Aggiungi",
+    newFolder: "Nuova cartella",
+    addDoc: "Nuovo documento",
+    fileUpload: "Carica file",
+    researchFolders: "Cartelle di ricerca",
+    folderName: "Nome cartella",
+    size: "Dimensioni",
+    created: "Creato",
+    actions: "Azioni",
+    allFolders: "Tutte le cartelle",
+    browsingDir: "Sfoglia directory",
+    folderEmpty: "La cartella è vuota",
+    folderEmptyDesc: "Nessuna risorsa è stata ancora aggiunta qui. Crea note di ricerca o esporta riassunti per riempirla!",
+    uploadPdf: "Carica file PDF",
+    dateAdded: "Data aggiunta",
+    lastViewed: "Ultima consultazione",
+    ascending: "Crescente",
+    descending: "Decrescente",
+    filesInLibrary: "{num} file nella biblioteca",
+    notes: "Note",
+    learnFileTypes: "Scopri i tipi di file"
+  },
+  pt: {
+    library: "Biblioteca",
+    desc: "Arquivo de arquivos, recursos de pesquisa e citações",
+    search: "Buscar na coleção...",
+    display: "Visualização",
+    density: "Densidade",
+    comfortable: "Confortável",
+    compact: "Compacto",
+    sort: "Ordenar",
+    title: "Título",
+    added: "Adicionado",
+    viewed: "Visualizado",
+    type: "Tipo",
+    filter: "Filtrar",
+    all: "Todos os arquivos",
+    documents: "Documentos",
+    folders: "Pastas",
+    name: "Nome",
+    items: "itens",
+    item: "item",
+    authors: "Autores",
+    folder: "Pasta",
+    summary: "Resumo",
+    add: "Adicionar",
+    newFolder: "Nova pasta",
+    addDoc: "Novo documento",
+    fileUpload: "Enviar arquivo",
+    researchFolders: "Pastas de pesquisa",
+    folderName: "Nome da pasta",
+    size: "Tamanho",
+    created: "Criado",
+    actions: "Ações",
+    allFolders: "Todas as pastas",
+    browsingDir: "Navegação no diretório",
+    folderEmpty: "A pasta está vazia",
+    folderEmptyDesc: "Nenhum recurso foi adicionado aqui ainda. Crie notas de pesquisa ou exporte resumos para preenchê-la!",
+    uploadPdf: "Enviar arquivo PDF",
+    dateAdded: "Data de adição",
+    lastViewed: "Última visualização",
+    ascending: "Crescente",
+    descending: "Decrescente",
+    filesInLibrary: "{num} arquivos na biblioteca",
+    notes: "Notas",
+    learnFileTypes: "Saiba mais sobre tipos de arquivo"
+  },
+  ar: {
+    library: "المكتبة",
+    desc: "مستودع الملفات وأصول الأبحاث والمراجع",
+    search: "البحث في المجموعة...",
+    display: "العرض",
+    density: "الكثافة",
+    comfortable: "مريح",
+    compact: "مدمج",
+    sort: "فرز",
+    title: "العنوان",
+    added: "تم الإضافة",
+    viewed: "تم العرض",
+    type: "النوع",
+    filter: "تصفية",
+    all: "جميع الملفات",
+    documents: "المستندات",
+    folders: "المجلدات",
+    name: "الاسم",
+    items: "عناصر",
+    item: "عنصر",
+    authors: "المؤلفون",
+    folder: "المجلد",
+    summary: "الملخص",
+    add: "إضافة",
+    newFolder: "مجلد جديد",
+    addDoc: "مستند جديد",
+    fileUpload: "تحميل ملف",
+    researchFolders: "مجلدات الأبحاث",
+    folderName: "اسم المجلد",
+    size: "الحجم",
+    created: "تاريخ الإنشاء",
+    actions: "الإجراءات",
+    allFolders: "جميع المجلدات",
+    browsingDir: "تصفح الدليل",
+    folderEmpty: "المجلد فارغ",
+    folderEmptyDesc: "لم يتم إضافة أي أصول هنا بعد. قم بإنشاء بعض الملاحظات البحثية أو قم بتصدير الملخصات لملئه!",
+    uploadPdf: "تحميل ملف pdf",
+    dateAdded: "تاريخ الإضافة",
+    lastViewed: "آخر مشاهدة",
+    ascending: "تصاعدي",
+    descending: "تنازلي",
+    filesInLibrary: "{num} ملفات في المكتبة",
+    notes: "الملاحظات",
+    learnFileTypes: "تعرف على أنواع الملفات"
+  },
+  zh: {
+    library: "文献库",
+    desc: "文件、研究资产和文献引用项",
+    search: "搜索集合...",
+    display: "显示",
+    density: "密度",
+    comfortable: "舒适",
+    compact: "紧凑",
+    sort: "排序",
+    title: "标题",
+    added: "已添加",
+    viewed: "已查看",
+    type: "类型",
+    filter: "筛选",
+    all: "所有文件",
+    documents: "文档",
+    folders: "文件夹",
+    name: "名称",
+    items: "项",
+    item: "项",
+    authors: "作者",
+    folder: "文件夹",
+    summary: "摘要",
+    add: "添加",
+    newFolder: "新建文件夹",
+    addDoc: "新建文档",
+    fileUpload: "文件上传",
+    researchFolders: "研究文件夹",
+    folderName: "文件夹名称",
+    size: "大小",
+    created: "创建于",
+    actions: "操作",
+    allFolders: "所有文件夹",
+    browsingDir: "浏览目录",
+    folderEmpty: "文件夹为空",
+    folderEmptyDesc: "此处尚未添加任何资产。创建一些研究笔记或导出摘要以填充它！",
+    uploadPdf: "上传 PDF 文件",
+    dateAdded: "添加日期",
+    lastViewed: "上次查看",
+    ascending: "升序",
+    descending: "降序",
+    filesInLibrary: "文献库中共有 {num} 个文件",
+    notes: "笔记",
+    learnFileTypes: "了解文件类型"
+  },
+  ja: {
+    library: "ライブラリ",
+    desc: "ファイル、研究用アセット、引用リポジトリ",
+    search: "コレクションを検索...",
+    display: "表示",
+    density: "表示密度",
+    comfortable: "標準",
+    compact: "コンパクト",
+    sort: "並べ替え",
+    title: "タイトル",
+    added: "追加日",
+    viewed: "閲覧日",
+    type: "種類",
+    filter: "フィルター",
+    all: "すべてのファイル",
+    documents: "ドキュメント",
+    folders: "フォルダ",
+    name: "名前",
+    items: "個のアイテム",
+    item: "個のアイテム",
+    authors: "著者",
+    folder: "フォルダ",
+    summary: "要約",
+    add: "追加",
+    newFolder: "新規フォルダ",
+    addDoc: "ドキュメントを追加",
+    fileUpload: "ファイルアップロード",
+    researchFolders: "研究用フォルダ",
+    folderName: "フォルダ名",
+    size: "サイズ",
+    created: "作成日",
+    actions: "アクション",
+    allFolders: "すべてのフォルダ",
+    browsingDir: "ディレクトリの閲覧",
+    folderEmpty: "フォルダは空です",
+    folderEmptyDesc: "ここにはまだアセットが追加されていません。研究用メモを作成するか、要約を書き出してフォルダを満たしてください！",
+    uploadPdf: "PDFファイルをアップロード",
+    dateAdded: "追加日時",
+    lastViewed: "最終閲覧",
+    ascending: "昇順",
+    descending: "降順",
+    filesInLibrary: "ライブラリに {num} 個のファイル",
+    notes: "メモ",
+    learnFileTypes: "ファイル形式について"
+  },
+  hi: {
+    library: "पुस्तकालय",
+    desc: "फाइलें, अनुसंधान संपत्तियां और उद्धरण भंडार",
+    search: "संग्रह खोजें...",
+    display: "प्रदर्शन",
+    density: "घनत्व",
+    comfortable: "आरामदायक",
+    compact: "सघन",
+    sort: "छाँटें",
+    title: "शीर्षक",
+    added: "जोड़ा गया",
+    viewed: "देखा गया",
+    type: "प्रकार",
+    filter: "फ़िल्टर",
+    all: "सभी फ़ाइलें",
+    documents: "दस्तावेज़",
+    folders: "फ़ोल्डर",
+    name: "नाम",
+    items: "आइटम",
+    item: "आइटम",
+    authors: "लेखक",
+    folder: "फ़ोल्डर",
+    summary: "सारांश",
+    add: "जोड़ें",
+    newFolder: "नया फ़ोल्डर",
+    addDoc: "नया दस्तावेज़",
+    fileUpload: "फ़ाइल अपलोड",
+    researchFolders: "अनुसंधान फ़ोल्डर",
+    folderName: "फ़ोल्डर का नाम",
+    size: "आकार",
+    created: "बनाया गया",
+    actions: "कार्रवाई",
+    allFolders: "सभी फ़ोल्डर",
+    browsingDir: "निर्देशिका ब्राउज़ करें",
+    folderEmpty: "फ़ोल्डर खाली है",
+    folderEmptyDesc: "यहाँ अभी तक कोई भी संपत्तियां नहीं जोड़ी गई हैं। इसे भरने के लिए कुछ शोध नोट्स बनाएं या सारांश निर्यात करें!",
+    uploadPdf: "पीडीएफ फाइल अपलोड करें",
+    dateAdded: "जोड़ा गया दिनांक",
+    lastViewed: "अंतिम बार देखा गया",
+    ascending: "आरोही",
+    descending: "अवरोही",
+    filesInLibrary: "पुस्तकालय में {num} फाइलें",
+    notes: "नोट्स",
+    learnFileTypes: "फ़ाइल प्रकारों के बारे में जानें"
+  }
+};
 
 export const LibraryPanel: React.FC<LibraryPanelProps> = ({
   papers,
@@ -94,7 +548,13 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
 
   handlePaperClick,
   formatAbstractText,
+  appLanguage,
 }) => {
+  const currentLang = appLanguage || "en";
+  const lt = (key: string, defaultText: string) => {
+    return LIBRARY_TRANSLATIONS[currentLang]?.[key] || LIBRARY_TRANSLATIONS["en"][key] || defaultText;
+  };
+
   // Library toolbar and interaction states
   const [selectedPapers, setSelectedPapers] = useState<string[]>([]);
   const [displayDensity, setDisplayDensity] = useState<"comfortable" | "compact">(
@@ -178,12 +638,12 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
           <div>
             <h1 className="text-2xl text-[#f4f4f5] font-medium tracking-tight">
               {selectedFolderId
-                ? folders.find((f) => f.id === selectedFolderId)?.name || "Library"
-                : "Library"}
+                ? folders.find((f) => f.id === selectedFolderId)?.name || lt("library", "Library")
+                : lt("library", "Library")}
             </h1>
             {!selectedFolderId && (
               <p className="text-[#71717a] text-[11px] mt-1">
-                Files, research assets, and citation repository
+                {lt("desc", "Files, research assets, and citation repository")}
               </p>
             )}
           </div>
@@ -191,11 +651,11 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
           <div className="relative w-64">
             <MinimalisticMagnifier
               weight="Linear"
-              className="absolute left-3 top-2.5 w-4 h-4 text-zinc-500 shrink-0"
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 shrink-0"
             />
             <input
               type="text"
-              placeholder="Search collection..."
+              placeholder={lt("search", "Search collection...")}
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               className="w-full bg-[#1a1a1a] border border-[#27272a] rounded-lg pl-9 pr-3 py-1.5 text-zinc-200 text-xs focus:border-zinc-400 focus:outline-[#1a1a1a] focus:outline-none placeholder:text-zinc-600 outline-none transition-colors"
@@ -221,7 +681,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                 }`}
               >
                 <Icon icon="ph:rows" className="w-3.5 h-3.5" />
-                <span>Display</span>
+                <span>{lt("display", "Display")}</span>
               </button>
               {isDisplayDropdownOpen && (
                 <>
@@ -231,7 +691,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                   />
                   <div className="absolute left-0 mt-1.5 w-44 bg-[#121212] border border-[#27272a] rounded-xl p-1.5 flex flex-col gap-0.5 shadow-xl z-50 text-xs text-zinc-300">
                     <div className="px-2.5 py-1 text-[9.5px] uppercase font-bold text-[#71717a] tracking-wider mb-0.5">
-                      Density
+                      {lt("density", "Density")}
                     </div>
                     <button
                       onClick={() => {
@@ -240,7 +700,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                       }}
                       className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                     >
-                      <span>Comfortable</span>
+                      <span>{lt("comfortable", "Comfortable")}</span>
                       {displayDensity === "comfortable" && (
                         <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
                       )}
@@ -252,7 +712,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                       }}
                       className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                     >
-                      <span>Compact</span>
+                      <span>{lt("compact", "Compact")}</span>
                       {displayDensity === "compact" && (
                         <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
                       )}
@@ -277,7 +737,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                 }`}
               >
                 <Icon icon="ph:arrows-down-up" className="w-3.5 h-3.5" />
-                <span>Sort</span>
+                <span>{lt("sort", "Sort")}</span>
               </button>
               {isSortDropdownOpen && (
                 <>
@@ -293,7 +753,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                       }}
                       className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                     >
-                      <span>Title</span>
+                      <span>{lt("title", "Title")}</span>
                       {sortBy === "title" && (
                         <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
                       )}
@@ -305,7 +765,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                       }}
                       className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                     >
-                      <span>Date Added</span>
+                      <span>{lt("dateAdded", "Date Added")}</span>
                       {sortBy === "added" && (
                         <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
                       )}
@@ -317,7 +777,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                       }}
                       className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                     >
-                      <span>Last Viewed</span>
+                      <span>{lt("lastViewed", "Last Viewed")}</span>
                       {sortBy === "viewed" && (
                         <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
                       )}
@@ -330,7 +790,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                       }}
                       className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                     >
-                      <span>Ascending</span>
+                      <span>{lt("ascending", "Ascending")}</span>
                       {sortOrder === "asc" && (
                         <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
                       )}
@@ -342,7 +802,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                       }}
                       className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                     >
-                      <span>Descending</span>
+                      <span>{lt("descending", "Descending")}</span>
                       {sortOrder === "desc" && (
                         <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
                       )}
@@ -367,7 +827,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                 }`}
               >
                 <Icon icon="ph:funnel" className="w-3.5 h-3.5" />
-                <span>Filter</span>
+                <span>{lt("filter", "Filter")}</span>
               </button>
               {isFilterDropdownOpen && (
                 <>
@@ -383,7 +843,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                       }}
                       className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                     >
-                      <span>All Files</span>
+                      <span>{lt("all", "All Files")}</span>
                       {filterType === "all" && (
                         <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
                       )}
@@ -395,7 +855,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                       }}
                       className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                     >
-                      <span>Notes</span>
+                      <span>{lt("notes", "Notes")}</span>
                       {filterType === "Note" && (
                         <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
                       )}
@@ -407,7 +867,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                       }}
                       className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white text-left transition-colors cursor-pointer"
                     >
-                      <span>Documents</span>
+                      <span>{lt("documents", "Documents")}</span>
                       {filterType === "Document" && (
                         <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-300" />
                       )}
@@ -418,11 +878,11 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 sm:ml-auto text-xs w-full sm:w-auto justify-between sm:justify-end">
+          <div className="flex items-center gap-3 sm:ml-auto text-xs w-full sm:w-auto justify-between sm:justify-end font-sans select-none">
             <span className="text-[#71717a] text-[11px] font-medium mr-1 select-none">
-              {sortedPapers.length} files in library
+              {lt("filesInLibrary", "{num} files in library").replace("{num}", String(sortedPapers.length))}
             </span>
-            <div className="relative">
+            <div className="relative font-jakarta">
               <button
                 onClick={() => {
                   setIsAddDropdownOpen(!isAddDropdownOpen);
@@ -432,7 +892,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                   isAddDropdownOpen ? "bg-white text-zinc-950" : "bg-zinc-200 hover:bg-white text-zinc-950"
                 }`}
               >
-                <span className="text-[11px]">Add</span>
+                <span className="text-[11px]">{lt("add", "Add")}</span>
                 <Icon
                   icon="ph:caret-down"
                   className={`w-3 h-3 transition-transform ${isAddDropdownOpen ? "rotate-180" : ""}`}
@@ -463,7 +923,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                           weight="Linear"
                           className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300"
                         />
-                        <span className="font-medium">New document</span>
+                        <span className="font-medium">{lt("addDoc", "New document")}</span>
                       </button>
 
                       <button
@@ -477,7 +937,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                           weight="Linear"
                           className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 shrink-0"
                         />
-                        <span className="font-medium">File upload</span>
+                        <span className="font-medium">{lt("fileUpload", "File upload")}</span>
                       </button>
 
                       <button
@@ -485,7 +945,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                           const newFolderId = `folder-${Date.now()}`;
                           dbSetFolder({
                             id: newFolderId,
-                            name: "Untitled Folder",
+                            name: lt("newFolder", "New folder"),
                             createdAt: Date.now(),
                           });
                           setIsAddDropdownOpen(false);
@@ -496,8 +956,23 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                           weight="Linear"
                           className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 shrink-0"
                         />
-                        <span className="font-medium">New folder</span>
+                        <span className="font-medium">{lt("newFolder", "New folder")}</span>
                       </button>
+
+                      <div className="h-[1px] bg-[#27272a] mx-2 my-0.5" />
+
+                      <a
+                        href="https://genlang.vercel.app/#blog-post/file-types"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group no-underline"
+                      >
+                        <Icon
+                          icon="ph:info"
+                          className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 shrink-0"
+                        />
+                        <span className="font-medium">{lt("learnFileTypes", "Learn about File Types")}</span>
+                      </a>
                     </motion.div>
                   </>
                 )}
@@ -512,7 +987,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
             // Folder Grid and Directory Layout
             <div className="px-4">
               <h2 className="text-[#a1a1aa] text-[10px] font-bold tracking-widest uppercase mb-4">
-                Research Folders
+                {lt("researchFolders", "Research Folders")}
               </h2>
 
               <div className="bg-[#121212] overflow-x-auto border border-[#27272a] rounded-xl mb-8">
@@ -520,16 +995,16 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                   <thead>
                     <tr className="border-b border-[#27272a] bg-[#1a1a1a]/40 text-[#71717a] text-[10.5px] font-jakarta tracking-wider uppercase">
                       <th className="pl-6 pr-3 py-3 font-semibold text-[#8a8a93]">
-                        Folder Name
+                        {lt("folderName", "Folder Name")}
                       </th>
                       <th className="py-3 px-3 font-semibold text-[#8a8a93]">
-                        Size
+                        {lt("size", "Size")}
                       </th>
                       <th className="py-3 px-3 font-semibold text-[#8a8a93]">
-                        Created
+                        {lt("created", "Created")}
                       </th>
                       <th className="pr-6 pl-3 py-3 w-[120px] text-right font-semibold text-[#8a8a93]">
-                        Actions
+                        {lt("actions", "Actions")}
                       </th>
                     </tr>
                   </thead>
@@ -580,7 +1055,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                         ...folder,
                                         name:
                                           renamingFolderTempName.trim() ||
-                                          "Untitled Folder",
+                                          lt("newFolder", "New folder"),
                                       });
                                       setRenamingFolderId(null);
                                     } else if (e.key === "Escape") {
@@ -592,7 +1067,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                       ...folder,
                                       name:
                                         renamingFolderTempName.trim() ||
-                                        "Untitled Folder",
+                                        lt("newFolder", "New folder"),
                                     });
                                     setRenamingFolderId(null);
                                   }}
@@ -611,7 +1086,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                               displayDensity === "compact" ? "py-1.5" : "py-3.5"
                             }`}
                           >
-                            {folderFiles.length} item{folderFiles.length !== 1 ? "s" : ""}
+                            {folderFiles.length} {folderFiles.length === 1 ? lt("item", "item") : lt("items", "items")}
                           </td>
                           <td
                             className={`px-3 text-zinc-500 ${
@@ -633,7 +1108,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                   setRenamingFolderTempName(folder.name);
                                 }}
                                 className="p-1.5 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white transition-colors"
-                                title="Rename Folder"
+                                title={lt("renameFolder", "Rename Folder")}
                               >
                                 <PenNewRound
                                   weight="Linear"
@@ -647,7 +1122,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                   setIsDeleteFolderModalOpen(true);
                                 }}
                                 className="p-1.5 hover:bg-[#27272a] rounded text-red-400 hover:text-red-350 transition-colors"
-                                title="Delete Folder"
+                                title={lt("deleteFolder", "Delete Folder")}
                               >
                                 <Icon icon="ph:trash" className="w-3.5 h-3.5" />
                               </button>
@@ -677,7 +1152,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                   }`}
                 >
                   <Icon icon="ph:caret-left" className="w-3.5 h-3.5" />
-                  <span>All Folders</span>
+                  <span>{lt("allFolders", "All Folders")}</span>
                 </button>
                 <span className="text-[#27272a] text-xs">/</span>
                 <div className="flex items-center gap-2">
@@ -687,7 +1162,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                   />
                   <span className="text-xs font-semibold text-white">
                     {folders.find((f) => f.id === selectedFolderId)?.name ||
-                      "Browsing Directory"}
+                      lt("browsingDir", "Browsing Directory")}
                   </span>
                 </div>
               </div>
@@ -700,10 +1175,10 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                     className="w-10 h-10 text-zinc-600 mx-auto mb-4 shrink-0"
                   />
                   <h3 className="text-[#e4e4e7] text-sm font-medium mb-1">
-                    Folder is Empty
+                    {lt("folderEmpty", "Folder is Empty")}
                   </h3>
                   <p className="text-[#52525b] text-xs max-w-sm mx-auto mb-4">
-                    No assets have been added here yet. Create some research notes or export Summaries to fill it!
+                    {lt("folderEmptyDesc", "No assets have been added here yet. Create some research notes or export Summaries to fill it!")}
                   </p>
                   <div className="flex justify-center gap-3">
                     <button
@@ -712,13 +1187,13 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                       }
                       className="px-6 py-2 bg-[#e4e4e7] hover:bg-white text-black rounded-full text-xs font-bold cursor-pointer transition-colors shadow-sm"
                     >
-                      New Document
+                      {lt("addDoc", "New document")}
                     </button>
                     <button
                       onClick={() => fileInputRef.current?.click()}
                       className="px-6 py-2 bg-[#18181b] border border-[#27272a] hover:bg-[#27272a] text-[#f4f4f5] rounded-full text-xs font-bold cursor-pointer transition-colors"
                     >
-                      Upload PDF File
+                      {lt("uploadPdf", "Upload PDF File")}
                     </button>
                   </div>
                 </div>
@@ -755,13 +1230,13 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                             ) : null}
                           </button>
                         </th>
-                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">Title</th>
-                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">Folder</th>
-                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">Authors</th>
-                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">Added</th>
-                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">Viewed</th>
-                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">Type</th>
-                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">Summary</th>
+                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">{lt("title", "Title")}</th>
+                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">{lt("folder", "Folder")}</th>
+                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">{lt("authors", "Authors")}</th>
+                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">{lt("added", "Added")}</th>
+                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">{lt("viewed", "Viewed")}</th>
+                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">{lt("type", "Type")}</th>
+                        <th className="py-3 px-3 font-semibold text-[#8a8a93]">{lt("summary", "Summary")}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#1e1e20] text-xs">
@@ -861,8 +1336,8 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                   <span className="text-[11px] truncate">
                                     {paper.folderId
                                       ? folders.find((f) => f.id === paper.folderId)?.name ||
-                                        "Library"
-                                      : "Library"}
+                                        lt("library", "Library")
+                                      : lt("library", "Library")}
                                   </span>
                                   <Icon
                                     icon="ph:caret-down"
@@ -903,7 +1378,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                         }}
                                         className="w-full flex items-center px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer text-left font-medium"
                                       >
-                                        Library
+                                        {lt("library", "Library")}
                                       </button>
                                       {folders.map((folder) => (
                                         <button
@@ -963,7 +1438,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                 className="px-2.5 py-1 bg-transparent hover:bg-[#27272a] text-zinc-300 hover:text-white font-sans text-[11px] rounded-lg transition-all cursor-pointer flex items-center gap-1.5 font-medium select-none"
                               >
                                 <Icon icon="ph:eye" className="w-3.5 h-3.5" />
-                                <span>View Summary</span>
+                                <span>{lt("summary", "Summary")}</span>
                               </button>
                             </td>
                           </tr>
