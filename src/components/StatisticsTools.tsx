@@ -1908,7 +1908,6 @@ export function StatisticsTools({
              type="file"
              ref={fileInputRef}
              className="hidden"
-             accept=".pdf,.csv,.txt,.json,.doc,.docx"
              onChange={e => {
                if (e.target.files && e.target.files[0]) {
                  handleFileUpload(e.target.files[0]);

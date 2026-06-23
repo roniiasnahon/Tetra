@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import TextareaAutosize from 'react-textarea-autosize';
 import ReactMarkdown from 'react-markdown';
 import { Icon } from './SolarIcon';
-import { Tab, ChatMessage } from '../App';
+import { Tab, ChatMessage, PaperItem } from '../App';
 import { TypewriterMarkdown } from './TypewriterMarkdown';
 import { DynamicShimmer } from './DynamicShimmer';
 import { Plain2, PaperclipRounded2 } from '@solar-icons/react';
@@ -29,6 +29,7 @@ interface MainChatProps {
   attachedFile: { fileId: string; fileName: string; mimetype: string; url: string } | null;
   setAttachedFile: (val: { fileId: string; fileName: string; mimetype: string; url: string } | null) => void;
   handlePaperclipClick: () => void;
+  papers?: PaperItem[];
 }
 
 export const modelsList = [
@@ -74,9 +75,11 @@ export const MainChat: React.FC<MainChatProps> = ({
   attachedFile,
   setAttachedFile,
   handlePaperclipClick,
-  handleStopGeneration
+  handleStopGeneration,
+  papers = []
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const mainTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isThinkingMenuOpen, setIsThinkingMenuOpen] = useState(false);
   const [isMoreModelsOpen, setIsMoreModelsOpen] = useState(false);
@@ -85,6 +88,75 @@ export const MainChat: React.FC<MainChatProps> = ({
   const chatScrollPositionsRef = useRef<Record<string, number>>({});
   const lastTabIdRef = useRef<string | null>(tab.id);
   const previousMessageCountRef = useRef<number>(messages?.length || 0);
+
+  const [mentionState, setMentionState] = useState<{
+    show: boolean;
+    query: string;
+    startIndex: number;
+    selectedIndex: number;
+  }>({
+    show: false,
+    query: "",
+    startIndex: -1,
+    selectedIndex: 0,
+  });
+
+  const filteredPapers = papers.filter((p: any) => {
+    if (!p.title) return false;
+    return p.title.toLowerCase().includes(mentionState.query.toLowerCase());
+  });
+
+  const handleTextareaChange = (val: string, selectionStart: number) => {
+    setChatInput(val);
+
+    const textBeforeCursor = val.slice(0, selectionStart);
+    const lastAtSymbolIndex = textBeforeCursor.lastIndexOf('@');
+
+    if (lastAtSymbolIndex !== -1) {
+      const query = textBeforeCursor.slice(lastAtSymbolIndex + 1);
+      if (!query.includes(' ') && lastAtSymbolIndex === textBeforeCursor.length - 1 - query.length) {
+        setMentionState({
+          show: true,
+          query,
+          startIndex: lastAtSymbolIndex,
+          selectedIndex: 0,
+        });
+        return;
+      }
+    }
+    setMentionState({ show: false, query: "", startIndex: -1, selectedIndex: 0 });
+  };
+
+  const selectPaper = (paper: any) => {
+    if (!mentionState.show) return;
+
+    const val = chatInput;
+    const beforeMention = val.slice(0, mentionState.startIndex);
+    const selectionStart = mainTextareaRef.current ? mainTextareaRef.current.selectionStart : val.length;
+    const afterMention = val.slice(selectionStart);
+    const replacement = "";
+    const newValue = beforeMention + replacement + afterMention;
+
+    setChatInput(newValue);
+    setMentionState({ show: false, query: "", startIndex: -1, selectedIndex: 0 });
+
+    if (paper.fileId) {
+      setAttachedFile({
+        fileId: paper.fileId,
+        fileName: paper.title,
+        mimetype: paper.mimetype || 'application/pdf',
+        url: paper.url || ''
+      });
+    }
+
+    setTimeout(() => {
+      if (mainTextareaRef.current) {
+        mainTextareaRef.current.focus();
+        const cursorPosition = beforeMention.length + replacement.length;
+        mainTextareaRef.current.setSelectionRange(cursorPosition, cursorPosition);
+      }
+    }, 50);
+  };
 
   const scrollToBottom = React.useCallback((instant = true) => {
     const fn = () => {
@@ -167,7 +239,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                         />
                       ) : (
                         <div className="max-w-[85%] bg-[#1a1a1a] rounded-2xl p-2.5 border border-[#27272a] flex items-center gap-3 w-fit">
-                          <div className="w-10 h-10 rounded-lg bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0">
+                          <div className="w-10 h-10 rounded-lg bg-zinc-800/80 flex items-center justify-center text-zinc-400 shrink-0">
                             <Icon icon="ph:file-text" className="w-5 h-5" />
                           </div>
                           <div className="min-w-0 flex-1 pr-2">
@@ -185,7 +257,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                   {(!m.attachment || (m.content && m.content.trim().length > 0) || m.role !== 'user') && (
                     <div className={`max-w-[85%] ${
                       m.role === 'user' 
-                        ? 'bg-[#1a1a1a] text-white rounded-2xl px-5 py-3.5 border border-[#27272a]' 
+                        ? 'bg-[#1a1a1a] text-white rounded-full px-6 py-3 border border-[#27272a]' 
                         : 'w-full text-[#d4d4d8] py-2'
                     } text-[15px] leading-[1.6]`}>
                       {m.role === 'assistant' && m.thought && (
@@ -234,7 +306,45 @@ export const MainChat: React.FC<MainChatProps> = ({
         </div>
 
         <div className="shrink-0 px-6 pb-1.5 pt-1 flex flex-col items-center gap-2">
-          <div className="w-full max-w-2xl bg-[#1a1a1a] rounded-[28px] p-2 flex flex-col transition-all">
+          <div className="w-full max-w-2xl bg-[#1a1a1a] rounded-[28px] p-2 flex flex-col transition-all relative">
+            {/* Mention dropdown */}
+            <AnimatePresence>
+              {mentionState.show && filteredPapers.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  transition={{ duration: 0.1 }}
+                  className="absolute bottom-full left-4 mb-2 w-[320px] bg-[#1a1a1a] border border-zinc-800 rounded-2xl p-1.5 shadow-xl z-[150] flex flex-col gap-0.5 max-h-[220px] overflow-y-auto"
+                >
+                  <div className="px-2 py-1.5 text-[11px] font-bold text-zinc-500 uppercase tracking-wider border-b border-zinc-850 mb-1">
+                    Your Library Documents ({filteredPapers.length})
+                  </div>
+                  {filteredPapers.map((p, idx) => {
+                    const isSelected = idx === mentionState.selectedIndex;
+                    return (
+                      <button
+                        key={p.fileId || p.title + idx}
+                        onClick={() => selectPaper(p)}
+                        onMouseEnter={() => setMentionState(prev => ({ ...prev, selectedIndex: idx }))}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all text-left ${
+                          isSelected ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        <Icon icon="ph:file-pdf" className="w-4 h-4 text-rose-450 shrink-0" />
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-[13px] font-medium truncate">{p.title}</span>
+                          {p.author && (
+                            <span className="text-[10px] text-zinc-500 truncate">{p.author}</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {attachedFile && (
               <div className="mx-2 mt-1 mb-2 animate-fade-in w-fit">
                 {attachedFile.mimetype?.startsWith("image/") ? (
@@ -256,7 +366,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                 ) : (
                   <div className="bg-[#1a1a1c] border border-[#2d2d30] rounded-2xl px-3 py-2 flex items-center justify-between gap-3 shadow-sm max-w-sm">
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-xl bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0 shadow-inner">
+                      <div className="w-10 h-10 rounded-xl bg-zinc-800/80 flex items-center justify-center text-zinc-400 shrink-0 shadow-inner">
                         <Icon icon="ph:file-text" className="w-5 h-5" />
                       </div>
                       <div className="min-w-0 pr-2">
@@ -280,6 +390,7 @@ export const MainChat: React.FC<MainChatProps> = ({
 
             <div className="px-3 pt-2 pb-3">
               <TextareaAutosize 
+                ref={mainTextareaRef}
                 key={`main-chat-input-${tab.id}`}
                 id={`main-chat-input-${tab.id}`}
                 name={`main-chat-input-${tab.id}`}
@@ -287,10 +398,35 @@ export const MainChat: React.FC<MainChatProps> = ({
                 placeholder="Ask Cosmi..."
                 value={chatInput}
                 onChange={(e) => {
-                  const val = e.target.value;
-                  setChatInput(val);
+                  handleTextareaChange(e.target.value, e.target.selectionStart);
                 }}
                 onKeyDown={(e) => {
+                  if (mentionState.show && filteredPapers.length > 0) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setMentionState(prev => ({
+                        ...prev,
+                        selectedIndex: (prev.selectedIndex + 1) % filteredPapers.length
+                      }));
+                      return;
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setMentionState(prev => ({
+                        ...prev,
+                        selectedIndex: (prev.selectedIndex - 1 + filteredPapers.length) % filteredPapers.length
+                      }));
+                      return;
+                    } else if (e.key === 'Enter') {
+                      e.preventDefault();
+                      selectPaper(filteredPapers[mentionState.selectedIndex]);
+                      return;
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setMentionState(prev => ({ ...prev, show: false }));
+                      return;
+                    }
+                  }
+
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     onSend();

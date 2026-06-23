@@ -104,7 +104,7 @@ interface FolderItem {
   createdAt: number;
 }
 
-interface PaperItem {
+export interface PaperItem {
   author: string;
   title: string;
   description: string;
@@ -3177,6 +3177,9 @@ export default function App() {
   const currentUserIdRef = useRef<string | null>(
     currentUser ? currentUser.uid : null,
   );
+  const loadedUserIdRef = useRef<string | "guest" | null>(
+    currentUser ? currentUser.uid : "guest",
+  );
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [storageMode, setStorageMode] = useState<"local" | "database">(() => {
     return (localStorage.getItem("cosmi_settings_storage_mode") as "local" | "database") || "local";
@@ -3864,6 +3867,8 @@ export default function App() {
           if (cachedMessages) setMessages(JSON.parse(cachedMessages));
         } catch {}
 
+        loadedUserIdRef.current = user.uid;
+
         // Load workspace session state from server
         try {
           const sessionDoc = await getDocFromServer(
@@ -3994,6 +3999,7 @@ export default function App() {
           setMessages([]);
           setAllChats([]);
         }
+        loadedUserIdRef.current = user.uid;
       } else {
         // --- GUEST / OFFLINE MODE ---
         setIsSessionLoaded(true);
@@ -4018,6 +4024,7 @@ export default function App() {
           setMessages([]);
           setAllChats([]);
         }
+        loadedUserIdRef.current = "guest";
       }
     };
 
@@ -4243,7 +4250,20 @@ export default function App() {
     }
   });
   const [chatInput, setChatInput] = useState("");
-  const [selectedModel, setSelectedModel] = useState("command-a-plus-05-2026");
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    try {
+      const cached = localStorage.getItem("cosmi_selected_model");
+      return cached || "command-a-plus-05-2026";
+    } catch {
+      return "command-a-plus-05-2026";
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("cosmi_selected_model", selectedModel);
+    } catch {}
+  }, [selectedModel]);
   const [thinkingLevel, setThinkingLevel] = useState<'Standard' | 'Deep' | 'Instant'>('Standard');
   const [isAgentModelMenuOpen, setIsAgentModelMenuOpen] = useState(false);
   const [isAgentThinkingMenuOpen, setIsAgentThinkingMenuOpen] = useState(false);
@@ -4267,6 +4287,76 @@ export default function App() {
     }
   });
   const [assistantInput, setAssistantInput] = useState("");
+  const assistantInputRef = useRef<HTMLTextAreaElement>(null);
+  const [agentMentionState, setAgentMentionState] = useState<{
+    show: boolean;
+    query: string;
+    startIndex: number;
+    selectedIndex: number;
+  }>({
+    show: false,
+    query: "",
+    startIndex: -1,
+    selectedIndex: 0,
+  });
+
+  const agentFilteredPapers = papers.filter((p) => {
+    if (!p.title) return false;
+    return p.title.toLowerCase().includes(agentMentionState.query.toLowerCase());
+  });
+
+  const handleAgentTextareaChange = (val: string, selectionStart: number) => {
+    setAssistantInput(val);
+
+    const textBeforeCursor = val.slice(0, selectionStart);
+    const lastAtSymbolIndex = textBeforeCursor.lastIndexOf('@');
+
+    if (lastAtSymbolIndex !== -1) {
+      const query = textBeforeCursor.slice(lastAtSymbolIndex + 1);
+      if (!query.includes(' ') && lastAtSymbolIndex === textBeforeCursor.length - 1 - query.length) {
+        setAgentMentionState({
+          show: true,
+          query,
+          startIndex: lastAtSymbolIndex,
+          selectedIndex: 0,
+        });
+        return;
+      }
+    }
+    setAgentMentionState({ show: false, query: "", startIndex: -1, selectedIndex: 0 });
+  };
+
+  const selectAgentPaper = (paper: PaperItem) => {
+    if (!agentMentionState.show) return;
+
+    const val = assistantInput;
+    const beforeMention = val.slice(0, agentMentionState.startIndex);
+    const selectionStart = assistantInputRef.current ? assistantInputRef.current.selectionStart : val.length;
+    const afterMention = val.slice(selectionStart);
+    const replacement = "";
+    const newValue = beforeMention + replacement + afterMention;
+
+    setAssistantInput(newValue);
+    setAgentMentionState({ show: false, query: "", startIndex: -1, selectedIndex: 0 });
+
+    if (paper.fileId) {
+      setAttachedFile({
+        fileId: paper.fileId,
+        fileName: paper.title,
+        mimetype: paper.mimetype || 'application/pdf',
+        url: paper.url || ''
+      });
+    }
+
+    setTimeout(() => {
+      if (assistantInputRef.current) {
+        assistantInputRef.current.focus();
+        const cursorPosition = beforeMention.length + replacement.length;
+        assistantInputRef.current.setSelectionRange(cursorPosition, cursorPosition);
+      }
+    }, 50);
+  };
+
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [researchStatus, setResearchStatus] = useState<
     "fetching" | "downloading" | "polishing" | "editor_agent" | null
@@ -4493,6 +4583,7 @@ export default function App() {
     if (!isSessionLoaded || !tabs || tabs.length === 0) return;
 
     if (currentUser && storageMode === "database") {
+      if (loadedUserIdRef.current !== currentUser.uid) return; // Prevent leak!
       const handler = setTimeout(() => {
         const sessionRef = doc(
           db,
@@ -4521,26 +4612,31 @@ export default function App() {
   // Synchronize workspace changes to LocalStorage instantly
   useEffect(() => {
     const uid = currentUser ? currentUser.uid : "guest";
+    if (loadedUserIdRef.current !== uid) return; // Prevent leak!
     localStorage.setItem(`cosmi_folders_${uid}`, JSON.stringify(folders));
   }, [folders, currentUser]);
 
   useEffect(() => {
     const uid = currentUser ? currentUser.uid : "guest";
+    if (loadedUserIdRef.current !== uid) return; // Prevent leak!
     localStorage.setItem(`cosmi_papers_${uid}`, JSON.stringify(papers));
   }, [papers, currentUser]);
 
   useEffect(() => {
     const uid = currentUser ? currentUser.uid : "guest";
+    if (loadedUserIdRef.current !== uid) return; // Prevent leak!
     localStorage.setItem(`cosmi_tabs_${uid}`, JSON.stringify(tabs));
   }, [tabs, currentUser]);
 
   useEffect(() => {
     const uid = currentUser ? currentUser.uid : "guest";
+    if (loadedUserIdRef.current !== uid) return; // Prevent leak!
     localStorage.setItem(`cosmi_activeTabId_${uid}`, activeTabId);
   }, [activeTabId, currentUser]);
 
   useEffect(() => {
     const uid = currentUser ? currentUser.uid : "guest";
+    if (loadedUserIdRef.current !== uid) return; // Prevent leak!
     localStorage.setItem(`cosmi_messages_${uid}`, JSON.stringify(messages));
   }, [messages, currentUser]);
 
@@ -5815,7 +5911,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
         type="file"
         ref={fileInputRef}
         className="hidden"
-        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.html,.csv,.json"
         multiple
         onChange={async (e) => {
           const files = e.target.files;
@@ -6821,8 +6916,18 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             <div className="px-1.5 pt-1 border-t border-[#2d2d30]/50">
                               <button
                                 onClick={async () => {
-                                  setIsLoggingOut(true);
                                   setIsProfileDropdownOpen(false);
+                                  setIsLoggingOut(true);
+                                  
+                                  // Instantly switch memory scope to guest and reset states to prevent any leaks
+                                  loadedUserIdRef.current = "guest";
+                                  setFolders([{ id: "f1", name: "My Research", createdAt: Date.now() - 172800000 }]);
+                                  setPapers([]);
+                                  setTabs([{ id: "initial-home", type: "home", title: "Home" }]);
+                                  setActiveTabId("initial-home");
+                                  setMessages([]);
+                                  setAllChats([]);
+
                                   setTimeout(async () => {
                                     try {
                                       await signOut(auth);
@@ -7201,6 +7306,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     setIsAiTyping(false);
                     updateChatMessages((prev) => prev, false);
                   }}
+                  papers={papers}
                 />
               </div>
             ) : activeTab.type === "library" ? (
@@ -9884,7 +9990,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             />
                           ) : (
                             <div className="max-w-[88%] bg-[#262626] text-white rounded-xl p-1.5 border border-zinc-800 flex items-center gap-2">
-                              <div className="w-8 h-8 rounded-lg bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0">
+                              <div className="w-8 h-8 rounded-lg bg-zinc-800/80 flex items-center justify-center text-zinc-400 shrink-0">
                                 <Icon icon="ph:file-text" className="w-[18px] h-[18px]" />
                               </div>
                               <div className="min-w-0 flex-1 pr-2 mt-0.5">
@@ -9903,7 +10009,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         <div
                           className={`${
                             m.role === "user"
-                              ? "self-end max-w-[88%] bg-[#262626] text-white rounded-xl rounded-br-none p-3.5"
+                              ? "self-end max-w-[88%] bg-[#262626] text-white rounded-full px-5 py-2.5"
                               : "self-start max-w-full bg-transparent text-[#d4d4d8] py-2"
                           } text-[13px] leading-relaxed transition-all`}
                         >
@@ -9989,7 +10095,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   ) : (
                     <div className="bg-[#1a1a1c] border border-zinc-800 rounded-2xl px-3 py-2 flex items-center justify-between gap-3 shadow-sm max-w-[240px]">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-9 h-9 rounded-xl bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0 shadow-inner">
+                        <div className="w-9 h-9 rounded-xl bg-zinc-800/80 flex items-center justify-center text-zinc-400 shrink-0 shadow-inner">
                           <Icon icon="ph:file-text" className="w-4 h-4" />
                         </div>
                         <div className="min-w-0 pr-2 flex flex-col justify-center">
@@ -10011,16 +10117,81 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 </div>
               )}
 
-              <div className="bg-[#222222] rounded-[10px] flex flex-col border border-transparent transition-colors">
+              <div className="bg-[#222222] rounded-[10px] flex flex-col border border-transparent transition-colors relative">
+                {/* Mention dropdown */}
+                <AnimatePresence>
+                  {agentMentionState.show && agentFilteredPapers.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      transition={{ duration: 0.1 }}
+                      className="absolute bottom-full left-2 mb-2 w-[300px] bg-[#222222] border border-zinc-800 rounded-2xl p-1.5 shadow-xl z-[150] flex flex-col gap-0.5 max-h-[180px] overflow-y-auto"
+                    >
+                      <div className="px-2 py-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider border-b border-[#2d2d30] mb-1">
+                        Your Library Documents ({agentFilteredPapers.length})
+                      </div>
+                      {agentFilteredPapers.map((p, idx) => {
+                        const isSelected = idx === agentMentionState.selectedIndex;
+                        return (
+                          <button
+                            key={p.fileId || p.title + idx}
+                            onClick={() => selectAgentPaper(p)}
+                            onMouseEnter={() => setAgentMentionState(prev => ({ ...prev, selectedIndex: idx }))}
+                            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-all text-left ${
+                              isSelected ? 'bg-zinc-850 text-white' : 'text-zinc-400 hover:text-white'
+                            }`}
+                          >
+                            <Icon icon="ph:file-pdf" className="w-3.5 h-3.5 text-rose-450 shrink-0" />
+                            <div className="flex flex-col min-w-0">
+                              <span className="text-[12px] font-medium truncate">{p.title}</span>
+                              {p.author && (
+                                <span className="text-[9px] text-zinc-500 truncate">{p.author}</span>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 <textarea
+                  ref={assistantInputRef}
                   key={`assistant-chat-input-${activeTabId}`}
                   id={`assistant-chat-input-${activeTabId}`}
                   name={`assistant-chat-input-${activeTabId}`}
                   autoComplete="off"
                   placeholder="Ask about your research, sources, or draft content..."
                   value={assistantInput}
-                  onChange={(e) => setAssistantInput(e.target.value)}
+                  onChange={(e) => handleAgentTextareaChange(e.target.value, e.target.selectionStart)}
                   onKeyDown={(e) => {
+                    if (agentMentionState.show && agentFilteredPapers.length > 0) {
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setAgentMentionState(prev => ({
+                          ...prev,
+                          selectedIndex: (prev.selectedIndex + 1) % agentFilteredPapers.length
+                        }));
+                        return;
+                      } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setAgentMentionState(prev => ({
+                          ...prev,
+                          selectedIndex: (prev.selectedIndex - 1 + agentFilteredPapers.length) % agentFilteredPapers.length
+                        }));
+                        return;
+                      } else if (e.key === 'Enter') {
+                        e.preventDefault();
+                        selectAgentPaper(agentFilteredPapers[agentMentionState.selectedIndex]);
+                        return;
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setAgentMentionState(prev => ({ ...prev, show: false }));
+                        return;
+                      }
+                    }
+
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       handleSendMessage(undefined, { fromSidePanel: true });
