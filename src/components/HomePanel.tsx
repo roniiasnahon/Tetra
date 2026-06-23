@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Tab } from "../App";
 import { Plus } from "lucide-react";
 import { AddFolder } from "@solar-icons/react";
+import { GetStartedChecklist } from "./GetStartedChecklist";
 
 interface FolderItem {
   id: string;
@@ -402,6 +403,8 @@ export const HomePanel: React.FC<HomePanelProps> = ({
             </AnimatePresence>
           </div>
         </div>
+
+        <GetStartedChecklist />
 
         <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wider mb-6">
           {ht("recentFolders", "Recent Folders")}

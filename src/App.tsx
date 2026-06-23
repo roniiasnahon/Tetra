@@ -3462,6 +3462,7 @@ export default function App() {
   };
 
   const createNewDocument = (targetFolderId?: string) => {
+    localStorage.setItem('onboarding_create_note', 'true');
     const newId = `doc-${Date.now()}`;
     const folder = targetFolderId || selectedFolderId || folders[0]?.id || "f1";
     const newDoc: Tab = {
@@ -3483,6 +3484,7 @@ export default function App() {
   };
 
   const handleUploadFile = async (file: File) => {
+    localStorage.setItem('onboarding_upload_file', 'true');
     const taskId = "upload-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
     const uploaderId = currentUserIdRef.current;
     
@@ -4336,6 +4338,7 @@ export default function App() {
     const replacement = "";
     const newValue = beforeMention + replacement + afterMention;
 
+    localStorage.setItem('onboarding_citation_note', 'true');
     setAssistantInput(newValue);
     setAgentMentionState({ show: false, query: "", startIndex: -1, selectedIndex: 0 });
 
@@ -5143,6 +5146,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
     if (!textToSend.trim()) return;
 
+    if (activeTab.fileId) {
+      localStorage.setItem('onboarding_chat_with_file', 'true');
+    }
+    if (activeTab.type === "chat" && activeTab.folderId) {
+      localStorage.setItem('onboarding_folder_chat', 'true');
+    }
+
     const userMessage: ChatMessage = {
       id: String(Date.now()),
       role: "user",
@@ -5399,6 +5409,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         .then((res) => res.json())
                         .then(async (resData) => {
                           if (resData.success && resData.papers) {
+                            localStorage.setItem('onboarding_search_papers', 'true');
                             setResearchStatus("downloading");
                             const newPapers = await Promise.all(
                               resData.papers.map(async (p: any) => {

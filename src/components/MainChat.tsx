@@ -137,6 +137,7 @@ export const MainChat: React.FC<MainChatProps> = ({
     const replacement = "";
     const newValue = beforeMention + replacement + afterMention;
 
+    localStorage.setItem('onboarding_citation_note', 'true');
     setChatInput(newValue);
     setMentionState({ show: false, query: "", startIndex: -1, selectedIndex: 0 });
 
