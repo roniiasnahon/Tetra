@@ -3579,7 +3579,6 @@ export default function App() {
             mimetype: data.mimetype,
             url: `/api/files/${data.fileId}`
           });
-          setSelectedModel("mistral-large-latest");
         }
 
         let extractedText = "";
@@ -4309,23 +4308,6 @@ export default function App() {
 
   const handleAgentTextareaChange = (val: string, selectionStart: number) => {
     setAssistantInput(val);
-
-    const textBeforeCursor = val.slice(0, selectionStart);
-    const lastAtSymbolIndex = textBeforeCursor.lastIndexOf('@');
-
-    if (lastAtSymbolIndex !== -1) {
-      const query = textBeforeCursor.slice(lastAtSymbolIndex + 1);
-      if (!query.includes(' ') && lastAtSymbolIndex === textBeforeCursor.length - 1 - query.length) {
-        setAgentMentionState({
-          show: true,
-          query,
-          startIndex: lastAtSymbolIndex,
-          selectedIndex: 0,
-        });
-        return;
-      }
-    }
-    setAgentMentionState({ show: false, query: "", startIndex: -1, selectedIndex: 0 });
   };
 
   const selectAgentPaper = (paper: PaperItem) => {
@@ -5251,7 +5233,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
               content: m.content,
               attachment: m.attachment ? { fileId: m.attachment.fileId, fileName: m.attachment.fileName, mimetype: m.attachment.mimetype } : undefined
             })),
-          model: (currentAttachment && !currentAttachment.mimetype?.startsWith("image/")) ? "mistral-large-latest" : selectedModel,
+          model: selectedModel,
           thinkingLevel: thinkingLevel,
           webSearch: webSearchEnabled,
           attachment: currentAttachment,
@@ -6200,7 +6182,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     }`}
                   >
                     <span className="text-[10px] text-[#71717a] uppercase font-bold tracking-wider">
-                      Workspace Folders
+                      Folders
                     </span>
                     <button
                       onClick={() => {
@@ -9990,7 +9972,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     >
                       {/* Separate Attachment Bubble */}
                       {m.role === "user" && m.attachment && (
-                        <div className="mb-0.5 w-fit">
+                        <div className="mb-0.5 w-fit self-end flex justify-end">
                           {m.attachment.mimetype?.startsWith("image/") ? (
                             <img 
                               src={m.attachment.url} 

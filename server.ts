@@ -3076,10 +3076,16 @@ ${researchContext}
 -------------------------------
 `;
 
-      const openaiMessages = messages.map((m: any) => ({
+      const openaiMessages: any[] = messages.map((m: any) => {
+        let content = m.content || "";
+        if (!content.trim() && m.attachment) {
+          content = `[Attached Document: ${m.attachment.fileName}]`;
+        }
+        return {
           role: m.role,
-          content: m.content
-        })).filter((m: any) => m.content && typeof m.content === 'string' && m.content.trim().length > 0);
+          content: content
+        };
+      }).filter((m: any) => m.content && typeof m.content === 'string' && m.content.trim().length > 0);
 
       // Inject current workspace context
       openaiMessages.unshift({

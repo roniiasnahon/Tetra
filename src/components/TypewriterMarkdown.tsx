@@ -2,43 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Icon } from './SolarIcon';
-import { motion } from 'motion/react';
-
-const childVariants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { duration: 0.1 } }
-};
-
-const AnimatedText = ({ text }: { text: string }) => {
-  return (
-    <>
-      {Array.from(text).map((char, index) => (
-        <motion.span key={index} variants={childVariants}>
-          {char}
-        </motion.span>
-      ))}
-    </>
-  );
-};
-
-const AnimatedChildren = ({ children }: { children: React.ReactNode }): React.ReactNode => {
-  if (typeof children === 'string') {
-    return <AnimatedText text={children} />;
-  }
-  if (Array.isArray(children)) {
-    return children.map((child, i) => (
-      <React.Fragment key={i}>
-        <AnimatedChildren>{child}</AnimatedChildren>
-      </React.Fragment>
-    ));
-  }
-  if (React.isValidElement(children)) {
-    if (children.props && (children.props as any).children) {
-      return React.cloneElement(children as any, {}, <AnimatedChildren>{(children.props as any).children}</AnimatedChildren>);
-    }
-  }
-  return children;
-};
 
 const previewCache = new Map<string, any>();
 
@@ -487,13 +450,13 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
   );
 
   const components = {
-    p: ({children}: any) => <div className="mb-4 last:mb-0 leading-relaxed text-[#d4d4d8] text-[15px]"><AnimatedChildren>{children}</AnimatedChildren></div>,
-    h1: ({children}: any) => <h1 className="text-2xl font-semibold mb-6 mt-4 text-white tracking-tight"><AnimatedChildren>{children}</AnimatedChildren></h1>,
-    h2: ({children}: any) => <h2 className="text-xl font-medium mb-4 mt-6 text-[#f4f4f5] tracking-tight"><AnimatedChildren>{children}</AnimatedChildren></h2>,
-    h3: ({children}: any) => <h3 className="text-lg font-medium mb-3 mt-5 text-[#e4e4e7]"><AnimatedChildren>{children}</AnimatedChildren></h3>,
+    p: ({children}: any) => <div className="mb-4 last:mb-0 leading-relaxed text-[#d4d4d8] text-[15px]">{children}</div>,
+    h1: ({children}: any) => <h1 className="text-2xl font-semibold mb-6 mt-4 text-white tracking-tight">{children}</h1>,
+    h2: ({children}: any) => <h2 className="text-xl font-medium mb-4 mt-6 text-[#f4f4f5] tracking-tight">{children}</h2>,
+    h3: ({children}: any) => <h3 className="text-lg font-medium mb-3 mt-5 text-[#e4e4e7]">{children}</h3>,
     ul: ({children}: any) => <ul className="list-disc pl-5 mb-4 text-[#d4d4d8] space-y-1.5 marker:text-zinc-500">{children}</ul>,
     ol: ({children}: any) => <ol className="list-decimal pl-5 mb-4 text-[#d4d4d8] space-y-1.5 marker:text-zinc-500">{children}</ol>,
-    li: ({children}: any) => <li className="pl-1 leading-relaxed"><span className="text-[15px]"><AnimatedChildren>{children}</AnimatedChildren></span></li>,
+    li: ({children}: any) => <li className="pl-1 leading-relaxed"><span className="text-[15px]">{children}</span></li>,
     blockquote: ({children, node}: any) => {
       const textContent = node && node.children ? node.children.map((c: any) => c.value || (c.children && c.children[0]?.value)).join('') : '';
       if (textContent && textContent.includes('Citation:')) {
@@ -655,11 +618,11 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
           className="underline decoration-dashed decoration-skip-ink underline-offset-[3px] text-inherit cursor-pointer hover:text-[#f4f4f5] transition-colors inline" 
           {...props}
         >
-          <AnimatedChildren>{children}</AnimatedChildren>
+          {children}
         </a>
       );
     },
-    strong: ({children}: any) => <strong className="font-semibold text-white"><AnimatedChildren>{children}</AnimatedChildren></strong>,
+    strong: ({children}: any) => <strong className="font-semibold text-white">{children}</strong>,
     img: ({ src, alt }: any) => {
       return (
         <span className="block my-5 max-w-full overflow-hidden">
@@ -691,18 +654,10 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
   };
 
   return (
-    <motion.div 
-      className={isStreaming ? "streaming-cursor" : ""}
-      initial="hidden"
-      animate="visible"
-      variants={{
-        hidden: {},
-        visible: { transition: { staggerChildren: isStreaming ? 0 : 0.05 } }
-      }}
-    >
+    <div className={isStreaming ? "streaming-cursor" : ""}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {processedContent}
       </ReactMarkdown>
-    </motion.div>
+    </div>
   );
 });

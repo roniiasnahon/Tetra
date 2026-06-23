@@ -108,23 +108,6 @@ export const MainChat: React.FC<MainChatProps> = ({
 
   const handleTextareaChange = (val: string, selectionStart: number) => {
     setChatInput(val);
-
-    const textBeforeCursor = val.slice(0, selectionStart);
-    const lastAtSymbolIndex = textBeforeCursor.lastIndexOf('@');
-
-    if (lastAtSymbolIndex !== -1) {
-      const query = textBeforeCursor.slice(lastAtSymbolIndex + 1);
-      if (!query.includes(' ') && lastAtSymbolIndex === textBeforeCursor.length - 1 - query.length) {
-        setMentionState({
-          show: true,
-          query,
-          startIndex: lastAtSymbolIndex,
-          selectedIndex: 0,
-        });
-        return;
-      }
-    }
-    setMentionState({ show: false, query: "", startIndex: -1, selectedIndex: 0 });
   };
 
   const selectPaper = (paper: any) => {
