@@ -16,7 +16,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Icon } from "./components/SolarIcon";
 import { MaterialIcon } from "./components/MaterialIcon";
 import { Sidebar, Plain2, PaperclipRounded2, Notes, FolderWithFiles, PenNewRound, FolderOpen, MinimalisticMagnifier, MenuDots, UploadMinimalistic, AddFolder, AddCircle, PaletteRound, NotebookBookmark, SidebarMinimalistic, HandStars } from "@solar-icons/react";
-import { Plus, X as XIcon, Minus, Square } from "lucide-react";
+import { Plus, X as XIcon, Minus, Square, HelpCircle } from "lucide-react";
 import html2pdf from "html2pdf.js";
 
 interface ShimProps extends React.HTMLAttributes<HTMLSpanElement> {
@@ -1474,6 +1474,27 @@ export default function App() {
       if (!c.id) return false;
       if (seen.has(c.id)) return false;
       seen.add(c.id);
+      return true;
+    });
+  };
+
+  const getUniqueFolders = (folderList: FolderItem[]) => {
+    const seen = new Set<string>();
+    return folderList.filter((f) => {
+      if (!f.id) return false;
+      if (seen.has(f.id)) return false;
+      seen.add(f.id);
+      return true;
+    });
+  };
+
+  const getUniquePapers = (paperList: PaperItem[]) => {
+    const seen = new Set<string>();
+    return paperList.filter((p) => {
+      const id = p.fileId || p.title;
+      if (!id) return false;
+      if (seen.has(id)) return false;
+      seen.add(id);
       return true;
     });
   };
@@ -6202,7 +6223,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     />
                     </button>
                   </div>
-                  {folders.map((folder) => {
+                  {getUniqueFolders(folders).map((folder) => {
                     const isExpanded = !!expandedFolders[folder.id];
                     const folderFiles = allLibraryItems.filter(
                       (item) => item.folderId === folder.id,
@@ -7148,7 +7169,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             onClick={() => setIsChatDropdownOpen(false)}
                           />
                           <div className="absolute top-full left-0 mt-1.5 w-[200px] bg-[#1a1a1a] border border-[#2d2d30] rounded-xl z-50 p-1.5 flex flex-col gap-0.5 max-h-72 overflow-y-auto shadow-2xl">
-                            {tabs
+                            {getUniqueTabs(tabs)
                               .filter((t) => t.type === "chat")
                               .map((chatTab) => (
                                 <button
@@ -7667,7 +7688,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-[#1e1e20] text-xs">
-                            {folders.map((folder) => {
+                            {getUniqueFolders(folders).map((folder) => {
                               const folderFiles = sortedPapers.filter(
                                 (p) => p.folderId === folder.id,
                               );
@@ -8065,7 +8086,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                                 >
                                                   Library
                                                 </button>
-                                                {folders.map((folder) => (
+                                                {getUniqueFolders(folders).map((folder) => (
                                                   <button
                                                     key={folder.id}
                                                     onClick={() => {
@@ -8206,19 +8227,32 @@ Once you have content, I can help you draft sections, summarize findings, or for
             ) : activeTab.type === "tools" ? (
               <div className="flex-1 overflow-hidden focus:outline-none bg-[#121212] flex flex-col pt-8 w-full h-full min-h-0">
                 <div className="w-full h-full flex flex-col min-h-0">
-                  <h1 className="text-xl text-[#f4f4f5] font-semibold tracking-tight pb-4 border-b border-[#222225] px-8 shrink-0">
-                    {activeToolsTab === "slovin"
-                      ? t("slovinTitle")
-                      : activeToolsTab === "percentage"
-                        ? t("percentageTitle")
-                        : activeToolsTab === "weighted"
-                          ? t("weightedTitle")
-                          : activeToolsTab === "likert"
-                            ? t("likertTitle")
-                            : activeToolsTab === "citation"
-                              ? t("citationsTitle")
-                              : t("analysisTitle")}
-                  </h1>
+                  <div className="flex items-center gap-3 pb-4 border-b border-[#222225] px-8 shrink-0">
+                    <h1 className="text-xl text-[#f4f4f5] font-semibold tracking-tight">
+                      {activeToolsTab === "slovin"
+                        ? t("slovinTitle")
+                        : activeToolsTab === "percentage"
+                          ? t("percentageTitle")
+                          : activeToolsTab === "weighted"
+                            ? t("weightedTitle")
+                            : activeToolsTab === "likert"
+                              ? t("likertTitle")
+                              : activeToolsTab === "citation"
+                                ? t("citationsTitle")
+                                : t("analysisTitle")}
+                    </h1>
+                    {activeToolsTab === "citation" && (
+                      <a 
+                        href="https://genlang.vercel.app/#blog-post/demystifying-citations-and-sources"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-zinc-500 hover:text-zinc-300 transition-colors mt-0.5"
+                        title="Demystifying Citations and Sources"
+                      >
+                        <HelpCircle className="w-5 h-5" />
+                      </a>
+                    )}
+                  </div>
                   <div className="flex-1 min-h-0 flex flex-col">
                     <StatisticsTools
                       onAddHistory={addToolsHistoryItem}
@@ -9963,6 +9997,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
               ) : (
                 messages
                   .filter((m) => !m.isHidden)
+                  .reduce((acc: ChatMessage[], m) => {
+                    if (!acc.some((x) => x.id === m.id)) {
+                      acc.push(m);
+                    }
+                    return acc;
+                  }, [])
                   .map((m) => (
                     <div
                       key={m.id}
@@ -10262,7 +10302,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             transition={{ duration: 0.15, ease: "easeOut" }}
                             className="absolute bottom-full right-0 mb-2 w-[280px] bg-[#1e1e22] border border-zinc-800/80 rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5"
                           >
-                            {modelsList.filter(m => !['mistral-large-latest', 'codestral-latest'].includes(m.id)).map((m) => {
+                            {modelsList.filter(m => !['mistral-large-latest', 'codestral-latest', 'solar-pro2'].includes(m.id)).map((m) => {
                               const isSelected = selectedModel === m.id;
                               return (
                                 <button
@@ -10308,7 +10348,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             >
                               <div className="flex items-start gap-2.5">
                                 <div className="w-4 shrink-0 flex items-center justify-center pt-0.5">
-                                  {['mistral-large-latest', 'codestral-latest'].includes(selectedModel) ? (
+                                  {['mistral-large-latest', 'codestral-latest', 'solar-pro2'].includes(selectedModel) ? (
                                     <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
                                   ) : (
                                     <div className="w-3.5" />
@@ -10317,7 +10357,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 <div className="flex flex-col gap-0.5 text-left">
                                   <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">More models</span>
                                   <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
-                                    {['mistral-large-latest', 'codestral-latest'].includes(selectedModel) 
+                                    {['mistral-large-latest', 'codestral-latest', 'solar-pro2'].includes(selectedModel) 
                                       ? modelsList.find(m => m.id === selectedModel)?.label 
                                       : 'Advanced reasoning & coding specials'}
                                   </span>
@@ -10345,7 +10385,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     <span className="text-[12px] font-bold text-zinc-400 uppercase tracking-widest ml-1">More Models</span>
                                   </div>
                                   <div className="overflow-y-auto max-h-[300px]">
-                                    {modelsList.filter(m => ['mistral-large-latest', 'codestral-latest'].includes(m.id)).map((m) => {
+                                    {modelsList.filter(m => ['mistral-large-latest', 'codestral-latest', 'solar-pro2'].includes(m.id)).map((m) => {
                                       const isSelected = selectedModel === m.id;
                                       return (
                                         <button

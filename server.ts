@@ -670,6 +670,22 @@ let basetenClient: OpenAI | null = null;
 let mistralClient: OpenAI | null = null;
 let groqClient: OpenAI | null = null;
 let cohereClient: OpenAI | null = null;
+let upstageClient: OpenAI | null = null;
+import { VoyageAIClient } from "voyageai";
+let voyageClient: VoyageAIClient | null = null;
+
+function getVoyageClient(): VoyageAIClient {
+  if (!voyageClient) {
+    const apiKey = process.env.VOYAGE_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "VOYAGE_API_KEY is not configured. Please set it in the Secrets panel."
+      );
+    }
+    voyageClient = new VoyageAIClient({ apiKey });
+  }
+  return voyageClient;
+}
 
 function getBasetenClient(): OpenAI {
   if (!basetenClient) {
@@ -733,6 +749,22 @@ function getCohereClient(): OpenAI {
     });
   }
   return cohereClient;
+}
+
+function getUpstageClient(): OpenAI {
+  if (!upstageClient) {
+    const apiKey = process.env.UPSTAGE_API_KEY || "up_f7qyEzCstwwEFZ7fDTkoBmeheHNTj";
+    if (!apiKey) {
+      throw new Error(
+        "UPSTAGE_API_KEY is not configured. Please set it in the Secrets panel."
+      );
+    }
+    upstageClient = new OpenAI({
+      apiKey: apiKey,
+      baseURL: "https://api.upstage.ai/v1/solar",
+    });
+  }
+  return upstageClient;
 }
 
 function extractTextFromHtml(html: string): string {
@@ -2377,7 +2409,7 @@ CRITICAL RULES:
             messages: [
               {
                 role: "system",
-                content: "You are a professional academic assistant. Generate a succinct, sophisticated 2-4 word title for this conversation based on the user's query. Use Title Case. Output ONLY the title text, no quotes or periods or asterisks."
+                content: "You are a helpful assistant. Generate an appropriate, natural, and descriptive title based on the user's initial query. Keep it under 9 words. Avoid over-complicating or using overly dry or academic-sounding language unless the query is specifically about an academic paper. Absolutely DO NOT include parenthetical notes, conversational commentary, or any other text—output ONLY the exact title. For casual greetings or brief casual text (e.g., 'yo', 'hi', 'hello', 'hey'), output a simple, clean title like 'New Conversation' or 'Casual Chat'."
               },
               {
                 role: "user",
@@ -2396,7 +2428,7 @@ CRITICAL RULES:
               messages: [
                 {
                   role: "system",
-                  content: "You are a professional academic assistant. Generate a succinct, sophisticated 2-4 word title for this conversation based on the user's query. Use Title Case. Output ONLY the title text, no quotes or periods or asterisks."
+                  content: "You are a helpful assistant. Generate an appropriate, natural, and descriptive title based on the user's initial query. Keep it under 9 words. Avoid over-complicating or using overly dry or academic-sounding language unless the query is specifically about an academic paper. Absolutely DO NOT include parenthetical notes, conversational commentary, or any other text—output ONLY the exact title. For casual greetings or brief casual text (e.g., 'yo', 'hi', 'hello', 'hey'), output a simple, clean title like 'New Conversation' or 'Casual Chat'."
                 },
                 {
                   role: "user",
@@ -2413,7 +2445,7 @@ CRITICAL RULES:
                 model: "gemini-3.1-flash-lite",
                 contents: userQuery,
                 config: {
-                  systemInstruction: "You are a professional academic assistant. Generate a succinct, sophisticated 2-4 word title for this conversation based on the user's query. Use Title Case. Output ONLY the title text, no quotes or periods or asterisks.",
+                  systemInstruction: "You are a helpful assistant. Generate an appropriate, natural, and descriptive title based on the user's initial query. Keep it under 9 words. Avoid over-complicating or using overly dry or academic-sounding language unless the query is specifically about an academic paper. Absolutely DO NOT include parenthetical notes, conversational commentary, or any other text—output ONLY the exact title. For casual greetings or brief casual text (e.g., 'yo', 'hi', 'hello', 'hey'), output a simple, clean title like 'New Conversation' or 'Casual Chat'.",
                   temperature: 0,
                 }
               });
@@ -2425,8 +2457,20 @@ CRITICAL RULES:
         }
 
         const toTitleCase = (str: string) => {
-          return str.toLowerCase().split(' ').map(word => {
-            return (word.charAt(0).toUpperCase() + word.slice(1));
+          const minorWords = ['and', 'or', 'but', 'a', 'an', 'the', 'for', 'to', 'in', 'of', 'at', 'by', 'from', 'with'];
+          return str.split(/\s+/).map((word, idx) => {
+            if (!word) return '';
+            const lowerWord = word.toLowerCase();
+            // Handle lowercase for minor words unless it is the start of the title
+            if (minorWords.includes(lowerWord) && idx > 0) {
+              return lowerWord;
+            }
+            // Keep acronyms uppercase if they are all uppercase (e.g., DNA, AI, API)
+            if (word === word.toUpperCase() && word.length > 1 && !/\d/.test(word)) {
+              return word;
+            }
+            // Otherwise, capitalize first letter, preserve the rest of the casing if mixed
+            return word.charAt(0).toUpperCase() + word.slice(1);
           }).join(' ');
         };
 
@@ -2840,7 +2884,7 @@ INSTRUCTION: Synthesize and ground your response on these web results, and make 
           let attempt = 0;
           while (attempt < 2) {
             try {
-                searchResponse = await axios.get(`https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(lastMessage)}&limit=3&fields=title,authors,year,abstract,venue,url,openAccessPdf`, {
+                searchResponse = await axios.get(`https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(lastMessage)}&limit=15&fields=title,authors,year,abstract,venue,url,openAccessPdf`, {
                     timeout: 5000,
                     headers: { 'User-Agent': 'Mozilla/5.0' }
                 });
@@ -2856,7 +2900,33 @@ INSTRUCTION: Synthesize and ground your response on these web results, and make 
             }
           }
           if (searchResponse?.status === 200) {
-            papers = (searchResponse.data?.data || []).filter((p: any) => !!p.openAccessPdf?.url);
+            let candidatePapers = (searchResponse.data?.data || []).filter((p: any) => !!p.openAccessPdf?.url);
+            // Optionally Rerank via Voyage AI if API Key is present
+            if (candidatePapers.length > 3 && process.env.VOYAGE_API_KEY) {
+              try {
+                const voyageClient = getVoyageClient();
+                const documentsToRerank = candidatePapers.map(p => 
+                  `Title: ${p.title}\nAbstract: ${p.abstract || "N/A"}`
+                );
+                const rerankResult = await voyageClient.rerank({
+                  query: lastMessage,
+                  documents: documentsToRerank,
+                  model: "rerank-2",
+                  topK: 3
+                });
+                if (rerankResult.data && rerankResult.data.length > 0) {
+                  papers = rerankResult.data.map(r => candidatePapers[r.index]);
+                  console.log(`[VOYAGE_RERANK] Successfully reranked semantic scholar results for "${lastMessage}"`);
+                } else {
+                  papers = candidatePapers.slice(0, 3);
+                }
+              } catch (rerankErr: any) {
+                 console.warn("[VOYAGE_RERANK] Failed to rerank, falling back to original sorting:", rerankErr.message);
+                 papers = candidatePapers.slice(0, 3);
+              }
+            } else {
+              papers = candidatePapers.slice(0, 3);
+            }
           }
         } catch (e: any) {
           // Silent fallback
@@ -2867,14 +2937,14 @@ INSTRUCTION: Synthesize and ground your response on these web results, and make 
           try {
             let cleanQuery = lastMessage.replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim();
             if (!cleanQuery) cleanQuery = lastMessage.trim() || "academic research";
-            const openAlexUrl = `https://api.openalex.org/works?search=${encodeURIComponent(cleanQuery)}&filter=has_pdf_url:true&per-page=3&mailto=asnahonron@gmail.com`;
+            const openAlexUrl = `https://api.openalex.org/works?search=${encodeURIComponent(cleanQuery)}&filter=has_pdf_url:true&per-page=15&mailto=asnahonron@gmail.com`;
             const alexResponse = await axios.get(openAlexUrl, {
               timeout: 6000,
               headers: { 'User-Agent': 'Mozilla/5.0' }
             });
             if (alexResponse.status === 200) {
               const results = alexResponse.data?.results || [];
-              papers = results.map((entry: any) => {
+              let candidatePapers = results.map((entry: any) => {
                 let abstract = "No abstract available.";
                 if (entry.abstract_inverted_index) {
                   const index = entry.abstract_inverted_index;
@@ -2904,6 +2974,30 @@ INSTRUCTION: Synthesize and ground your response on these web results, and make 
                   openAccessPdf: pdfUrl ? { url: pdfUrl } : null
                 };
               });
+
+              if (candidatePapers.length > 3 && process.env.VOYAGE_API_KEY) {
+                try {
+                  const voyageClient = getVoyageClient();
+                  const documentsToRerank = candidatePapers.map(p => 
+                    `Title: ${p.title}\nAbstract: ${p.abstract || "N/A"}`
+                  );
+                  const rerankResult = await voyageClient.rerank({
+                    query: lastMessage,
+                    documents: documentsToRerank,
+                    model: "rerank-2",
+                    topK: 3
+                  });
+                  if (rerankResult.data && rerankResult.data.length > 0) {
+                    papers = rerankResult.data.map(r => candidatePapers[r.index]);
+                  } else {
+                    papers = candidatePapers.slice(0, 3);
+                  }
+                } catch (e: any) {
+                  papers = candidatePapers.slice(0, 3);
+                }
+              } else {
+                papers = candidatePapers.slice(0, 3);
+              }
             }
           } catch (alexErr: any) {
             console.error("[AUTO-SEARCH] OpenAlex fallback failed:", alexErr.message || alexErr);
@@ -3151,8 +3245,9 @@ ${researchContext}
       let completionStream;
       let usedGeminiFallback = !!(attachment && attachment.mimetype?.startsWith("image/"));
       let tryBasetenFirst = !usedGeminiFallback && requestedModel === "hokku-iv";
-      let tryMistralFirst = !usedGeminiFallback && !tryBasetenFirst && !requestedModel.includes("cohere") && !requestedModel.includes("command-a");
-      let tryCohereFirst = !usedGeminiFallback && !tryBasetenFirst && (requestedModel.includes("cohere") || requestedModel.includes("command-a"));
+      let tryUpstageFirst = !usedGeminiFallback && requestedModel === "solar-pro2";
+      let tryMistralFirst = !usedGeminiFallback && !tryBasetenFirst && !tryUpstageFirst && !requestedModel.includes("cohere") && !requestedModel.includes("command-a");
+      let tryCohereFirst = !usedGeminiFallback && !tryBasetenFirst && !tryUpstageFirst && (requestedModel.includes("cohere") || requestedModel.includes("command-a"));
       let mistralModelToUse = "mistral-large-latest";
       let cohereModelToUse = "command-a-plus-05-2026";
       let basetenModelToUse = process.env.BASETEN_MODEL || "llama-3-1-70b-instruct";
@@ -3162,23 +3257,33 @@ ${researchContext}
           tryMistralFirst = true;
           tryCohereFirst = false;
           tryBasetenFirst = false;
+          tryUpstageFirst = false;
           usedGeminiFallback = false;
           mistralModelToUse = requestedModel;
         } else if (requestedModel.includes("gemini")) {
           tryMistralFirst = false;
           tryCohereFirst = false;
           tryBasetenFirst = false;
+          tryUpstageFirst = false;
           usedGeminiFallback = true;
         } else if (requestedModel.includes("cohere") || requestedModel.includes("command-a")) {
           tryMistralFirst = false;
           tryCohereFirst = true;
           tryBasetenFirst = false;
+          tryUpstageFirst = false;
           usedGeminiFallback = false;
           cohereModelToUse = requestedModel;
         } else if (requestedModel === "hokku-iv") {
           tryMistralFirst = false;
           tryCohereFirst = false;
           tryBasetenFirst = true;
+          tryUpstageFirst = false;
+          usedGeminiFallback = false;
+        } else if (requestedModel === "solar-pro2") {
+          tryMistralFirst = false;
+          tryCohereFirst = false;
+          tryBasetenFirst = false;
+          tryUpstageFirst = true;
           usedGeminiFallback = false;
         }
       }
@@ -3270,9 +3375,36 @@ ${researchContext}
         }
       }
 
+      if (tryUpstageFirst) {
+        try {
+          console.log(`[LLM] Streaming chat with Upstage (solar-pro2)...`);
+          const client = getUpstageClient();
+          completionStream = await client.chat.completions.create({
+            model: "solar-pro2",
+            messages: messagesPayload,
+            temperature: 0.7,
+            stream: true
+          });
+        } catch (err: any) {
+          console.warn(`[LLM] Upstage streaming failed:`, err.message || err);
+          
+          if (err.message?.includes("UPSTAGE_API_KEY") || err.message?.includes("configured")) {
+             throw new Error("UPSTAGE_API_KEY is not defined. Please configure it in your Settings.");
+          }
+
+          if (requestedModel !== "solar-pro2") {
+            console.warn("[LLM] Falling back to Gemini...");
+            tryUpstageFirst = false;
+            usedGeminiFallback = true;
+          } else {
+             throw new Error(`Upstage LLM failed: ${err.message || "Unknown error during streaming."}`);
+          }
+        }
+      }
+
       let mainChatCollectedText = "";
 
-      if ((!tryMistralFirst && !tryCohereFirst && !tryBasetenFirst) || usedGeminiFallback) {
+      if ((!tryMistralFirst && !tryCohereFirst && !tryBasetenFirst && !tryUpstageFirst) || usedGeminiFallback) {
         console.log(`[LLM] Streaming chat with Gemini...`);
         
         // Convert messages list to Gemini alternated format
@@ -3943,6 +4075,57 @@ ${textToAnalyze}
     } catch (e: any) {
       console.error("[NOTES_API] Error:", e);
       res.status(500).json({ error: e.message || "An exception occurred during notes composition." });
+    }
+  });
+
+  app.post("/api/voyage/embed", async (req, res) => {
+    try {
+      const { texts, model = "voyage-3" } = req.body;
+      if (!texts || !Array.isArray(texts) || texts.length === 0) {
+        return res.status(400).json({ error: "An array of 'texts' is required." });
+      }
+      
+      const client = getVoyageClient();
+      console.log(`[VOYAGE_API] Generating embeddings for ${texts.length} items using ${model}...`);
+      const result = await client.embed({
+        input: texts,
+        model: model
+      });
+      
+      return res.json({ success: true, embeddings: result.data });
+    } catch (e: any) {
+      console.error("[VOYAGE_API] Embedding error:", e);
+      if (e.message?.includes("VOYAGE_API_KEY")) {
+         return res.status(401).json({ error: e.message });
+      }
+      return res.status(500).json({ error: "Failed to generate embeddings via Voyage AI." });
+    }
+  });
+
+  app.post("/api/voyage/rerank", async (req, res) => {
+    try {
+      const { query, documents, topK = null, model = "rerank-2" } = req.body;
+      if (!query || !documents || !Array.isArray(documents) || documents.length === 0) {
+         return res.status(400).json({ error: "'query' and 'documents' array are required." });
+      }
+      
+      const client = getVoyageClient();
+      console.log(`[VOYAGE_API] Reranking ${documents.length} documents for query: "${query}"...`);
+      
+      const result = await client.rerank({
+         query,
+         documents: documents.map(d => typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 50),
+         model: model,
+         topK: topK || undefined
+      });
+      
+      return res.json({ success: true, results: result.data });
+    } catch (e: any) {
+      console.error("[VOYAGE_API] Reranking error:", e);
+      if (e.message?.includes("VOYAGE_API_KEY")) {
+         return res.status(401).json({ error: e.message });
+      }
+      return res.status(500).json({ error: "Failed to rerank via Voyage AI." });
     }
   });
 

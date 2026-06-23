@@ -38,6 +38,7 @@ export const modelsList = [
   { id: 'mistral-large-latest', label: 'Sift II', desc: 'Advanced logic and excellent for language translation' },
   { id: 'codestral-latest', label: 'Kindle Preview', desc: 'Technical specialist for coding, math, and logic puzzles' },
   { id: 'command-a-plus-05-2026', label: 'Raisee V', desc: 'Creative partner for writing, brainstorming, and essay drafts' },
+  { id: 'solar-pro2', label: 'Visor IV', desc: 'High-performance reasoning and rapid analysis by Upstage AI' },
 ];
 
 const renderLinkifiedText = (text: string) => {
@@ -201,7 +202,12 @@ export const MainChat: React.FC<MainChatProps> = ({
             </div>
           ) : (
             <div className="w-full max-w-3xl flex flex-col gap-4 pb-8">
-              {messages.filter(m => !m.isHidden).map((m) => (
+              {messages.filter(m => !m.isHidden).reduce((acc: ChatMessage[], m) => {
+                if (!acc.some(x => x.id === m.id)) {
+                  acc.push(m);
+                }
+                return acc;
+              }, []).map((m) => (
                 <div 
                   key={m.id} 
                   className={`flex flex-col ${
@@ -535,7 +541,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                     />
                     {/* Dropdown Menu */}
                     <div className="absolute bottom-full right-0 mb-2 w-[280px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
-                      {modelsList.filter(m => !['mistral-large-latest', 'codestral-latest'].includes(m.id)).map((m) => {
+                      {modelsList.filter(m => !['mistral-large-latest', 'codestral-latest', 'solar-pro2'].includes(m.id)).map((m) => {
                         const isSelected = selectedModel === m.id;
                         return (
                           <button
@@ -583,7 +589,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                       >
                         <div className="flex items-start gap-2.5">
                           <div className="w-4 shrink-0 flex items-center justify-center pt-0.5">
-                            {['mistral-large-latest', 'codestral-latest'].includes(selectedModel) ? (
+                            {['mistral-large-latest', 'codestral-latest', 'solar-pro2'].includes(selectedModel) ? (
                               <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
                             ) : (
                               <div className="w-3.5" />
@@ -592,7 +598,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                           <div className="flex flex-col gap-0.5 text-left">
                             <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">More models</span>
                             <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
-                              {['mistral-large-latest', 'codestral-latest'].includes(selectedModel) 
+                              {['mistral-large-latest', 'codestral-latest', 'solar-pro2'].includes(selectedModel) 
                                 ? modelsList.find(m => m.id === selectedModel)?.label 
                                 : 'Advanced reasoning & coding specials'}
                             </span>
@@ -611,7 +617,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                             transition={{ duration: 0.15, ease: "easeOut" }}
                             className="absolute left-full bottom-8 ml-2 w-[280px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[101] flex flex-col gap-0.5"
                           >
-                            {modelsList.filter(m => ['mistral-large-latest', 'codestral-latest'].includes(m.id)).map((m) => {
+                            {modelsList.filter(m => ['mistral-large-latest', 'codestral-latest', 'solar-pro2'].includes(m.id)).map((m) => {
                               const isSelected = selectedModel === m.id;
                               return (
                                 <button
