@@ -1,10 +1,30 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { Icon } from './SolarIcon';
+
+// Import Prism and languages for syntax highlighting
+import Prism from 'prismjs';
+import 'prismjs/components/prism-clike';
+import 'prismjs/components/prism-javascript';
+import 'prismjs/components/prism-typescript';
+import 'prismjs/components/prism-jsx';
+import 'prismjs/components/prism-tsx';
+import 'prismjs/components/prism-python';
+import 'prismjs/components/prism-bash';
+import 'prismjs/components/prism-markdown';
+import 'prismjs/components/prism-json';
+import 'prismjs/components/prism-css';
+import 'prismjs/components/prism-sql';
+import 'prismjs/components/prism-rust';
+import 'prismjs/components/prism-go';
+import 'prismjs/components/prism-c';
+import 'prismjs/components/prism-cpp';
+import 'prismjs/components/prism-csharp';
+import 'prismjs/components/prism-yaml';
 
 export function preprocessLaTeX(text: string): string {
   if (!text) return "";
@@ -457,6 +477,150 @@ function groupImagesIntoCarousel(content: string): string {
   return result;
 }
 
+const CodeBlockComponent = ({ language, code, isBig }: { language: string; code: string; isBig?: boolean }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy code: ", err);
+    }
+  };
+
+  const handleDownload = () => {
+    try {
+      const blob = new Blob([code], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      
+      let ext = "txt";
+      const lower = (language || "").toLowerCase();
+      if (lower === "javascript" || lower === "js") ext = "js";
+      else if (lower === "typescript" || lower === "ts") ext = "ts";
+      else if (lower === "jsx") ext = "jsx";
+      else if (lower === "tsx") ext = "tsx";
+      else if (lower === "python" || lower === "py") ext = "py";
+      else if (lower === "html") ext = "html";
+      else if (lower === "css") ext = "css";
+      else if (lower === "json") ext = "json";
+      else if (lower === "rust" || lower === "rs") ext = "rs";
+      else if (lower === "go" || lower === "golang") ext = "go";
+      else if (lower === "sh" || lower === "bash" || lower === "shell") ext = "sh";
+      else if (lower === "markdown" || lower === "md") ext = "md";
+      
+      link.download = `code-snippet.${ext}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to download code: ", err);
+    }
+  };
+
+  const formatLanguage = (lang: string) => {
+    if (!lang) return "Code";
+    const lower = lang.toLowerCase();
+    if (lower === "javascript" || lower === "js") return "JavaScript";
+    if (lower === "typescript" || lower === "ts") return "TypeScript";
+    if (lower === "python" || lower === "py") return "Python";
+    if (lower === "html") return "HTML";
+    if (lower === "css") return "CSS";
+    if (lower === "json") return "JSON";
+    if (lower === "rust" || lower === "rs") return "Rust";
+    if (lower === "golang" || lower === "go") return "Go";
+    if (lower === "cpp" || lower === "c++") return "C++";
+    if (lower === "csharp" || lower === "c#") return "C#";
+    if (lower === "bash" || lower === "sh" || lower === "shell") return "Bash";
+    if (lower === "yaml" || lower === "yml") return "YAML";
+    if (lower === "markdown" || lower === "md") return "Markdown";
+    if (lower === "sql") return "SQL";
+    return lang.charAt(0).toUpperCase() + lang.slice(1);
+  };
+
+  const getLanguageIcon = (lang: string) => {
+    const lower = (lang || "").toLowerCase();
+    if (lower === "javascript" || lower === "js") return "logos:javascript";
+    if (lower === "typescript" || lower === "ts") return "logos:typescript-icon";
+    if (lower === "python" || lower === "py") return "logos:python";
+    if (lower === "html") return "logos:html-5";
+    if (lower === "css") return "logos:css-3";
+    if (lower === "json") return "logos:json";
+    if (lower === "rust" || lower === "rs") return "logos:rust";
+    if (lower === "golang" || lower === "go") return "logos:go";
+    if (lower === "cpp" || lower === "c++") return "logos:c-plusplus";
+    if (lower === "csharp" || lower === "c#") return "logos:c-sharp";
+    if (lower === "bash" || lower === "sh" || lower === "shell") return "logos:bash-icon";
+    if (lower === "yaml" || lower === "yml") return "logos:yaml";
+    if (lower === "markdown" || lower === "md") return "logos:markdown";
+    if (lower === "sql") return "mdi:database";
+    return "ph:code-bold";
+  };
+
+  const highlighted = useMemo(() => {
+    const lang = (language || "").toLowerCase();
+    const grammar = Prism.languages[lang] || Prism.languages.markup || Prism.languages.javascript;
+    const validLang = Prism.languages[lang] ? lang : "markup";
+    try {
+      return Prism.highlight(code, grammar, validLang);
+    } catch (e) {
+      console.error(e);
+      return code
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+  }, [code, language]);
+
+  return (
+    <div className="my-6 rounded-[20px] overflow-hidden bg-[#121214] border border-[#27272a]/30 shadow-xl" id="custom-code-block">
+      <div className="flex items-center justify-between px-5 py-3.5 bg-[#121214]/40">
+        <div className="flex items-center gap-2.5">
+          <Icon icon={getLanguageIcon(language)} className="w-[18px] h-[18px] shrink-0 grayscale opacity-60" />
+          <span className="text-[13.5px] font-semibold text-zinc-100 font-sans tracking-tight">
+            {formatLanguage(language)}
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Download Button */}
+          <button
+            onClick={handleDownload}
+            className="w-8 h-8 rounded-full bg-zinc-800/10 hover:bg-zinc-800/40 text-zinc-400 hover:text-white flex items-center justify-center transition-all cursor-pointer border border-zinc-700/5"
+            title="Download code"
+          >
+            <Icon icon="ph:download-simple" className="w-[18px] h-[18px]" />
+          </button>
+          
+          {/* Copy Button */}
+          <button
+            onClick={handleCopy}
+            className="w-8 h-8 rounded-full bg-zinc-800/10 hover:bg-zinc-800/40 text-zinc-400 hover:text-white flex items-center justify-center transition-all cursor-pointer border border-zinc-700/5"
+            title="Copy code"
+          >
+            {copied ? (
+              <Icon icon="ph:check" className="w-[18px] h-[18px] text-green-400" />
+            ) : (
+              <Icon icon="ph:copy" className="w-[18px] h-[18px]" />
+            )}
+          </button>
+        </div>
+      </div>
+      <div className="overflow-x-auto px-5 pb-5 pt-1 custom-scrollbar-h">
+        <code 
+          className={`block font-mono leading-relaxed min-w-max whitespace-pre ${isBig ? "text-[14px]" : "text-[13px]"}`}
+          dangerouslySetInnerHTML={{ __html: highlighted }}
+        />
+      </div>
+    </div>
+  );
+};
+
 export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationClick, isStreaming, isBig }: { content: string, timestamp: number, onCitationClick?: (page: number, title: string) => void, isStreaming?: boolean, isBig?: boolean }) => {
   
   // Transform custom syntax [[page:N|Title]] into markdown links with special prefix
@@ -533,18 +697,11 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
       }
 
       return isBlock ? (
-        <div className="my-6 rounded-xl overflow-hidden border border-[#27272a] bg-[#1a1a1c]">
-          {match && (
-            <div className="bg-[#222222] px-4 py-2 border-b border-[#2d2d30] flex items-center justify-between">
-              <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider">{match[1]}</span>
-            </div>
-          )}
-          <div className="overflow-x-auto p-4">
-            <code className={`block font-mono text-[#d4d4d8] leading-relaxed min-w-max whitespace-pre-wrap ${isBig ? "text-[14.5px]" : "text-[13px]"}`} {...props}>
-              {children}
-            </code>
-          </div>
-        </div>
+        <CodeBlockComponent
+          language={match ? match[1] : ""}
+          code={strChildren}
+          isBig={isBig}
+        />
       ) : (
         <code className={`text-[#f4f4f5] font-mono ${isBig ? "text-[14.5px]" : "text-[13px]"}`} {...props}>
           {children}

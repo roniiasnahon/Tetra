@@ -34,11 +34,11 @@ html.light-mode canvas {
 }
 
 @theme {
-  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "DM Sans", sans-serif;
-  --font-serif: "DM Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-jakarta: "DM Sans", sans-serif;
-  --font-google: "Google Sans", "DM Sans", sans-serif;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-serif: "Lora", serif;
+  --font-jakarta: "Plus Jakarta Sans", sans-serif;
+  --font-google: "Plus Jakarta Sans", sans-serif;
 }
 
 body {
@@ -480,6 +480,66 @@ input[type="number"] {
 .table-embed-wrapper:hover .embed-delete-btn,
 .chart-embed-wrapper:hover .embed-delete-btn {
   display: flex !important;
+}
+
+/* Custom code highlighting tokens */
+#custom-code-block .token.comment,
+#custom-code-block .token.prolog,
+#custom-code-block .token.doctype,
+#custom-code-block .token.cdata {
+  color: #71717a !important; /* grayish-zinc */
+  font-style: italic;
+}
+
+#custom-code-block .token.punctuation {
+  color: #e4e4e7 !important; /* zinc-200 */
+}
+
+#custom-code-block .token.property,
+#custom-code-block .token.tag,
+#custom-code-block .token.constant,
+#custom-code-block .token.symbol,
+#custom-code-block .token.deleted {
+  color: #f43f5e !important; /* rose-500, elegant pink/rose keys */
+}
+
+#custom-code-block .token.boolean,
+#custom-code-block .token.number {
+  color: #c084fc !important; /* purple-400 */
+}
+
+#custom-code-block .token.selector,
+#custom-code-block .token.attr-name,
+#custom-code-block .token.string,
+#custom-code-block .token.char,
+#custom-code-block .token.builtin,
+#custom-code-block .token.inserted {
+  color: #4ade80 !important; /* green-400, vibrant emerald/lime */
+}
+
+#custom-code-block .token.operator,
+#custom-code-block .token.entity,
+#custom-code-block .token.url,
+#custom-code-block .language-css .token.string,
+#custom-code-block .style .token.string {
+  color: #e4e4e7 !important;
+}
+
+#custom-code-block .token.atrule,
+#custom-code-block .token.attr-value,
+#custom-code-block .token.keyword {
+  color: #60a5fa !important; /* blue-400, elegant cyan/blue keyword */
+}
+
+#custom-code-block .token.function,
+#custom-code-block .token.class-name {
+  color: #a78bfa !important; /* violet-400, elegant purple-ish */
+}
+
+#custom-code-block .token.regex,
+#custom-code-block .token.important,
+#custom-code-block .token.variable {
+  color: #fb923c !important; /* orange-400 */
 }
 
 
