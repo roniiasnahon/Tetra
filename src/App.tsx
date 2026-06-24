@@ -2105,6 +2105,7 @@ export default function App() {
       window.removeEventListener("keydown", handleGlobalShortcuts);
     };
   }, [tabs, activeTabId, isDesktopApp, requestDeleteTab]);
+
   const [isAssistantChatDropdownOpen, setIsAssistantChatDropdownOpen] =
     useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -4584,6 +4585,28 @@ export default function App() {
     });
   };
 
+  useEffect(() => {
+    const handleNewChat = () => {
+      const newId = `chat-${Date.now()}`;
+      const newChatTab: Tab = {
+        id: newId,
+        type: "chat",
+        title: "New chat",
+        messages: [],
+      };
+      setTabs((prev) => [...prev, newChatTab]);
+      setActiveTabId(newId);
+      setActiveAssistantTabId(newId);
+      setMessages([]);
+      saveChatToLibrary(currentUser?.uid || "guest", newChatTab);
+    };
+
+    window.addEventListener("request-new-chat", handleNewChat);
+    return () => {
+      window.removeEventListener("request-new-chat", handleNewChat);
+    };
+  }, [currentUser?.uid, saveChatToLibrary, setTabs, setActiveTabId, setActiveAssistantTabId, setMessages]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const assistantMessageIdRef = useRef<string | null>(null);
@@ -5181,9 +5204,28 @@ Once you have content, I can help you draft sections, summarize findings, or for
   );
 
   // Sending chat messages
+  const handleEditLastPrompt = async (newContent: string) => {
+    const lastUserIdx = [...messages].map((m) => m.role).lastIndexOf("user");
+    if (lastUserIdx === -1) return;
+
+    const remainingMessages = messages.slice(0, lastUserIdx);
+    const originalAttachment = messages[lastUserIdx]?.attachment;
+
+    // Trigger handleSendMessage using overrideMessages and overrideAttachment
+    await handleSendMessage(newContent, { 
+      overrideMessages: remainingMessages,
+      overrideAttachment: originalAttachment
+    });
+  };
+
   const handleSendMessage = async (
     customText?: string,
-    options: { isHidden?: boolean; fromSidePanel?: boolean } = {},
+    options: { 
+      isHidden?: boolean; 
+      fromSidePanel?: boolean; 
+      overrideMessages?: ChatMessage[]; 
+      overrideAttachment?: any;
+    } = {},
   ) => {
     let textToSend = "";
     if (customText) {
@@ -5209,12 +5251,16 @@ Once you have content, I can help you draft sections, summarize findings, or for
       content: textToSend,
       timestamp: Date.now(),
       isHidden: options.isHidden ?? false,
-      attachment: attachedFile ? { ...attachedFile } : undefined,
+      attachment: options.overrideAttachment !== undefined ? options.overrideAttachment : (attachedFile ? { ...attachedFile } : undefined),
     };
 
     setAttachedFile(null);
 
-    updateChatMessages((prev) => [...prev, userMessage], false);
+    if (options.overrideMessages) {
+      updateChatMessages([...options.overrideMessages, userMessage], false);
+    } else {
+      updateChatMessages((prev) => [...prev, userMessage], false);
+    }
     if (!customText) {
       const isFromAssistant =
         options.fromSidePanel || activeTab.type !== "chat";
@@ -5294,7 +5340,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          messages: [...messages, userMessage]
+          messages: [...(options.overrideMessages || messages), userMessage]
             .slice(-20)
             .map((m) => ({ 
               role: m.role, 
@@ -7388,6 +7434,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     updateChatMessages((prev) => prev, false);
                   }}
                   papers={papers}
+                  handleEditLastPrompt={handleEditLastPrompt}
                 />
               </div>
             ) : activeTab.type === "library" ? (

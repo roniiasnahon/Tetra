@@ -9,12 +9,16 @@ export interface ToastMessage {
   message: string;
   type: ToastType;
   duration?: number;
+  action?: {
+    label: string;
+    onClick: () => void;
+  };
 }
 
 // Global helper to show toasts easily from anywhere
-export const showToast = (message: string, type: ToastType = 'success', duration = 3000, id?: string) => {
+export const showToast = (message: string, type: ToastType = 'success', duration = 3000, id?: string, action?: { label: string; onClick: () => void }) => {
   const event = new CustomEvent('app-toast', {
-    detail: { message, type, duration, id }
+    detail: { message, type, duration, id, action }
   });
   window.dispatchEvent(event);
 };
@@ -27,10 +31,10 @@ export function ToastContainer() {
     const timeoutsMap: { [id: string]: NodeJS.Timeout } = {};
 
     const handleToastEvent = (e: Event) => {
-      const customEvent = e as CustomEvent<{ message: string; type: ToastType; duration?: number; id?: string }>;
+      const customEvent = e as CustomEvent<{ message: string; type: ToastType; duration?: number; id?: string; action?: { label: string; onClick: () => void } }>;
       if (!customEvent.detail) return;
 
-      const { message, type, duration = 3000, id } = customEvent.detail;
+      const { message, type, duration = 3000, id, action } = customEvent.detail;
       const toastId = id || Math.random().toString(36).substr(2, 9);
       
       setToasts((prev) => {
@@ -41,7 +45,8 @@ export function ToastContainer() {
             ...updated[index],
             message,
             type,
-            duration
+            duration,
+            action
           };
           return updated;
         } else {
@@ -49,7 +54,8 @@ export function ToastContainer() {
             id: toastId,
             message,
             type,
-            duration
+            duration,
+            action
           };
           return [...prev, newToast];
         }
@@ -120,6 +126,18 @@ export function ToastContainer() {
                 {toast.message}
               </p>
             </div>
+            {toast.action && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toast.action!.onClick();
+                  removeToast(toast.id);
+                }}
+                className="shrink-0 px-3 py-1.5 bg-white text-zinc-950 hover:bg-zinc-200 text-[12px] font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer"
+              >
+                {toast.action.label}
+              </button>
+            )}
             <button
               onClick={() => removeToast(toast.id)}
               className="p-0.5 text-zinc-500 hover:text-zinc-300 transition-colors rounded-lg bg-transparent border-0 cursor-pointer flex items-center justify-center"
