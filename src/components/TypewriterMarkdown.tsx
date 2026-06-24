@@ -1,7 +1,27 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { Icon } from './SolarIcon';
+
+export function preprocessLaTeX(text: string): string {
+  if (!text) return "";
+  let processed = text;
+  
+  // Replace block math \[ \]
+  processed = processed.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => {
+    return `\n$$\n${math.trim()}\n$$\n`;
+  });
+  
+  // Replace inline math \( \)
+  processed = processed.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => {
+    return `$${math.trim()}$`;
+  });
+  
+  return processed;
+}
 
 const previewCache = new Map<string, any>();
 
@@ -437,26 +457,28 @@ function groupImagesIntoCarousel(content: string): string {
   return result;
 }
 
-export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationClick, isStreaming }: { content: string, timestamp: number, onCitationClick?: (page: number, title: string) => void, isStreaming?: boolean }) => {
+export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationClick, isStreaming, isBig }: { content: string, timestamp: number, onCitationClick?: (page: number, title: string) => void, isStreaming?: boolean, isBig?: boolean }) => {
   
   // Transform custom syntax [[page:N|Title]] into markdown links with special prefix
   // We use encodeURIComponent for the title to handle spaces and special chars in the hash URL
-  const processedContent = groupImagesIntoCarousel(
-    (content || '').replace(/\[\[page:(\d+)\|(.+?)\]\]/g, (_, p, t) => {
-      // Escape potentially breaking characters in title label for markdown
-      const safeTitle = t.replace(/\]/g, '\\]');
-      return `[${safeTitle} (p. ${p})](#cite-page-${p}-${encodeURIComponent(t)})`;
-    })
+  const processedContent = preprocessLaTeX(
+    groupImagesIntoCarousel(
+      (content || '').replace(/\[\[page:(\d+)\|(.+?)\]\]/g, (_, p, t) => {
+        // Escape potentially breaking characters in title label for markdown
+        const safeTitle = t.replace(/\]/g, '\\]');
+        return `[${safeTitle} (p. ${p})](#cite-page-${p}-${encodeURIComponent(t)})`;
+      })
+    )
   );
 
   const components = {
-    p: ({children}: any) => <div className="mb-4 last:mb-0 leading-relaxed text-[#d4d4d8] text-[15px]">{children}</div>,
-    h1: ({children}: any) => <h1 className="text-2xl font-semibold mb-6 mt-4 text-white tracking-tight">{children}</h1>,
-    h2: ({children}: any) => <h2 className="text-xl font-medium mb-4 mt-6 text-[#f4f4f5] tracking-tight">{children}</h2>,
-    h3: ({children}: any) => <h3 className="text-lg font-medium mb-3 mt-5 text-[#e4e4e7]">{children}</h3>,
+    p: ({children}: any) => <div className={`mb-4 last:mb-0 leading-relaxed text-[#d4d4d8] ${isBig ? "text-[16.5px]" : "text-[15px]"}`}>{children}</div>,
+    h1: ({children}: any) => <h1 className={`font-semibold mb-6 mt-4 text-white tracking-tight ${isBig ? "text-3xl" : "text-2xl"}`}>{children}</h1>,
+    h2: ({children}: any) => <h2 className={`font-medium mb-4 mt-6 text-[#f4f4f5] tracking-tight ${isBig ? "text-2xl" : "text-xl"}`}>{children}</h2>,
+    h3: ({children}: any) => <h3 className={`font-medium mb-3 mt-5 text-[#e4e4e7] ${isBig ? "text-xl" : "text-lg"}`}>{children}</h3>,
     ul: ({children}: any) => <ul className="list-disc pl-5 mb-4 text-[#d4d4d8] space-y-1.5 marker:text-zinc-500">{children}</ul>,
     ol: ({children}: any) => <ol className="list-decimal pl-5 mb-4 text-[#d4d4d8] space-y-1.5 marker:text-zinc-500">{children}</ol>,
-    li: ({children}: any) => <li className="pl-1 leading-relaxed"><span className="text-[15px]">{children}</span></li>,
+    li: ({children}: any) => <li className="pl-1 leading-relaxed"><span className={isBig ? "text-[16.5px]" : "text-[15px]"}>{children}</span></li>,
     blockquote: ({children, node}: any) => {
       const textContent = node && node.children ? node.children.map((c: any) => c.value || (c.children && c.children[0]?.value)).join('') : '';
       if (textContent && textContent.includes('Citation:')) {
@@ -518,13 +540,13 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
             </div>
           )}
           <div className="overflow-x-auto p-4">
-            <code className="block font-mono text-[13px] text-[#d4d4d8] leading-relaxed min-w-max whitespace-pre-wrap" {...props}>
+            <code className={`block font-mono text-[#d4d4d8] leading-relaxed min-w-max whitespace-pre-wrap ${isBig ? "text-[14.5px]" : "text-[13px]"}`} {...props}>
               {children}
             </code>
           </div>
         </div>
       ) : (
-        <code className="text-[#f4f4f5] font-mono text-[13px]" {...props}>
+        <code className={`text-[#f4f4f5] font-mono ${isBig ? "text-[14.5px]" : "text-[13px]"}`} {...props}>
           {children}
         </code>
       );
@@ -655,7 +677,7 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
 
   return (
     <div className={isStreaming ? "streaming-cursor" : ""}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>
         {processedContent}
       </ReactMarkdown>
     </div>

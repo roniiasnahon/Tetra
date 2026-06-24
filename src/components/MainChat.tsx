@@ -2,9 +2,11 @@ import React, { useRef, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from "motion/react";
 import TextareaAutosize from 'react-textarea-autosize';
 import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { Icon } from './SolarIcon';
 import { Tab, ChatMessage, PaperItem } from '../App';
-import { TypewriterMarkdown } from './TypewriterMarkdown';
+import { TypewriterMarkdown, preprocessLaTeX } from './TypewriterMarkdown';
 import { DynamicShimmer } from './DynamicShimmer';
 import { Plain2, PaperclipRounded2 } from '@solar-icons/react';
 import { Plus } from 'lucide-react';
@@ -89,6 +91,7 @@ export const MainChat: React.FC<MainChatProps> = ({
   const chatScrollPositionsRef = useRef<Record<string, number>>({});
   const lastTabIdRef = useRef<string | null>(tab.id);
   const previousMessageCountRef = useRef<number>(messages?.length || 0);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
 
   const [mentionState, setMentionState] = useState<{
     show: boolean;
@@ -149,6 +152,7 @@ export const MainChat: React.FC<MainChatProps> = ({
         chatScrollContainerRef.current.scrollTop = chatScrollContainerRef.current.scrollHeight;
       }
       messagesEndRef.current?.scrollIntoView({ behavior: instant ? 'auto' : 'smooth' });
+      setShowScrollBottom(false);
     };
     fn();
     // Safety check sequence for asynchronous layouts/markdown parsing
@@ -161,6 +165,7 @@ export const MainChat: React.FC<MainChatProps> = ({
     if (tab.id !== lastTabIdRef.current) {
       // Tab switched
       lastTabIdRef.current = tab.id;
+      setShowScrollBottom(false);
       if (tab.id && chatScrollPositionsRef.current[tab.id] !== undefined) {
         if (chatScrollContainerRef.current) {
           chatScrollContainerRef.current.scrollTop = chatScrollPositionsRef.current[tab.id];
@@ -193,8 +198,12 @@ export const MainChat: React.FC<MainChatProps> = ({
             if (tab.id) {
               chatScrollPositionsRef.current[tab.id] = e.currentTarget.scrollTop;
             }
+            const container = e.currentTarget;
+            const threshold = 150; // pixels from the bottom
+            const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+            setShowScrollBottom(!isAtBottom && container.scrollHeight > container.clientHeight);
           }}
-          className="flex-1 flex flex-col items-center pt-2 pb-6 px-4 md:px-6 h-full overflow-y-auto custom-scrollbar-h"
+          className="flex-1 flex flex-col items-center pt-[70px] pb-6 px-4 md:px-6 h-full overflow-y-auto custom-scrollbar-h"
         >
           {messages.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center w-full max-w-3xl">
@@ -247,19 +256,19 @@ export const MainChat: React.FC<MainChatProps> = ({
                   {(!m.attachment || (m.content && m.content.trim().length > 0) || m.role !== 'user') && (
                     <div className={`max-w-[85%] ${
                       m.role === 'user' 
-                        ? 'bg-[#1a1a1a] text-white rounded-full px-6 py-3 border border-[#27272a]' 
+                        ? 'bg-[#1a1a1a] text-white rounded-[22px] px-6 py-3.5' 
                         : 'w-full text-[#d4d4d8] py-2'
-                    } text-[15px] leading-[1.6]`}>
+                    } text-[16.5px] leading-[1.6]`}>
                       {m.role === 'assistant' && m.thought && (
                         <div className="mb-4">
-                          <details className="group [&_summary::-webkit-details-marker]:hidden">
+                           <details className="group [&_summary::-webkit-details-marker]:hidden">
                             <summary className="flex items-center gap-2 cursor-pointer text-xs font-medium text-zinc-500 hover:text-zinc-400 transition-colors select-none w-fit">
                               <Icon icon="ph:brain" className="w-4 h-4" />
                               <span>Thought Process</span>
                               <Icon icon="ph:caret-right" className="w-3 h-3 group-open:rotate-90 transition-transform" />
                             </summary>
-                            <div className="mt-2 pl-3.5 border-l border-zinc-800 text-[13px] text-zinc-400 font-sans leading-relaxed markdown-body">
-                              <ReactMarkdown>{m.thought}</ReactMarkdown>
+                            <div className="mt-2 pl-3.5 border-l border-zinc-800 text-[13.5px] text-zinc-400 font-sans leading-relaxed markdown-body">
+                              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{preprocessLaTeX(m.thought)}</ReactMarkdown>
                             </div>
                           </details>
                         </div>
@@ -273,6 +282,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                             content={m.content} 
                             timestamp={m.timestamp} 
                             isStreaming={isAiTyping && m.id === messages[messages.length - 1]?.id} 
+                            isBig={true}
                           />
                         )}
                       </div>
@@ -295,7 +305,51 @@ export const MainChat: React.FC<MainChatProps> = ({
           )}
         </div>
 
-        <div className="shrink-0 px-6 pb-1.5 pt-1 flex flex-col items-center gap-2">
+        <div className="shrink-0 px-6 pb-1.5 pt-1 flex flex-col items-center gap-2 relative">
+          <AnimatePresence>
+            {showScrollBottom && (
+              <div className="absolute -top-12 left-1/2 -translate-x-1/2 flex items-center gap-2 z-50">
+                {isAiTyping || researchStatus ? (
+                  <motion.button
+                    initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                    onClick={() => scrollToBottom(false)}
+                    className="h-[38px] flex items-center justify-center gap-1.5 px-4 bg-[#1a1a1a]/95 hover:bg-zinc-800 border border-zinc-800 rounded-full shadow-xl transition-all cursor-pointer hover:border-zinc-700"
+                    title="Scroll to bottom"
+                  >
+                    <motion.span
+                      animate={{ y: [0, -3.5, 0] }}
+                      transition={{ repeat: Infinity, duration: 0.8, ease: "easeInOut", delay: 0 }}
+                      className="w-1.5 h-1.5 bg-zinc-400 rounded-full"
+                    />
+                    <motion.span
+                      animate={{ y: [0, -3.5, 0] }}
+                      transition={{ repeat: Infinity, duration: 0.8, ease: "easeInOut", delay: 0.15 }}
+                      className="w-1.5 h-1.5 bg-zinc-400 rounded-full"
+                    />
+                    <motion.span
+                      animate={{ y: [0, -3.5, 0] }}
+                      transition={{ repeat: Infinity, duration: 0.8, ease: "easeInOut", delay: 0.3 }}
+                      className="w-1.5 h-1.5 bg-zinc-400 rounded-full"
+                    />
+                  </motion.button>
+                ) : (
+                  <motion.button
+                    initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                    onClick={() => scrollToBottom(false)}
+                    className="flex items-center justify-center bg-[#1a1a1a]/95 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white rounded-full w-[38px] h-[38px] shadow-xl transition-all cursor-pointer hover:border-zinc-700"
+                    title="Scroll to bottom"
+                  >
+                    <Icon icon="ph:arrow-down" className="w-4 h-4" />
+                  </motion.button>
+                )}
+              </div>
+            )}
+          </AnimatePresence>
+
           <div className="w-full max-w-2xl bg-[#1a1a1a] rounded-[28px] p-2 flex flex-col transition-all relative">
             {/* Mention dropdown */}
             <AnimatePresence>

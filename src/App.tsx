@@ -3,11 +3,13 @@ import React, { useState, useEffect, useRef } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { marked, Marked } from "marked";
 import markedKatex from "marked-katex-extension";
 import "katex/dist/katex.min.css";
 import { MainChat, modelsList } from "./components/MainChat";
-import { TypewriterMarkdown } from "./components/TypewriterMarkdown";
+import { TypewriterMarkdown, preprocessLaTeX } from "./components/TypewriterMarkdown";
 import { DynamicShimmer } from "./components/DynamicShimmer";
 import { HomePanel } from "./components/HomePanel";
 import { LibraryPanel } from "./components/LibraryPanel";
@@ -15,7 +17,7 @@ import { UploadsManager, UploadTask } from "./components/UploadsManager";
 import { motion, AnimatePresence } from "motion/react";
 import { Icon } from "./components/SolarIcon";
 import { MaterialIcon } from "./components/MaterialIcon";
-import { Sidebar, Plain2, PaperclipRounded2, Notes, FolderWithFiles, PenNewRound, FolderOpen, MinimalisticMagnifier, MenuDots, UploadMinimalistic, AddFolder, AddCircle, PaletteRound, NotebookBookmark, SidebarMinimalistic, HandStars } from "@solar-icons/react";
+import { Sidebar, Plain2, PaperclipRounded2, Notes, FolderWithFiles, PenNewRound, FolderOpen, MinimalisticMagnifier, MenuDots, UploadMinimalistic, AddFolder, AddCircle, PaletteRound, NotebookBookmark, SidebarMinimalistic, HandStars, Mug } from "@solar-icons/react";
 import { Plus, X as XIcon, Minus, Square, HelpCircle } from "lucide-react";
 import html2pdf from "html2pdf.js";
 
@@ -60,7 +62,6 @@ const ExternalLink = makeIcon('open_in_new');
 const Unlink = makeIcon('link_off');
 const LinkIcon = makeIcon('link');
 
-const Coffee = makeIcon('coffee');
 const X = makeIcon('close');
 import { StatisticsTools } from "./components/StatisticsTools";
 import { SidePanel } from "./components/SidePanel";
@@ -1777,6 +1778,7 @@ export default function App() {
 
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
 
   // Tab deletion confirmation modal state
   const [tabIdToDelete, setTabIdToDelete] = useState<string | null>(null);
@@ -1993,8 +1995,8 @@ export default function App() {
     dragStartIndexRef.current = null;
   };
 
-  const requestDeleteTab = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const requestDeleteTab = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (isDesktopApp) {
       setTabIdToDelete(id);
       setIsDeleteConfirmOpen(true);
@@ -2058,6 +2060,42 @@ export default function App() {
     setIsChatMenuOpen(false);
     setIsAssistantChatDropdownOpen(false);
   };
+
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      // 1. Tab Switching: Ctrl+1 to Ctrl+9 or Cmd+1 to Cmd+9
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+        // e.key could be "1"-"9"
+        const keyNum = parseInt(e.key, 10);
+        if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 9) {
+          const tabIndex = keyNum - 1;
+          if (tabIndex < tabs.length) {
+            e.preventDefault();
+            setActiveTabId(tabs[tabIndex].id);
+          }
+        }
+      }
+
+      // 2. Alt+F4 for closing notice on Desktop
+      if (e.altKey && e.key === "F4" && isDesktopApp) {
+        e.preventDefault();
+        setIsExitConfirmOpen(true);
+      }
+
+      // 3. Ctrl+W or Cmd+W to close current tab on Desktop
+      if ((e.ctrlKey || e.metaKey) && (e.key === "w" || e.key === "W") && isDesktopApp) {
+        e.preventDefault();
+        if (activeTabId) {
+          requestDeleteTab(activeTabId);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalShortcuts);
+    return () => {
+      window.removeEventListener("keydown", handleGlobalShortcuts);
+    };
+  }, [tabs, activeTabId, isDesktopApp, requestDeleteTab]);
   const [isAssistantChatDropdownOpen, setIsAssistantChatDropdownOpen] =
     useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -4294,7 +4332,7 @@ export default function App() {
     return localStorage.getItem("cosmi_settings_web_search") === "true";
   });
   const [latexEnabled, setLatexEnabled] = useState(() => {
-    return localStorage.getItem("cosmi_settings_latex") === "true";
+    return localStorage.getItem("cosmi_settings_latex") !== "false";
   });
   const [autoDraftEnabled, setAutoDraftEnabled] = useState(() => {
     return localStorage.getItem("cosmi_settings_auto_draft") !== "false";
@@ -4936,7 +4974,7 @@ export default function App() {
 
       // Trim outer whitespace so that heading tags (like ## Introduction)
       // placed at the start/ends are parsed as actual headings, not inline text.
-      const trimmedMarkdown = formattedMarkdown.trim();
+      const trimmedMarkdown = preprocessLaTeX(formattedMarkdown.trim());
 
       const markedInstance = new Marked();
       if (latexEnabled) {
@@ -6706,13 +6744,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
             {/* Bottom Section */}
             <div className="mt-auto p-3">
-              <button
-                onClick={() => setShowBuyCoffeeModal(true)}
-                className="w-full flex items-center gap-2.5 px-2 py-2 text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#1a1a1a] rounded-lg text-[12px] font-medium transition-all cursor-pointer group"
-              >
-                <Coffee className="w-3.5 h-3.5 text-[#52525b] group-hover:text-[#e3a088]" />
-                <span>Buy me a coffee</span>
-              </button>
 
               {/* User Profile Header */}
               <div className="p-1 mt-2 relative">
@@ -6794,6 +6825,17 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               >
                                 <Icon icon="ph:gear" className="w-[18px] h-[18px] text-[#71717a]" />
                                 <span className="font-medium">{t("settings")}</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setIsProfileDropdownOpen(false);
+                                  setShowBuyCoffeeModal(true);
+                                }}
+                                className="w-full text-left px-2.5 py-2 text-[13px] text-[#e4e4e7] hover:bg-[#27272a]/50 transition-colors rounded-lg flex items-center gap-3 cursor-pointer"
+                              >
+                                <Mug weight="Outline" className="w-[18px] h-[18px] text-[#71717a] group-hover:text-[#e3a088]" />
+                                <span className="font-medium">Buy me a coffee</span>
                               </button>
 
                               {/* Hover triggers Learn More foldout submenu */}
@@ -6927,7 +6969,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 </div>
                             </div>
 
-                            <div className="px-1.5 pt-1 border-t border-[#2d2d30]/50">
+                            <div className="px-1.5 py-1 border-t border-[#2d2d30]/50">
+                              <button
+                                onClick={() => {
+                                  setIsProfileDropdownOpen(false);
+                                  setIsKeyboardShortcutsOpen(true);
+                                }}
+                                className="w-full text-left px-2.5 py-2 text-[13px] text-[#e4e4e7] hover:bg-[#27272a]/50 transition-colors rounded-lg flex items-center gap-3 cursor-pointer"
+                              >
+                                <Icon icon="ph:keyboard" className="w-[18px] h-[18px] text-[#71717a]" />
+                                <span className="font-medium">Keyboard shortcuts</span>
+                              </button>
+                            </div>
+
+                            <div className="px-1.5 pb-1 border-t border-[#2d2d30]/50">
                               <button
                                 onClick={async () => {
                                   setIsProfileDropdownOpen(false);
@@ -7133,8 +7188,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
             ) : activeTab.type === "chat" ? (
               <div className="flex-1 flex flex-col bg-[#121212] relative overflow-hidden">
                 {/* Chat Header */}
-                <header className="h-[52px] flex items-center justify-between px-4 shrink-0 relative z-45">
-                  <div className="flex items-center gap-2">
+                <header className="absolute top-0 left-0 right-0 h-[64px] flex items-center justify-between px-4 z-45 pointer-events-none">
+                  {/* Background fade to make scrolling text disappear smoothly */}
+                  <div className="absolute top-0 left-0 right-0 h-[100px] bg-gradient-to-b from-[#121212] via-[#121212]/90 to-transparent pointer-events-none -z-10" />
+                  
+                  <div className="flex items-center gap-2 pointer-events-auto">
                     <div className="relative">
                       {isRenamingChat === activeTab.id ? (
                         <input
@@ -7224,7 +7282,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 pointer-events-auto">
                     <button
                       onClick={() => {
                         const newId = `chat-${Date.now()}`;
@@ -10042,7 +10100,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         <div
                           className={`${
                             m.role === "user"
-                              ? "self-end max-w-[88%] bg-[#262626] text-white rounded-full px-5 py-2.5"
+                              ? "self-end max-w-[88%] bg-[#262626] text-white rounded-[22px] px-6 py-3.5"
                               : "self-start max-w-full bg-transparent text-[#d4d4d8] py-2"
                           } text-[13px] leading-relaxed transition-all`}
                         >
@@ -10061,13 +10119,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                   />
                                 </summary>
                                 <div className="mt-2 pl-3 border-l border-zinc-800 text-xs text-zinc-400 font-sans leading-relaxed markdown-body">
-                                  <ReactMarkdown>{m.thought}</ReactMarkdown>
+                                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{preprocessLaTeX(m.thought)}</ReactMarkdown>
                                 </div>
                               </details>
                             </div>
                           )}
                           <div
-                            className={`select-text break-words ${m.role === "user" ? "whitespace-pre-wrap" : "markdown-body text-[#d4d4d8]"}`}
+                            className={`select-text ${m.role === "user" ? "break-words whitespace-pre-wrap" : "break-words markdown-body text-[#d4d4d8]"}`}
                           >
                             {m.role === "user" ? (
                               renderLinkifiedText(m.content)
@@ -11399,6 +11457,109 @@ Once you have content, I can help you draft sections, summarize findings, or for
       )}
 
       <AnimatePresence>
+        {isKeyboardShortcutsOpen && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsKeyboardShortcutsOpen(false)} />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative w-full max-w-md bg-[#1a1a1a] rounded-2xl shadow-2xl border border-zinc-800 flex flex-col overflow-hidden max-h-[85vh]"
+            >
+              <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800">
+                <h2 className="text-xl font-semibold text-white">Keyboard shortcuts</h2>
+                <button
+                  onClick={() => setIsKeyboardShortcutsOpen(false)}
+                  className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors border border-transparent hover:border-zinc-700"
+                >
+                  <Icon icon="ph:x" className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-2 overflow-y-auto custom-scrollbar flex flex-col gap-8 px-6 py-6">
+                
+                <div className="space-y-4">
+                  <h3 className="text-[13px] font-semibold text-zinc-400">General</h3>
+                  
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-zinc-300">Switch tabs (1-9)</span>
+                    <div className="flex gap-1.5">
+                      <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Ctrl</kbd>
+                      <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Num</kbd>
+                    </div>
+                  </div>
+
+                  {isDesktopApp && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-zinc-300">Close current tab</span>
+                        <div className="flex gap-1.5">
+                          <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Ctrl</kbd>
+                          <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">W</kbd>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-zinc-300">Close app</span>
+                        <div className="flex gap-1.5">
+                          <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Alt</kbd>
+                          <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">F4</kbd>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="text-[13px] font-semibold text-zinc-400">Editor</h3>
+                  
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-zinc-300">Undo</span>
+                    <div className="flex gap-1.5">
+                      <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Ctrl</kbd>
+                      <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Z</kbd>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-zinc-300">Redo</span>
+                    <div className="flex gap-1.5 flex-col items-end">
+                      <div className="flex gap-1.5">
+                        <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Ctrl</kbd>
+                        <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Y</kbd>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Ctrl</kbd>
+                        <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Shift</kbd>
+                        <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Z</kbd>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="text-[13px] font-semibold text-zinc-400">In chats</h3>
+                  
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-zinc-300">Send message</span>
+                    <div className="flex gap-1.5">
+                      <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Enter</kbd>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-zinc-300">New line in message</span>
+                    <div className="flex gap-1.5">
+                      <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Shift</kbd>
+                      <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Enter</kbd>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {isSettingsModalOpen && (
           <Settings 
             currentUser={currentUser} 
@@ -12546,7 +12707,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
               {supportAmountPaid ? (
                 <div className="flex flex-col items-center text-center space-y-4 py-4">
                   <div className="w-14 h-14 rounded-full bg-emerald-950/30 border border-emerald-800/40 flex items-center justify-center text-emerald-400">
-                    <Coffee className="w-7 h-7" />
+                    <Mug weight="Outline" className="w-7 h-7" />
                   </div>
 
                   <div className="space-y-1">
@@ -12581,7 +12742,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <div className="flex flex-col items-center text-center space-y-4 pt-1">
                   {/* Coffee cup box */}
                   <div className="w-14 h-14 rounded-2xl bg-[#221714] border border-[#44312a] flex items-center justify-center text-[#e3a088]">
-                    <Coffee className="w-7 h-7" />
+                    <Mug weight="Outline" className="w-7 h-7" />
                   </div>
 
                   <div className="space-y-1">
@@ -12647,7 +12808,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       rel="noopener noreferrer"
                       className="w-full py-2.5 rounded-xl bg-zinc-200 hover:bg-white text-[#121212] font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                     >
-                      <Coffee className="w-3.5 h-3.5" />
+                      <Mug weight="Outline" className="w-3.5 h-3.5" />
                       <span>Support on BuyMeACoffee.com</span>
                       <ExternalLink className="w-3 h-3 ml-0.5" />
                     </a>
