@@ -2089,6 +2089,15 @@ export default function App() {
           requestDeleteTab(activeTabId);
         }
       }
+
+      // 4. Ctrl+P or Cmd+P to toggle side panel in document tabs
+      if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) {
+        const currentTab = tabs.find((t) => t.id === activeTabId);
+        if (currentTab?.type === "document") {
+          e.preventDefault();
+          setIsSidePanelOpen((prev) => !prev);
+        }
+      }
     };
 
     window.addEventListener("keydown", handleGlobalShortcuts);
@@ -11511,6 +11520,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <div className="space-y-4">
                   <h3 className="text-[13px] font-semibold text-zinc-400">Editor</h3>
                   
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-zinc-300">Toggle side panel</span>
+                    <div className="flex gap-1.5">
+                      <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Ctrl</kbd>
+                      <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">P</kbd>
+                    </div>
+                  </div>
+
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-zinc-300">Undo</span>
                     <div className="flex gap-1.5">
