@@ -59,7 +59,7 @@ interface MainChatProps {
 export const modelsList = [
   {
     id: "auto",
-    label: "Composition I",
+    label: "Ode I",
     desc: "Fast and versatile; great for daily homework and file analysis",
   },
   {
@@ -69,12 +69,12 @@ export const modelsList = [
   },
   {
     id: "mistral-large-latest",
-    label: "Sift II",
+    label: "Sestina",
     desc: "Advanced logic and excellent for language translation",
   },
   {
     id: "codestral-latest",
-    label: "Kindle Preview",
+    label: "Prose Preview",
     desc: "Technical specialist for coding, math, and logic puzzles",
   },
   {
@@ -84,8 +84,18 @@ export const modelsList = [
   },
   {
     id: "solar-pro2",
-    label: "Visor IV",
+    label: "Pantoum V",
     desc: "High-performance reasoning and rapid analysis by Upstage AI",
+  },
+  {
+    id: "reka-flash",
+    label: "Villanelle Post",
+    desc: "Lightning-fast, multimodal intelligence by Reka AI",
+  },
+  {
+    id: "mercury-2",
+    label: "Cinquain Lite",
+    desc: "Advanced model by Inception Labs",
   },
 ];
 
@@ -820,7 +830,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                     <span className="flex items-center gap-1.5">
                       <span className="text-white">
                         {modelsList.find((m) => m.id === selectedModel)
-                          ?.label || "Composition I"}
+                          ?.label || "Ode I"}
                       </span>
                       {thinkingLevel !== "Standard" && (
                         <span className="text-zinc-400 opacity-50 font-normal text-[10.5px] ml-1">
@@ -846,7 +856,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                         }}
                       />
                       {/* Dropdown Menu */}
-                      <div className="absolute bottom-full right-0 mb-2 w-[280px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
+                      <div className="absolute bottom-full right-0 mb-2 w-[220px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
                         {modelsList
                           .filter(
                             (m) =>
@@ -854,6 +864,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                                 "mistral-large-latest",
                                 "codestral-latest",
                                 "solar-pro2",
+                                "reka-flash",
                               ].includes(m.id),
                           )
                           .map((m) => {
@@ -867,14 +878,14 @@ export const MainChat: React.FC<MainChatProps> = ({
                                   setIsThinkingMenuOpen(false);
                                   setIsMoreModelsOpen(false);
                                 }}
-                                className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                className={`relative group w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                                   isSelected
                                     ? "bg-zinc-800/25 text-white"
                                     : "text-zinc-300 hover:text-white"
                                 }`}
                               >
                                 {/* Left check col */}
-                                <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
+                                <div className="w-4 flex items-center justify-center shrink-0">
                                   {isSelected ? (
                                     <Icon
                                       icon="ph:check"
@@ -885,13 +896,16 @@ export const MainChat: React.FC<MainChatProps> = ({
                                   )}
                                 </div>
                                 {/* Right aligned text block */}
-                                <div className="flex flex-col gap-0.5 text-left min-w-0">
+                                <div className="text-left min-w-0">
                                   <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
                                     {m.label}
                                   </span>
-                                  <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
-                                    {m.desc}
-                                  </span>
+                                </div>
+                                {/* Tooltip */}
+                                <div className="absolute right-full top-1/2 -translate-y-1/2 mr-2.5 w-48 opacity-0 invisible group-hover:opacity-100 group-hover:visible bg-[#1a1a1e] border border-zinc-800/80 text-zinc-300 text-[11px] rounded-lg p-2 shadow-xl pointer-events-none z-[110] leading-normal font-normal transition-all duration-150">
+                                  {m.desc}
+                                  {/* Sharp Arrow Pointer */}
+                                  <div className="absolute top-1/2 -translate-y-1/2 left-[calc(100%-4px)] w-2 h-2 rotate-45 bg-[#1a1a1e] border-r border-t border-zinc-800/80 pointer-events-none" />
                                 </div>
                               </button>
                             );
@@ -903,16 +917,17 @@ export const MainChat: React.FC<MainChatProps> = ({
                             setIsMoreModelsOpen(!isMoreModelsOpen);
                             setIsThinkingMenuOpen(false);
                           }}
-                          className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                             isMoreModelsOpen ? "bg-zinc-800/30" : ""
                           }`}
                         >
-                          <div className="flex items-start gap-2.5">
-                            <div className="w-4 shrink-0 flex items-center justify-center pt-0.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-4 shrink-0 flex items-center justify-center">
                               {[
                                 "mistral-large-latest",
                                 "codestral-latest",
                                 "solar-pro2",
+                                "reka-flash",
                               ].includes(selectedModel) ? (
                                 <Icon
                                   icon="ph:check"
@@ -922,22 +937,9 @@ export const MainChat: React.FC<MainChatProps> = ({
                                 <div className="w-3.5" />
                               )}
                             </div>
-                            <div className="flex flex-col gap-0.5 text-left">
-                              <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
-                                More models
-                              </span>
-                              <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
-                                {[
-                                  "mistral-large-latest",
-                                  "codestral-latest",
-                                  "solar-pro2",
-                                ].includes(selectedModel)
-                                  ? modelsList.find(
-                                      (m) => m.id === selectedModel,
-                                    )?.label
-                                  : "Advanced reasoning & coding specials"}
-                              </span>
-                            </div>
+                            <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
+                              More models
+                            </span>
                           </div>
                           <Icon
                             icon="ph:caret-right-bold"
@@ -953,7 +955,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                               animate={{ opacity: 1, x: 0, scale: 1 }}
                               exit={{ opacity: 0, x: -10, scale: 0.95 }}
                               transition={{ duration: 0.15, ease: "easeOut" }}
-                              className="absolute left-full bottom-8 ml-2 w-[280px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[101] flex flex-col gap-0.5"
+                              className="absolute left-full bottom-8 ml-2 w-[220px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[101] flex flex-col gap-0.5"
                             >
                               {modelsList
                                 .filter((m) =>
@@ -961,6 +963,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                                     "mistral-large-latest",
                                     "codestral-latest",
                                     "solar-pro2",
+                                    "reka-flash",
                                   ].includes(m.id),
                                 )
                                 .map((m) => {
@@ -974,14 +977,14 @@ export const MainChat: React.FC<MainChatProps> = ({
                                         setIsThinkingMenuOpen(false);
                                         setIsMoreModelsOpen(false);
                                       }}
-                                      className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                      className={`relative group w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                                         isSelected
                                           ? "bg-zinc-800/25 text-white"
                                           : "text-zinc-300 hover:text-white"
                                       }`}
                                     >
                                       {/* Left check col */}
-                                      <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
+                                      <div className="w-4 flex items-center justify-center shrink-0">
                                         {isSelected ? (
                                           <Icon
                                             icon="ph:check"
@@ -992,13 +995,16 @@ export const MainChat: React.FC<MainChatProps> = ({
                                         )}
                                       </div>
                                       {/* Right aligned text block */}
-                                      <div className="flex flex-col gap-0.5 text-left min-w-0">
+                                      <div className="text-left min-w-0">
                                         <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
                                           {m.label}
                                         </span>
-                                        <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
-                                          {m.desc}
-                                        </span>
+                                      </div>
+                                      {/* Tooltip */}
+                                      <div className="absolute right-full top-1/2 -translate-y-1/2 mr-2.5 w-48 opacity-0 invisible group-hover:opacity-100 group-hover:visible bg-[#1a1a1e] border border-zinc-800/80 text-zinc-300 text-[11px] rounded-lg p-2 shadow-xl pointer-events-none z-[110] leading-normal font-normal transition-all duration-150">
+                                        {m.desc}
+                                        {/* Sharp Arrow Pointer */}
+                                        <div className="absolute top-1/2 -translate-y-1/2 left-[calc(100%-4px)] w-2 h-2 rotate-45 bg-[#1a1a1e] border-r border-t border-zinc-800/80 pointer-events-none" />
                                       </div>
                                     </button>
                                   );

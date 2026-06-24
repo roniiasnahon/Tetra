@@ -2274,22 +2274,31 @@ export default function App() {
   const lastContentRef = useRef("");
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isTypingRef = useRef(false);
+  const savedSelectionRangeRef = useRef<Range | null>(null);
 
   useEffect(() => {
     const handleSelectionChange = () => {
       const selection = window.getSelection();
-      if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+      
+      if (selection && selection.rangeCount > 0) {
         const range = selection.getRangeAt(0);
-        const parentNode = range.commonAncestorContainer.parentElement;
+        
+        if (editorRef.current && editorRef.current.contains(range.commonAncestorContainer)) {
+          savedSelectionRangeRef.current = range.cloneRange();
+        }
 
-        if (parentNode) {
-          const parentStyle = window.getComputedStyle(parentNode);
-          const sizeStr = parentStyle.fontSize;
-          if (sizeStr) {
-            const parsed = parseInt(sizeStr);
-            if (!isNaN(parsed)) {
-              setCurrentSelectionSize(parsed);
-              return;
+        if (!selection.isCollapsed) {
+          const parentNode = range.commonAncestorContainer.parentElement;
+
+          if (parentNode) {
+            const parentStyle = window.getComputedStyle(parentNode);
+            const sizeStr = parentStyle.fontSize;
+            if (sizeStr) {
+              const parsed = parseInt(sizeStr);
+              if (!isNaN(parsed)) {
+                setCurrentSelectionSize(parsed);
+                return;
+              }
             }
           }
         }
@@ -2470,9 +2479,18 @@ export default function App() {
     if (!editorRef.current) return;
     pushToUndo();
     
+    // Cache the range first before focusing changes the selection!
+    const rangeToRestore = savedSelectionRangeRef.current;
+
     // Ensure the editor has focus before trying selection
     if (document.activeElement !== editorRef.current) {
       editorRef.current.focus();
+    }
+
+    const selection = window.getSelection();
+    if (selection && rangeToRestore) {
+      selection.removeAllRanges();
+      selection.addRange(rangeToRestore);
     }
     
     let thead = `<thead><tr style="background-color:#1a1a1c; border-bottom:1px solid #27272a;">`;
@@ -2491,7 +2509,15 @@ export default function App() {
     }
     tbody += `</tbody>`;
 
-    const tableHTML = `<table style="width:100%; border-collapse:collapse; margin:16px 0; font-size:13px; border:1px solid #27272a; border-radius:8px; overflow:hidden;">${thead}${tbody}</table><p><br></p>`;
+    const tableHTML = `
+      <div class="table-embed-wrapper" contenteditable="false" draggable="true" style="display:block; margin:20px 0; position:relative; cursor:grab; border-radius:8px; border:1px solid transparent; transition:border-color 0.15s;" onmouseenter="this.style.borderColor='#27272a'" onmouseleave="this.style.borderColor='transparent'">
+        <button class="embed-delete-btn" title="Delete Table" style="position:absolute; top:6px; right:6px; background:#18181b; border:1px solid #27272a; border-radius:4px; color:#a1a1aa; cursor:pointer; font-size:10px; width:18px; height:18px; display:none; align-items:center; justify-content:center; z-index:10; outline:none; transition:all 0.15s;">✕</button>
+        <div contenteditable="true" style="padding:4px; background:transparent; cursor:default;" onmousedown="event.stopPropagation();">
+          <table style="width:100%; border-collapse:collapse; font-size:13px; border:1px solid #27272a; border-radius:8px; overflow:hidden;">${thead}${tbody}</table>
+        </div>
+      </div>
+      <p><br></p>
+    `;
     
     let success = false;
     try {
@@ -2502,7 +2528,6 @@ export default function App() {
     
     // Fallback if execCommand fails (e.g. no selection range or unsupported)
     if (!success) {
-      const selection = window.getSelection();
       if (selection && selection.rangeCount > 0) {
         const range = selection.getRangeAt(0);
         
@@ -2555,7 +2580,12 @@ export default function App() {
         node = node.parentNode;
       }
       if (tableEl) {
-        tableEl.remove();
+        const wrapper = tableEl.closest(".table-embed-wrapper");
+        if (wrapper) {
+          wrapper.remove();
+        } else {
+          tableEl.remove();
+        }
         // Sync state
         const html = editorRef.current.innerHTML;
         lastContentRef.current = html;
@@ -2802,8 +2832,11 @@ export default function App() {
     const encodedState = btoa(encodeURIComponent(JSON.stringify(chartState)));
     
     const chartWrapperHTML = `
-      <div class="chart-embed-wrapper" data-chart-state="${encodedState}" contenteditable="false" style="display:block; margin:24px auto; max-width:540px; text-align:center;">
-        ${svgContent}
+      <div class="chart-embed-wrapper" data-chart-state="${encodedState}" contenteditable="false" draggable="true" style="display:block; margin:24px auto; max-width:540px; position:relative; cursor:grab; border-radius:8px; border:1px solid transparent; transition:border-color 0.15s; text-align:center;" onmouseenter="this.style.borderColor='#27272a'" onmouseleave="this.style.borderColor='transparent'">
+        <button class="embed-delete-btn" title="Delete Chart" style="position:absolute; top:6px; right:6px; background:#18181b; border:1px solid #27272a; border-radius:4px; color:#a1a1aa; cursor:pointer; font-size:10px; width:18px; height:18px; display:none; align-items:center; justify-content:center; z-index:10; outline:none; transition:all 0.15s;">✕</button>
+        <div style="padding:16px; background:transparent;">
+          ${svgContent}
+        </div>
       </div>
     `;
     const chartHTML = chartWrapperHTML + `<p><br></p>`;
@@ -2827,8 +2860,16 @@ export default function App() {
       }
       chartBeingEdited.parentNode.replaceChild(frag, chartBeingEdited);
     } else {
+      const rangeToRestore = savedSelectionRangeRef.current;
+
       if (document.activeElement !== editorRef.current) {
         editorRef.current.focus();
+      }
+
+      const selection = window.getSelection();
+      if (selection && rangeToRestore) {
+        selection.removeAllRanges();
+        selection.addRange(rangeToRestore);
       }
 
       let success = false;
@@ -2839,7 +2880,6 @@ export default function App() {
       }
 
       if (!success) {
-        const selection = window.getSelection();
         if (selection && selection.rangeCount > 0) {
           const range = selection.getRangeAt(0);
           if (editorRef.current.contains(range.commonAncestorContainer)) {
@@ -9755,7 +9795,79 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         suppressContentEditableWarning
                         data-placeholder={isReadOnly ? "" : "Start writing..."}
                         className="w-full bg-transparent text-inherit outline-none min-h-[400px] leading-relaxed focus:outline-none markdown-body"
+                        onDragStart={(e) => {
+                          const target = e.target as HTMLElement;
+                          const draggableElement = target.closest(".table-embed-wrapper, .chart-embed-wrapper") as HTMLElement | null;
+                          if (draggableElement) {
+                            const tempId = "drag-" + Date.now();
+                            draggableElement.setAttribute("data-drag-id", tempId);
+                            e.dataTransfer.setData("text/plain", tempId);
+                            e.dataTransfer.effectAllowed = "move";
+                          }
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                        }}
+                        onDrop={(e) => {
+                          const tempId = e.dataTransfer.getData("text/plain");
+                          if (tempId && tempId.startsWith("drag-")) {
+                            e.preventDefault();
+                            pushToUndo();
+                            
+                            const draggedEl = editorRef.current?.querySelector(`[data-drag-id="${tempId}"]`) as HTMLElement | null;
+                            if (draggedEl) {
+                              let range: Range | null = null;
+                              if (document.caretRangeFromPoint) {
+                                range = document.caretRangeFromPoint(e.clientX, e.clientY);
+                              } else if ((e as any).rangeParent) {
+                                range = document.createRange();
+                                range.setStart((e as any).rangeParent, (e as any).rangeOffset);
+                                range.collapse(true);
+                              }
+                              
+                              if (range && editorRef.current?.contains(range.commonAncestorContainer)) {
+                                draggedEl.removeAttribute("data-drag-id");
+                                draggedEl.remove();
+                                range.insertNode(draggedEl);
+                                
+                                const sel = window.getSelection();
+                                if (sel) {
+                                  sel.removeAllRanges();
+                                  const newRange = document.createRange();
+                                  newRange.selectNode(draggedEl);
+                                  sel.addRange(newRange);
+                                }
+                                
+                                const html = editorRef.current.innerHTML;
+                                lastContentRef.current = html;
+                                setDocumentContent(html);
+                                setTabs((prev) =>
+                                  prev.map((t) => (t.id === activeTabId ? { ...t, content: html } : t)),
+                                );
+                                setDocSaveStatus("saving");
+                              } else {
+                                draggedEl.removeAttribute("data-drag-id");
+                              }
+                            }
+                          }
+                        }}
                         onInput={(e) => {
+                          if (editorRef.current) {
+                            const tableWrappers = editorRef.current.querySelectorAll(".table-embed-wrapper");
+                            tableWrappers.forEach((wrapper) => {
+                              if (!wrapper.querySelector("table")) {
+                                wrapper.remove();
+                              }
+                            });
+                            const chartWrappers = editorRef.current.querySelectorAll(".chart-embed-wrapper");
+                            chartWrappers.forEach((wrapper) => {
+                              if (!wrapper.querySelector("svg") && !wrapper.querySelector("img")) {
+                                wrapper.remove();
+                              }
+                            });
+                          }
+
                           const html = e.currentTarget.innerHTML;
                           
                           // Typing session manager for undo/redo snapshots
@@ -9794,6 +9906,38 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           } else if (isMod && e.key.toLowerCase() === "y") {
                             e.preventDefault();
                             handleRedo();
+                          }
+                        }}
+                        onKeyUp={(e) => {
+                          if (e.key === "Backspace" || e.key === "Delete") {
+                            if (editorRef.current) {
+                              let mutated = false;
+                              const tableWrappers = editorRef.current.querySelectorAll(".table-embed-wrapper");
+                              tableWrappers.forEach((wrapper) => {
+                                if (!wrapper.querySelector("table")) {
+                                  wrapper.remove();
+                                  mutated = true;
+                                }
+                              });
+                              const chartWrappers = editorRef.current.querySelectorAll(".chart-embed-wrapper");
+                              chartWrappers.forEach((wrapper) => {
+                                if (!wrapper.querySelector("svg") && !wrapper.querySelector("img")) {
+                                  wrapper.remove();
+                                  mutated = true;
+                                }
+                              });
+                              if (mutated) {
+                                const html = editorRef.current.innerHTML;
+                                lastContentRef.current = html;
+                                setDocumentContent(html);
+                                setTabs((prev) =>
+                                  prev.map((t) =>
+                                    t.id === activeTabId ? { ...t, content: html } : t
+                                  )
+                                );
+                                setDocSaveStatus("saving");
+                              }
+                            }
                           }
                         }}
                         onBlur={() => {
@@ -9907,6 +10051,27 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         }}
                         onClick={(e) => {
                           const target = e.target as HTMLElement;
+                          
+                          // Handle delete button on embed wrappers (tables and charts)
+                          if (target.closest(".embed-delete-btn")) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const wrapper = target.closest(".table-embed-wrapper, .chart-embed-wrapper");
+                            if (wrapper) {
+                              pushToUndo();
+                              wrapper.remove();
+                              
+                              const html = editorRef.current?.innerHTML || "";
+                              lastContentRef.current = html;
+                              setDocumentContent(html);
+                              setTabs((prev) =>
+                                prev.map((t) => (t.id === activeTabId ? { ...t, content: html } : t)),
+                              );
+                              setDocSaveStatus("saving");
+                            }
+                            return;
+                          }
+
                           const anchor = target.closest("a");
                           if (anchor) {
                             const href = anchor.getAttribute("href");
@@ -10414,9 +10579,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 10, scale: 0.95 }}
                             transition={{ duration: 0.15, ease: "easeOut" }}
-                            className="absolute bottom-full right-0 mb-2 w-[280px] bg-[#1e1e22] border border-zinc-800/80 rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5"
+                            className="absolute bottom-full right-0 mb-2 w-[220px] bg-[#1e1e22] border border-zinc-800/80 rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5"
                           >
-                            {modelsList.filter(m => !['mistral-large-latest', 'codestral-latest', 'solar-pro2'].includes(m.id)).map((m) => {
+                            {modelsList.filter(m => !['mistral-large-latest', 'codestral-latest', 'solar-pro2', 'reka-flash'].includes(m.id)).map((m) => {
                               const isSelected = selectedModel === m.id;
                               return (
                                 <button
@@ -10427,23 +10592,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     setIsAgentThinkingMenuOpen(false);
                                     setIsAgentMoreModelsOpen(false);
                                   }}
-                                  className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                                     isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
                                   }`}
                                 >
-                                  <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
+                                  <div className="w-4 flex items-center justify-center shrink-0">
                                     {isSelected ? (
                                       <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
                                     ) : (
                                       <div className="w-3.5" />
                                     )}
                                   </div>
-                                  <div className="flex flex-col gap-0.5 text-left min-w-0">
+                                  <div className="text-left min-w-0">
                                     <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
                                       {m.label}
-                                    </span>
-                                    <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
-                                      {m.desc}
                                     </span>
                                   </div>
                                 </button>
@@ -10456,26 +10618,19 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 setIsAgentMoreModelsOpen(!isAgentMoreModelsOpen);
                                 setIsAgentThinkingMenuOpen(false);
                               }}
-                              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                                 isAgentMoreModelsOpen ? 'bg-zinc-800/30' : ''
                               }`}
                             >
-                              <div className="flex items-start gap-2.5">
-                                <div className="w-4 shrink-0 flex items-center justify-center pt-0.5">
-                                  {['mistral-large-latest', 'codestral-latest', 'solar-pro2'].includes(selectedModel) ? (
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-4 shrink-0 flex items-center justify-center">
+                                  {['mistral-large-latest', 'codestral-latest', 'solar-pro2', 'reka-flash'].includes(selectedModel) ? (
                                     <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
                                   ) : (
                                     <div className="w-3.5" />
                                   )}
                                 </div>
-                                <div className="flex flex-col gap-0.5 text-left">
-                                  <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">More models</span>
-                                  <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
-                                    {['mistral-large-latest', 'codestral-latest', 'solar-pro2'].includes(selectedModel) 
-                                      ? modelsList.find(m => m.id === selectedModel)?.label 
-                                      : 'Advanced reasoning & coding specials'}
-                                  </span>
-                                </div>
+                                <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">More models</span>
                               </div>
                               <Icon icon="ph:caret-right-bold" className="w-3 h-3 text-zinc-500 mr-1.5 shrink-0" />
                             </div>
@@ -10499,7 +10654,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     <span className="text-[12px] font-bold text-zinc-400 uppercase tracking-widest ml-1">More Models</span>
                                   </div>
                                   <div className="overflow-y-auto max-h-[300px]">
-                                    {modelsList.filter(m => ['mistral-large-latest', 'codestral-latest', 'solar-pro2'].includes(m.id)).map((m) => {
+                                    {modelsList.filter(m => ['mistral-large-latest', 'codestral-latest', 'solar-pro2', 'reka-flash'].includes(m.id)).map((m) => {
                                       const isSelected = selectedModel === m.id;
                                       return (
                                         <button
@@ -10510,23 +10665,20 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                             setIsAgentThinkingMenuOpen(false);
                                             setIsAgentMoreModelsOpen(false);
                                           }}
-                                          className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                                             isSelected ? 'bg-zinc-800/25 text-white' : 'text-zinc-300 hover:text-white'
                                           }`}
                                         >
-                                          <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
+                                          <div className="w-4 flex items-center justify-center shrink-0">
                                             {isSelected ? (
                                               <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
                                             ) : (
                                               <div className="w-3.5" />
                                             )}
                                           </div>
-                                          <div className="flex flex-col gap-0.5 text-left min-w-0">
+                                          <div className="text-left min-w-0">
                                             <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
                                               {m.label}
-                                            </span>
-                                            <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
-                                              {m.desc}
                                             </span>
                                           </div>
                                         </button>
@@ -11719,7 +11871,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   {/* Color Schemes */}
                   <div>
                     <span className="text-[10px] text-[#71717a] font-bold uppercase mb-1.5 block tracking-wider">Color Scheme presets</span>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <div className="flex flex-wrap gap-2.5">
                       {[
                         { id: "multicolor", label: "Multicolor", colors: ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b"] },
                         { id: "blue", label: "Blue Slate", colors: ["#3b82f6"] },
@@ -11737,19 +11889,19 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         <button
                           key={scheme.id}
                           type="button"
+                          title={scheme.label}
                           onClick={() => setChartDataColor(scheme.id)}
-                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] transition-colors cursor-pointer justify-between ${
+                          className={`flex items-center justify-center w-7 h-7 rounded-full transition-all cursor-pointer overflow-hidden ring-offset-2 ring-offset-[#121212] ${
                             chartDataColor === scheme.id
-                              ? "border-zinc-500 bg-zinc-800/40 text-white"
-                              : "border-[#27272a] bg-[#161616] text-zinc-400 hover:border-zinc-500"
+                              ? "ring-2 ring-zinc-400 scale-110"
+                              : "ring-1 ring-[#27272a] hover:ring-zinc-500 hover:scale-105"
                           }`}
                         >
-                          <span className="truncate">{scheme.label}</span>
-                          <div className="flex -space-x-1.5 shrink-0">
-                            {scheme.colors.slice(0, 3).map((c, i) => (
-                              <div key={i} className="w-2.5 h-2.5 rounded-full ring-1 ring-black" style={{ backgroundColor: c }} />
-                            ))}
-                          </div>
+                          {scheme.id === "multicolor" ? (
+                            <div className="w-full h-full" style={{ background: "conic-gradient(#10b981, #3b82f6, #8b5cf6, #f59e0b, #10b981)" }} />
+                          ) : (
+                            <div className="w-full h-full" style={{ backgroundColor: scheme.colors[0] }} />
+                          )}
                         </button>
                       ))}
                     </div>

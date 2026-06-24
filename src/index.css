@@ -469,6 +469,19 @@ input[type="number"] {
   fill: #1e293b !important;
 }
 
+.embed-delete-btn {
+  transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out;
+}
+.embed-delete-btn:hover {
+  color: #ef4444 !important;
+  background-color: #27272a !important;
+}
+
+.table-embed-wrapper:hover .embed-delete-btn,
+.chart-embed-wrapper:hover .embed-delete-btn {
+  display: flex !important;
+}
+
 
 
 
