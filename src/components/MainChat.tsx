@@ -11,6 +11,7 @@ import { DynamicShimmer } from "./DynamicShimmer";
 import { Plain2, PaperclipRounded2 } from "@solar-icons/react";
 import { Plus } from "lucide-react";
 import { showToast } from "./Toast";
+import { auth } from "../firebase";
 
 interface MainChatProps {
   tab: Tab;
@@ -79,7 +80,7 @@ export const modelsList = [
   },
   {
     id: "command-a-plus-05-2026",
-    label: "Raisee V",
+    label: "Ericka V",
     desc: "Creative partner for writing, brainstorming, and essay drafts",
   },
   {
@@ -96,6 +97,11 @@ export const modelsList = [
     id: "mercury-2",
     label: "Cinquain Lite",
     desc: "Advanced model by Inception Labs",
+  },
+  {
+    id: "mimo-v2.5-pro",
+    label: "Triolett II",
+    desc: "High-performance multimodal model by Xiaomi",
   },
 ];
 
@@ -198,7 +204,9 @@ export const MainChat: React.FC<MainChatProps> = ({
     const replacement = "";
     const newValue = beforeMention + replacement + afterMention;
 
-    localStorage.setItem("onboarding_citation_note", "true");
+    const uid = auth.currentUser?.uid;
+    const key = uid ? `onboarding_citation_note_${uid}` : "onboarding_citation_note";
+    localStorage.setItem(key, "true");
     setChatInput(newValue);
     setMentionState({
       show: false,
@@ -865,6 +873,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                                 "codestral-latest",
                                 "solar-pro2",
                                 "reka-flash",
+                                "mimo-v2.5-pro",
                               ].includes(m.id),
                           )
                           .map((m) => {
@@ -928,6 +937,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                                 "codestral-latest",
                                 "solar-pro2",
                                 "reka-flash",
+                                "mimo-v2.5-pro",
                               ].includes(selectedModel) ? (
                                 <Icon
                                   icon="ph:check"
@@ -964,6 +974,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                                     "codestral-latest",
                                     "solar-pro2",
                                     "reka-flash",
+                                    "mimo-v2.5-pro",
                                   ].includes(m.id),
                                 )
                                 .map((m) => {

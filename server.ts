@@ -818,6 +818,7 @@ let cohereClient: OpenAI | null = null;
 let upstageClient: OpenAI | null = null;
 let rekaClient: OpenAI | null = null;
 let inceptionClient: OpenAI | null = null;
+let xiaomiClient: OpenAI | null = null;
 import { VoyageAIClient } from "voyageai";
 let voyageClient: VoyageAIClient | null = null;
 
@@ -948,6 +949,23 @@ function getInceptionClient(): OpenAI {
     });
   }
   return inceptionClient;
+}
+
+function getXiaomiClient(): OpenAI {
+  if (!xiaomiClient) {
+    const apiKey =
+      process.env.XIAOMI_API_KEY || "sk-s14gvi7k26iigkps96520rf7n76pw52povykiw07m9nuuq91";
+    if (!apiKey) {
+      throw new Error(
+        "XIAOMI_API_KEY is not configured. Please set it in the Secrets panel.",
+      );
+    }
+    xiaomiClient = new OpenAI({
+      apiKey: apiKey,
+      baseURL: "https://api.xiaomimimo.com/v1",
+    });
+  }
+  return xiaomiClient;
 }
 
 function extractTextFromHtml(html: string): string {
@@ -1688,6 +1706,8 @@ async function startServer() {
         .json({ error: `Validation check failed: ${err.message || err}` });
     }
   });
+
+
 
   // Dynamic public metadata resolver for rich inline link-previews
   app.get("/api/link-preview", async (req, res) => {
@@ -4046,6 +4066,9 @@ ${researchContext}
           "\n\n[THINKING DISABLED]: You must provide a direct, concise, and immediate response without any extensive reasoning, self-reflection, or internal thinking steps. Do not output any <think> tags. Keep it brief and to the point.";
       }
 
+      // Ensure the model is completely context-aware of the current workspace state (document, notes, citations)
+      activeSystemInstruction += `\n\n=== CURRENT WORKSPACE CONTEXT ===\n${formattedContext}\n=================================`;
+
       const messagesPayload = [
         {
           role: "system",
@@ -4069,12 +4092,15 @@ ${researchContext}
       let tryRekaFirst = !usedGeminiFallback && requestedModel === "reka-flash";
       let tryInceptionFirst =
         !usedGeminiFallback && requestedModel === "mercury-2";
+      let tryXiaomiFirst =
+        !usedGeminiFallback && requestedModel === "mimo-v2.5-pro";
       let tryMistralFirst =
         !usedGeminiFallback &&
         !tryBasetenFirst &&
         !tryUpstageFirst &&
         !tryRekaFirst &&
         !tryInceptionFirst &&
+        !tryXiaomiFirst &&
         !requestedModel.includes("cohere") &&
         !requestedModel.includes("command-a");
       let tryCohereFirst =
@@ -4083,6 +4109,7 @@ ${researchContext}
         !tryUpstageFirst &&
         !tryRekaFirst &&
         !tryInceptionFirst &&
+        !tryXiaomiFirst &&
         (requestedModel.includes("cohere") ||
           requestedModel.includes("command-a"));
       let mistralModelToUse = "mistral-large-latest";
@@ -4097,6 +4124,7 @@ ${researchContext}
           tryBasetenFirst = false;
           tryUpstageFirst = false;
           tryRekaFirst = false;
+          tryXiaomiFirst = false;
           usedGeminiFallback = false;
           mistralModelToUse = requestedModel;
         } else if (requestedModel.includes("gemini")) {
@@ -4105,6 +4133,7 @@ ${researchContext}
           tryBasetenFirst = false;
           tryUpstageFirst = false;
           tryRekaFirst = false;
+          tryXiaomiFirst = false;
           usedGeminiFallback = true;
         } else if (
           requestedModel.includes("cohere") ||
@@ -4115,6 +4144,7 @@ ${researchContext}
           tryBasetenFirst = false;
           tryUpstageFirst = false;
           tryRekaFirst = false;
+          tryXiaomiFirst = false;
           usedGeminiFallback = false;
           cohereModelToUse = requestedModel;
         } else if (requestedModel === "hokku-iv") {
@@ -4123,6 +4153,7 @@ ${researchContext}
           tryBasetenFirst = true;
           tryUpstageFirst = false;
           tryRekaFirst = false;
+          tryXiaomiFirst = false;
           usedGeminiFallback = false;
         } else if (requestedModel === "solar-pro2") {
           tryMistralFirst = false;
@@ -4130,6 +4161,7 @@ ${researchContext}
           tryBasetenFirst = false;
           tryUpstageFirst = true;
           tryRekaFirst = false;
+          tryXiaomiFirst = false;
           usedGeminiFallback = false;
         } else if (requestedModel === "reka-flash") {
           tryMistralFirst = false;
@@ -4138,6 +4170,7 @@ ${researchContext}
           tryUpstageFirst = false;
           tryRekaFirst = true;
           tryInceptionFirst = false;
+          tryXiaomiFirst = false;
           usedGeminiFallback = false;
         } else if (requestedModel === "mercury-2") {
           tryMistralFirst = false;
@@ -4146,6 +4179,16 @@ ${researchContext}
           tryUpstageFirst = false;
           tryRekaFirst = false;
           tryInceptionFirst = true;
+          tryXiaomiFirst = false;
+          usedGeminiFallback = false;
+        } else if (requestedModel === "mimo-v2.5-pro") {
+          tryMistralFirst = false;
+          tryCohereFirst = false;
+          tryBasetenFirst = false;
+          tryUpstageFirst = false;
+          tryRekaFirst = false;
+          tryInceptionFirst = false;
+          tryXiaomiFirst = true;
           usedGeminiFallback = false;
         }
       }
@@ -4380,6 +4423,43 @@ ${researchContext}
         }
       }
 
+      if (tryXiaomiFirst) {
+        try {
+          console.log(`[LLM] Streaming chat with Xiaomi (mimo-v2.5-pro)...`);
+          const client = getXiaomiClient();
+          completionStream = await client.chat.completions.create({
+            model: "mimo-v2.5-pro",
+            messages: messagesPayload,
+            temperature: 0.7,
+            stream: true,
+          });
+        } catch (err: any) {
+          console.warn(`[LLM] Xiaomi streaming failed:`, err.message || err);
+
+          if (
+            err.message?.includes("XIAOMI_API_KEY") ||
+            err.message?.includes("configured") ||
+            err.message?.includes("401") ||
+            err.message?.includes("JWT") ||
+            err.message?.includes("Invalid JWT")
+          ) {
+            throw new Error(
+              "XIAOMI_API_KEY is invalid or missing. Please check your API key in Settings.",
+            );
+          }
+
+          if (requestedModel !== "mimo-v2.5-pro") {
+            console.warn("[LLM] Falling back to Gemini...");
+            tryXiaomiFirst = false;
+            usedGeminiFallback = true;
+          } else {
+            throw new Error(
+              `Xiaomi LLM failed: ${err.message || "Unknown error during streaming."}`,
+            );
+          }
+        }
+      }
+
       let mainChatCollectedText = "";
 
       if (
@@ -4388,7 +4468,8 @@ ${researchContext}
           !tryBasetenFirst &&
           !tryUpstageFirst &&
           !tryRekaFirst &&
-          !tryInceptionFirst) ||
+          !tryInceptionFirst &&
+          !tryXiaomiFirst) ||
         usedGeminiFallback
       ) {
         console.log(`[LLM] Streaming chat with Gemini...`);

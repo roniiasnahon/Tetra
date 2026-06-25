@@ -4,6 +4,7 @@ import { Icon } from './SolarIcon';
 import { MaterialIcon } from './MaterialIcon';
 import { auth, googleProvider, signInWithPopup } from '../firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import { getUserFriendlyErrorMessage } from '../lib/error-utils';
 import { Minus, Square, X } from 'lucide-react';
 
 // --- Pupil Sub-component ---
@@ -281,7 +282,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
       setSuccessMessage(data.mocked ? `${data.message}` : 'A new verification code has been dispatched to your email.');
     } catch (err: any) {
       console.error('Failed to resend code:', err);
-      setErrorMessage(err.message || 'Failed to resend verification code.');
+      setErrorMessage(getUserFriendlyErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -322,7 +323,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
         await signInWithPopup(auth, googleProvider);
       } catch (err: any) {
         console.error('Google Sign-In failed:', err);
-        setErrorMessage('We couldn\'t connect your Google account. Please check your internet connection or try again.');
+        setErrorMessage(getUserFriendlyErrorMessage(err));
         setIsLoading(false);
       }
     }
@@ -337,7 +338,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
       await signInWithPopup(auth, yahooProvider);
     } catch (err: any) {
       console.error('Yahoo Sign-In failed:', err);
-      setErrorMessage('We couldn\'t connect your Yahoo account. Please check your internet connection or try again.');
+      setErrorMessage(getUserFriendlyErrorMessage(err));
       setIsLoading(false);
     }
   };
@@ -370,7 +371,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
         const verifyData = await verifyResp.json();
         
         if (!verifyResp.ok) {
-          setErrorMessage(verifyData.error || 'Incorrect code. Please double check and try again.');
+          setErrorMessage(getUserFriendlyErrorMessage(verifyData.error || 'Incorrect code. Please double check and try again.'));
           setIsLoading(false);
           return;
         }
@@ -382,11 +383,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
         onSuccess?.();
       } catch (err: any) {
         console.error("Verification confirmation or registration failed:", err);
-        if (err.code === 'auth/email-already-in-use') {
-          setErrorMessage('An account with this email address already exists. Try signing in helper instead.');
-        } else {
-          setErrorMessage(err.message || 'We encountered an error verifying or registering you. Please try again.');
-        }
+        setErrorMessage(getUserFriendlyErrorMessage(err));
       } finally {
         setIsLoading(false);
       }
@@ -443,20 +440,7 @@ export const AuthenticationScreen: React.FC<AuthenticationScreenProps> = ({ onSu
       }
     } catch (err: any) {
       console.error("Email auth operation failed:", err);
-      
-      if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
-        setErrorMessage('We couldn\'t find an account matching that email and password. Please check your details and try again.');
-      } else if (err.code === 'auth/email-already-in-use') {
-        setErrorMessage('An account with this email address already exists. Try signing in helper instead.');
-      } else if (err.code === 'auth/invalid-email') {
-        setErrorMessage('That email address doesn\'t look quite right. Please check for any typos.');
-      } else if (err.code === 'auth/operation-not-allowed') {
-        setErrorMessage('Email and password sign-in is currently undergoing updates. Please use a different sign-in partner or contact support.');
-      } else if (err.code === 'auth/weak-password') {
-        setErrorMessage('For your security, please choose a stronger password with at least 6 characters.');
-      } else {
-        setErrorMessage(err.message || 'We ran into an unexpected issue while signing you in. Please verify your details or try again in a moment.');
-      }
+      setErrorMessage(getUserFriendlyErrorMessage(err));
     } finally {
       setIsLoading(false);
     }

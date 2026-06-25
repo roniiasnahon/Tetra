@@ -30,11 +30,14 @@ service cloud.firestore {
     // 3. Entity Validators
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'email', 'createdAt'])
-        && data.keys().size() <= 6
+        && data.keys().size() <= 20
         && data.uid == request.auth.uid
         && data.email is string
         && data.createdAt is number
-        && data.get('displayName', '') is string;
+        && data.get('displayName', '') is string
+        && (data.keys().hasAll(['institution']) ? data.institution is string : true)
+        && (data.keys().hasAll(['heardFrom']) ? data.heardFrom is string : true)
+        && (data.keys().hasAll(['onboardingComplete']) ? data.onboardingComplete is bool : true);
     }
 
     function isValidFolder(data) {

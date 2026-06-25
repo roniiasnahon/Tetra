@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getUserFriendlyErrorMessage } from '../lib/error-utils';
 import { Icon } from './SolarIcon';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -228,7 +229,7 @@ export const Settings = ({
       showToast("Settings successfully saved!", "success");
     } catch (e: any) {
       console.error(e);
-      showToast("Error saving: " + e.message, "error");
+      showToast(getUserFriendlyErrorMessage(e), "error");
     } finally {
       setIsSavingAll(false);
     }
@@ -278,7 +279,7 @@ export const Settings = ({
       setFullName(accountDisplayName);
       localStorage.setItem("cosmi_settings_full_name", accountDisplayName);
     } catch (e: any) {
-      showToast("Failed to update profile: " + e.message, "error");
+      showToast(getUserFriendlyErrorMessage(e), "error");
     } finally {
       setIsSavingProfile(false);
     }
@@ -291,7 +292,7 @@ export const Settings = ({
       await sendPasswordResetEmail(auth, currentUser.email);
       showToast("Security password reset email dispatched!", "success");
     } catch (e: any) {
-      showToast("Failed dispatching password reset: " + e.message, "error");
+      showToast(getUserFriendlyErrorMessage(e), "error");
     } finally {
       setIsSendingReset(false);
     }
@@ -304,7 +305,7 @@ export const Settings = ({
       await sendEmailVerification(auth.currentUser);
       showToast("Activation verification email has been sent!", "success");
     } catch (e: any) {
-      showToast("Failed sending verification link: " + e.message, "error");
+      showToast(getUserFriendlyErrorMessage(e), "error");
     } finally {
       setIsSendingVerification(false);
     }

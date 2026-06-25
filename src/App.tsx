@@ -20,6 +20,7 @@ import { MaterialIcon } from "./components/MaterialIcon";
 import { Sidebar, Plain2, PaperclipRounded2, Notes, FolderWithFiles, PenNewRound, FolderOpen, MinimalisticMagnifier, MenuDots, UploadMinimalistic, AddFolder, AddCircle, PaletteRound, NotebookBookmark, SidebarMinimalistic, HandStars, Mug } from "@solar-icons/react";
 import { Plus, X as XIcon, Minus, Square, HelpCircle } from "lucide-react";
 import html2pdf from "html2pdf.js";
+import { getUserFriendlyErrorMessage } from "./lib/error-utils";
 
 interface ShimProps extends React.HTMLAttributes<HTMLSpanElement> {
   className?: string;
@@ -67,6 +68,7 @@ import { StatisticsTools } from "./components/StatisticsTools";
 import { SidePanel } from "./components/SidePanel";
 import { Settings } from "./components/Settings";
 import { AuthenticationScreen } from "./components/AuthenticationScreen";
+import { OnboardingScreen } from "./components/OnboardingScreen";
 import { DesktopAuthBridge } from "./components/DesktopAuthBridge";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -1558,7 +1560,7 @@ export default function App() {
     }
   };
 
-  const [isAssistantOpen, setIsAssistantOpen] = useState(true);
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
   const [isUploadsPanelOpen, setIsUploadsPanelOpen] = useState(true);
   const [isUploadsPanelCollapsed, setIsUploadsPanelCollapsed] = useState(false);
@@ -3137,6 +3139,13 @@ export default function App() {
       return null;
     }
   });
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+
+  const setOnboardingTaskComplete = (taskKey: string) => {
+    const uid = currentUser?.uid;
+    const storageKey = uid ? `onboarding_${taskKey}_${uid}` : `onboarding_${taskKey}`;
+    localStorage.setItem(storageKey, 'true');
+  };
 
   // Handle desktop deep linking callbacks (Electron & Tauri)
   useEffect(() => {
@@ -3571,7 +3580,7 @@ export default function App() {
   };
 
   const createNewDocument = (targetFolderId?: string) => {
-    localStorage.setItem('onboarding_create_note', 'true');
+    setOnboardingTaskComplete('create_note');
     const newId = `doc-${Date.now()}`;
     const folder = targetFolderId || selectedFolderId || folders[0]?.id || "f1";
     const newDoc: Tab = {
@@ -3593,7 +3602,7 @@ export default function App() {
   };
 
   const handleUploadFile = async (file: File) => {
-    localStorage.setItem('onboarding_upload_file', 'true');
+    setOnboardingTaskComplete('upload_file');
     const taskId = "upload-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
     const uploaderId = currentUserIdRef.current;
     
@@ -3836,7 +3845,7 @@ export default function App() {
       }
     } catch (err: any) {
       console.error("Upload failed", err);
-      const errMsg = err?.message || "The server returned an unexpected error format.";
+      const errMsg = getUserFriendlyErrorMessage(err);
       
       // Update upload tasks state with failure
       setUploadTasks((prev) =>
@@ -3944,12 +3953,20 @@ export default function App() {
       unsubChats();
       unsubAnnos();
 
-      if (user && storageMode === "database") {
-        // --- PRIVATE PERSISTENT MODE ---
-        // Save/Sync profile
+      if (user) {
+        // Save/Sync profile & Check Onboarding
         try {
+          const userDocRef = doc(db, "users", user.uid);
+          const userDocSnap = await getDocFromServer(userDocRef);
+          
+          if (!userDocSnap.exists() || !userDocSnap.data()?.onboardingComplete) {
+             setNeedsOnboarding(true);
+          } else {
+             setNeedsOnboarding(false);
+          }
+
           setDoc(
-            doc(db, "users", user.uid),
+            userDocRef,
             {
               uid: user.uid,
               email: user.email || "",
@@ -3962,6 +3979,10 @@ export default function App() {
         } catch (error) {
           console.error("Failed saving user profile:", error);
         }
+      }
+
+      if (user && storageMode === "database") {
+        // --- PRIVATE PERSISTENT MODE ---
 
         // Hydrate from localStorage first for instant UI response
         try {
@@ -4158,6 +4179,7 @@ export default function App() {
     // Handle Firebase Redirect result (removed as Tauri breakout is preferred)
 
     const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
+      setIsAuthLoading(true);
       syncUserToLocal(user);
       setCurrentUser(user);
       currentUserIdRef.current = user ? user.uid : null;
@@ -4166,7 +4188,7 @@ export default function App() {
       const userCallMe = localStorage.getItem(`cosmi_settings_call_me_${uid}`) || "";
       setCallMe(userCallMe);
       
-      setupListeners(user);
+      await setupListeners(user);
 
       setIsAuthLoading(false);
     });
@@ -4362,7 +4384,9 @@ export default function App() {
   const [chatInput, setChatInput] = useState("");
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
-      const cached = localStorage.getItem("cosmi_selected_model");
+      const cachedRef = localStorage.getItem("cosmi_user_snapshot");
+      const uid = cachedRef ? JSON.parse(cachedRef).uid : "guest";
+      const cached = localStorage.getItem(`cosmi_selected_model_${uid}`) || localStorage.getItem("cosmi_selected_model");
       return cached || "command-a-plus-05-2026";
     } catch {
       return "command-a-plus-05-2026";
@@ -4371,9 +4395,12 @@ export default function App() {
 
   useEffect(() => {
     try {
+      const cachedRef = localStorage.getItem("cosmi_user_snapshot");
+      const uid = cachedRef ? JSON.parse(cachedRef).uid : "guest";
+      localStorage.setItem(`cosmi_selected_model_${uid}`, selectedModel);
       localStorage.setItem("cosmi_selected_model", selectedModel);
     } catch {}
-  }, [selectedModel]);
+  }, [selectedModel, currentUser]);
   const [thinkingLevel, setThinkingLevel] = useState<'Standard' | 'Deep' | 'Instant'>('Standard');
   const [isAgentModelMenuOpen, setIsAgentModelMenuOpen] = useState(false);
   const [isAgentThinkingMenuOpen, setIsAgentThinkingMenuOpen] = useState(false);
@@ -4429,7 +4456,7 @@ export default function App() {
     const replacement = "";
     const newValue = beforeMention + replacement + afterMention;
 
-    localStorage.setItem('onboarding_citation_note', 'true');
+    setOnboardingTaskComplete('citation_note');
     setAssistantInput(newValue);
     setAgentMentionState({ show: false, query: "", startIndex: -1, selectedIndex: 0 });
 
@@ -5279,10 +5306,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
     if (!textToSend.trim()) return;
 
     if (activeTab.fileId) {
-      localStorage.setItem('onboarding_chat_with_file', 'true');
+      setOnboardingTaskComplete('chat_with_file');
     }
     if (activeTab.type === "chat" && activeTab.folderId) {
-      localStorage.setItem('onboarding_folder_chat', 'true');
+      setOnboardingTaskComplete('folder_chat');
     }
 
     const userMessage: ChatMessage = {
@@ -5545,7 +5572,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         .then((res) => res.json())
                         .then(async (resData) => {
                           if (resData.success && resData.papers) {
-                            localStorage.setItem('onboarding_search_papers', 'true');
+                            setOnboardingTaskComplete('search_papers');
                             setResearchStatus("downloading");
                             const newPapers = await Promise.all(
                               resData.papers.map(async (p: any) => {
@@ -6027,6 +6054,36 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
   if (!currentUser) {
     return <AuthenticationScreen onGoogleSignIn={handleGoogleLogin} />;
+  }
+
+  if (needsOnboarding) {
+    return (
+      <OnboardingScreen 
+        user={currentUser} 
+        onComplete={(firstPrompt) => {
+          setNeedsOnboarding(false);
+          if (firstPrompt.trim()) {
+            const newId = `chat-${Date.now()}`;
+            const newChatTab: Tab = {
+              id: newId,
+              type: "chat",
+              title: "New chat",
+              messages: [],
+            };
+            setTabs((prev) => [...prev, newChatTab]);
+            setActiveTabId(newId);
+            setActiveAssistantTabId(newId);
+            setMessages([]);
+            saveChatToLibrary(currentUser?.uid || "guest", newChatTab);
+
+            // Trigger a message from the initial prompt in the main chat tab
+            setTimeout(() => {
+              handleSendMessage(firstPrompt);
+            }, 600);
+          }
+        }} 
+      />
+    );
   }
 
   return (
@@ -10581,7 +10638,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             transition={{ duration: 0.15, ease: "easeOut" }}
                             className="absolute bottom-full right-0 mb-2 w-[220px] bg-[#1e1e22] border border-zinc-800/80 rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5"
                           >
-                            {modelsList.filter(m => !['mistral-large-latest', 'codestral-latest', 'solar-pro2', 'reka-flash'].includes(m.id)).map((m) => {
+                            {modelsList.filter(m => !['mistral-large-latest', 'codestral-latest', 'solar-pro2', 'reka-flash', 'mimo-v2.5-pro'].includes(m.id)).map((m) => {
                               const isSelected = selectedModel === m.id;
                               return (
                                 <button
@@ -10624,7 +10681,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             >
                               <div className="flex items-center gap-2.5">
                                 <div className="w-4 shrink-0 flex items-center justify-center">
-                                  {['mistral-large-latest', 'codestral-latest', 'solar-pro2', 'reka-flash'].includes(selectedModel) ? (
+                                  {['mistral-large-latest', 'codestral-latest', 'solar-pro2', 'reka-flash', 'mimo-v2.5-pro'].includes(selectedModel) ? (
                                     <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
                                   ) : (
                                     <div className="w-3.5" />
@@ -10654,7 +10711,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     <span className="text-[12px] font-bold text-zinc-400 uppercase tracking-widest ml-1">More Models</span>
                                   </div>
                                   <div className="overflow-y-auto max-h-[300px]">
-                                    {modelsList.filter(m => ['mistral-large-latest', 'codestral-latest', 'solar-pro2', 'reka-flash'].includes(m.id)).map((m) => {
+                                    {modelsList.filter(m => ['mistral-large-latest', 'codestral-latest', 'solar-pro2', 'reka-flash', 'mimo-v2.5-pro'].includes(m.id)).map((m) => {
                                       const isSelected = selectedModel === m.id;
                                       return (
                                         <button
@@ -10862,9 +10919,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
               setShowLinkRenameModal(true);
               setLinkContextMenu(null);
             }}
-            className="w-full text-left px-3 py-2.5 hover:bg-[#202022] transition-colors flex items-center gap-2 text-zinc-200 cursor-pointer"
+            className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white transition-colors flex items-center gap-3 text-zinc-300 cursor-pointer text-xs font-medium group"
           >
-            <Edit2 size={13} />
+            <Edit2 size={14} className="text-zinc-500 group-hover:text-zinc-300" />
             <span>Rename hyperlink</span>
           </button>
 
@@ -10885,9 +10942,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
               }
               setLinkContextMenu(null);
             }}
-            className="w-full text-left px-3 py-2.5 hover:bg-[#202022] transition-colors flex items-center gap-2 text-zinc-200 cursor-pointer border-t border-[#1a1a1c]"
+            className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white transition-colors flex items-center gap-3 text-zinc-300 cursor-pointer border-t border-[#1a1a1c] mt-1 text-xs font-medium group"
           >
-            <ExternalLink size={13} />
+            <ExternalLink size={14} className="text-zinc-500 group-hover:text-zinc-300" />
             <span>Open link</span>
           </button>
 
@@ -10987,9 +11044,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   }
                   setTableContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 hover:bg-[#202022] hover:text-white transition-colors flex items-center gap-2 cursor-pointer text-zinc-300"
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white transition-colors flex items-center gap-3 cursor-pointer text-zinc-300 text-xs font-medium group"
               >
-                <Icon icon="ph:arrow-fat-up-light" className="w-[14px] h-[14px] text-zinc-400" />
+                <Icon icon="ph:arrow-fat-up-light" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
                 <span>Insert Row Above</span>
               </button>
 
@@ -11029,13 +11086,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   }
                   setTableContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 hover:bg-[#202022] hover:text-white transition-colors flex items-center gap-2 cursor-pointer text-zinc-300"
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white transition-colors flex items-center gap-3 cursor-pointer text-zinc-300 text-xs font-medium group"
               >
-                <Icon icon="ph:arrow-fat-down-light" className="w-[14px] h-[14px] text-zinc-400" />
+                <Icon icon="ph:arrow-fat-down-light" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
                 <span>Insert Row Below</span>
               </button>
 
-              <div className="h-[1px] bg-[#2d2d30] my-1" />
+              <div className="h-[1px] bg-[#2d2d30] my-1 mx-1" />
 
               <button
                 onClick={(e) => {
@@ -11085,9 +11142,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   }
                   setTableContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 hover:bg-[#202022] hover:text-white transition-colors flex items-center gap-2 cursor-pointer text-zinc-300"
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white transition-colors flex items-center gap-3 cursor-pointer text-zinc-300 text-xs font-medium group"
               >
-                <Icon icon="ph:arrow-fat-left-light" className="w-[14px] h-[14px] text-zinc-400" />
+                <Icon icon="ph:arrow-fat-left-light" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
                 <span>Insert Column Left</span>
               </button>
 
@@ -11139,13 +11196,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   }
                   setTableContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 hover:bg-[#202022] hover:text-white transition-colors flex items-center gap-2 cursor-pointer text-zinc-300"
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#27272a] hover:text-white transition-colors flex items-center gap-3 cursor-pointer text-zinc-300 text-xs font-medium group"
               >
-                <Icon icon="ph:arrow-fat-right-light" className="w-[14px] h-[14px] text-zinc-400" />
+                <Icon icon="ph:arrow-fat-right-light" className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300" />
                 <span>Insert Column Right</span>
               </button>
 
-              <div className="h-[1px] bg-[#2d2d30] my-1" />
+              <div className="h-[1px] bg-[#2d2d30] my-1 mx-1" />
 
               <button
                 onClick={(e) => {
@@ -11173,9 +11230,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   }
                   setTableContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 hover:bg-[#202022] text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-2 cursor-pointer"
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-red-500/10 text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-3 cursor-pointer text-xs font-medium group"
               >
-                <Icon icon="ph:minus" className="w-[14px] h-[14px]" />
+                <Icon icon="ph:minus" className="w-4 h-4" />
                 <span>Remove Current Row</span>
               </button>
 
@@ -11222,13 +11279,13 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   }
                   setTableContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 hover:bg-[#202022] text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-2 cursor-pointer"
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-red-500/10 text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-3 cursor-pointer text-xs font-medium group"
               >
-                <Icon icon="ph:columns-light" className="w-[14px] h-[14px]" />
+                <Icon icon="ph:columns-light" className="w-4 h-4" />
                 <span>Remove Current Column</span>
               </button>
 
-              <div className="h-[1px] bg-[#2d2d30] my-1" />
+              <div className="h-[1px] bg-[#2d2d30] my-1 mx-1" />
             </>
           )}
 
@@ -11254,9 +11311,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
               }
               setTableContextMenu(null);
             }}
-            className="w-full text-left px-3 py-2.5 hover:bg-[#202022] text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-2 cursor-pointer font-semibold"
+            className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-red-500/10 text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-3 cursor-pointer text-xs font-semibold group"
           >
-            <Icon icon="ph:trash" className="w-[14px] h-[14px]" />
+            <Icon icon="ph:trash" className="w-4 h-4" />
             <span>Remove Entire Table</span>
           </button>
         </div>

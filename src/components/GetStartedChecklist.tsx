@@ -1,5 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Icon } from '@iconify/react';
+import { auth } from '../firebase';
+
+const getOnboardingKey = (key: string) => {
+  const uid = auth.currentUser?.uid;
+  return uid ? `onboarding_${key}_${uid}` : `onboarding_${key}`;
+};
 
 export const GetStartedChecklist: React.FC = () => {
   const [tasks, setTasks] = useState({
@@ -14,12 +20,12 @@ export const GetStartedChecklist: React.FC = () => {
   useEffect(() => {
     const loadTasks = () => {
       setTasks({
-        uploadFile: localStorage.getItem('onboarding_upload_file') === 'true',
-        chatFile: localStorage.getItem('onboarding_chat_with_file') === 'true',
-        createNote: localStorage.getItem('onboarding_create_note') === 'true',
-        searchPapers: localStorage.getItem('onboarding_search_papers') === 'true',
-        folderChat: localStorage.getItem('onboarding_folder_chat') === 'true',
-        citationNote: localStorage.getItem('onboarding_citation_note') === 'true',
+        uploadFile: localStorage.getItem(getOnboardingKey('upload_file')) === 'true',
+        chatFile: localStorage.getItem(getOnboardingKey('chat_with_file')) === 'true',
+        createNote: localStorage.getItem(getOnboardingKey('create_note')) === 'true',
+        searchPapers: localStorage.getItem(getOnboardingKey('search_papers')) === 'true',
+        folderChat: localStorage.getItem(getOnboardingKey('folder_chat')) === 'true',
+        citationNote: localStorage.getItem(getOnboardingKey('citation_note')) === 'true',
       });
     };
 

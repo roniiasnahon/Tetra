@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { getUserFriendlyErrorMessage } from '../lib/error-utils';
 import { showToast } from './Toast';
 import { AudioVisualizerPlayer } from './AudioVisualizerPlayer';
 import { Icon } from './SolarIcon';
@@ -427,7 +428,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       }
     } catch (err: any) {
       console.error("Notes generation error:", err);
-      showToast(err?.message || "Notes generation failed.", "error");
+      showToast(getUserFriendlyErrorMessage(err), "error");
     } finally {
       setIsGeneratingNotes(false);
     }
@@ -585,7 +586,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         throw new Error(data.error || "Upload response success false");
       }
     } catch (err: any) {
-      const msg = err.message || "Error uploading attachment";
+      const msg = getUserFriendlyErrorMessage(err);
       setAttachmentError(msg);
       showToast(`Attachment upload failed: ${msg}`, 'error', 4000, toastId);
     } finally {
@@ -637,7 +638,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       setQuizHistory({});
       showToast('AI assessment ready! Test your understanding.', 'success');
     } catch (err: any) {
-      const errMsg = err.message || 'Error executing AI generation request.';
+      const errMsg = getUserFriendlyErrorMessage(err);
       setQuizError(errMsg);
       showToast(`Failed to generate assessment: ${errMsg}`, 'error');
     } finally {

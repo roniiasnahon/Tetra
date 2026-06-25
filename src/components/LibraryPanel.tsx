@@ -1376,7 +1376,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                           dbSetPaper({ ...paper, folderId: "" });
                                           setActiveMoveFolderDropdown(null);
                                         }}
-                                        className="w-full flex items-center px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer text-left font-medium"
+                                        className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer text-left font-medium group"
                                       >
                                         {lt("library", "Library")}
                                       </button>
@@ -1387,7 +1387,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                             dbSetPaper({ ...paper, folderId: folder.id });
                                             setActiveMoveFolderDropdown(null);
                                           }}
-                                          className="w-full flex items-center px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer text-left truncate font-medium"
+                                          className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer text-left truncate font-medium group"
                                         >
                                           {folder.name}
                                         </button>
