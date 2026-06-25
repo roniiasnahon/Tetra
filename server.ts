@@ -545,8 +545,27 @@ async function robustDownloadPdf(url: string): Promise<Buffer> {
 async function attemptBypassDownload(url: string): Promise<Buffer> {
   try {
     const buffer = await robustDownloadPdf(url);
-    const magic = buffer.toString("utf-8", 0, 4);
-    if (magic === "%PDF" || buffer.length > 100) {
+    const sniffed = sniffMimeType(buffer);
+
+    // If it's explicitly a PDF, we are good.
+    if (sniffed.mimetype === "application/pdf") {
+      return buffer;
+    }
+
+    // If it's HTML, it means robustDownloadPdf failed to find a direct PDF even after crawling
+    if (sniffed.mimetype === "text/html") {
+      const titleMatch = buffer.toString("utf-8").match(/<title>([^<]+)<\/title>/i);
+      const pageTitle = titleMatch ? titleMatch[1] : "Unknown HTML Page";
+      
+      if (pageTitle.toLowerCase().includes("radware") || pageTitle.toLowerCase().includes("captcha") || pageTitle.toLowerCase().includes("blocked")) {
+        throw new Error(`Access blocked by security filter (Radware/Captcha) at the source: ${pageTitle}`);
+      }
+      
+      throw new Error(`Downloaded content is a web page ("${pageTitle}"), not a PDF. The source might be behind a login or proxy.`);
+    }
+
+    // Fallback for other types if they are large enough to be something useful (though we usually want PDFs here)
+    if (buffer.length > 100) {
       return buffer;
     }
     throw new Error("Downloaded file is empty or not a valid format");

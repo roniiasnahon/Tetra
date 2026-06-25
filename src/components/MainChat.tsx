@@ -874,6 +874,8 @@ export const MainChat: React.FC<MainChatProps> = ({
                                 "solar-pro2",
                                 "reka-flash",
                                 "mimo-v2.5-pro",
+                                "mercury-2",
+                                "command-a-plus-05-2026",
                               ].includes(m.id),
                           )
                           .map((m) => {
@@ -938,6 +940,8 @@ export const MainChat: React.FC<MainChatProps> = ({
                                 "solar-pro2",
                                 "reka-flash",
                                 "mimo-v2.5-pro",
+                                "mercury-2",
+                                "command-a-plus-05-2026",
                               ].includes(selectedModel) ? (
                                 <Icon
                                   icon="ph:check"
@@ -975,6 +979,8 @@ export const MainChat: React.FC<MainChatProps> = ({
                                     "solar-pro2",
                                     "reka-flash",
                                     "mimo-v2.5-pro",
+                                    "mercury-2",
+                                    "command-a-plus-05-2026",
                                   ].includes(m.id),
                                 )
                                 .map((m) => {

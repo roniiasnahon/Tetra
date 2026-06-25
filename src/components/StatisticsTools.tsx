@@ -470,6 +470,16 @@ export function StatisticsTools({
         setPdfFileName(file.name);
         
         const arrayBuffer = await file.arrayBuffer();
+        
+        // Robust Header Validation
+        const header = new TextDecoder().decode(new Uint8Array(arrayBuffer.slice(0, 50)));
+        if (!header.includes("%PDF-")) {
+          if (header.includes("<head") || header.includes("<title") || header.includes("<!DOCTYPE")) {
+            throw new Error("Invalid PDF structure: This appears to be a web page (HTML) rather than a PDF document.");
+          }
+          throw new Error("Invalid PDF structure: File does not start with %PDF- header.");
+        }
+
         const loadingTask = pdfjs.getDocument({
           data: arrayBuffer,
           cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
@@ -917,6 +927,16 @@ export function StatisticsTools({
          }
       } else if (fileExt === '.pdf') {
          const arrayBuffer = await file.arrayBuffer();
+
+         // Robust Header Validation
+         const header = new TextDecoder().decode(new Uint8Array(arrayBuffer.slice(0, 50)));
+         if (!header.includes("%PDF-")) {
+           if (header.includes("<head") || header.includes("<title") || header.includes("<!DOCTYPE")) {
+             throw new Error("Invalid PDF structure: This appears to be a web page (HTML) rather than a PDF document.");
+           }
+           throw new Error("Invalid PDF structure: File does not start with %PDF- header.");
+         }
+
          const loadingTask = pdfjs.getDocument({
            data: arrayBuffer,
            cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,

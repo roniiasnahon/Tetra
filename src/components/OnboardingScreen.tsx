@@ -156,7 +156,7 @@ export function OnboardingScreen({ user, onComplete }: OnboardingScreenProps) {
       <div className="hidden md:flex md:w-[42%] bg-[#030303] border-r border-[#18181b] flex-col justify-between p-12 relative overflow-hidden">
         {/* Background Image: Onboarding.jpg dimmed */}
         <img
-          src="/Onboarding.jpg"
+          src="Onboarding.jpg"
           alt="Onboarding Background"
           className="absolute inset-0 w-full h-full object-cover opacity-20 pointer-events-none z-0"
           referrerPolicy="no-referrer"

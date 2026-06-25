@@ -729,9 +729,30 @@ const getOrCreateCachedPdf = async (fileId: string): Promise<string> => {
       // If not cached persistently, fetch, cache, and return local object URL
       const response = await fetch(fileUrl);
       if (response.ok) {
-        // Save a clone to Cache Storage for next time
-        await cache.put(fileUrl, response.clone());
         const blob = await response.blob();
+        
+        // Robust Header Validation: Ensure it's a valid PDF before caching
+        const buffer = await blob.slice(0, 1024).arrayBuffer();
+        const header = new TextDecoder().decode(new Uint8Array(buffer));
+        if (!header.includes("%PDF-")) {
+          console.error(`Invalid PDF detected at ${fileUrl}. Header: ${header.substring(0, 40)}`);
+          if (header.includes("<head") || header.includes("<title") || header.includes("<!DOCTYPE")) {
+            if (header.toLowerCase().includes("radware") || header.toLowerCase().includes("captcha")) {
+              throw new Error("Access Blocked: The source website is protected by bot protection (Radware). Try downloading the PDF manually and uploading it here.");
+            }
+            throw new Error("Invalid PDF: The server returned a web page instead of a document. This can happen if the link is a landing page or requires a login.");
+          }
+          throw new Error("Invalid PDF structure: The file does not start with the expected PDF header (%PDF-).");
+        }
+
+        // Save a clone to Cache Storage for next time
+        const reconstructedResponse = new Response(blob, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers
+        });
+        await cache.put(fileUrl, reconstructedResponse);
+
         const objUrl = URL.createObjectURL(blob);
         const win = window as any;
         if (win.__pdfMemoryCache) {
@@ -7140,6 +7161,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                   setIsProfileDropdownOpen(false);
                                   setIsLoggingOut(true);
                                   
+                                  // Instantly remove snapshot to prevent account leakage
+                                  localStorage.removeItem("cosmi_user_snapshot");
+
                                   // Instantly switch memory scope to guest and reset states to prevent any leaks
                                   loadedUserIdRef.current = "guest";
                                   setFolders([{ id: "f1", name: "My Research", createdAt: Date.now() - 172800000 }]);
@@ -7153,7 +7177,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     try {
                                       await signOut(auth);
                                       setIsLoggingOut(false);
-                                      localStorage.removeItem("cosmi_user_snapshot");
                                     } catch (err) {
                                       console.error("Sign out error:", err);
                                       setIsLoggingOut(false);
