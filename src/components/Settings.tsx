@@ -74,19 +74,24 @@ export const Settings = ({
     return localStorage.getItem(`cosmi_settings_full_name_${uid}`) || currentUser?.displayName || "";
   });
   const [workType, setWorkType] = useState(() => {
-    return localStorage.getItem("cosmi_settings_work_desc") || "Other";
+    const uid = currentUser?.uid || "guest";
+    return localStorage.getItem(`cosmi_settings_work_desc_${uid}`) || "Other";
   });
   const [instructions, setInstructions] = useState(() => {
-    return localStorage.getItem("cosmi_settings_system_instructions") || "";
+    const uid = currentUser?.uid || "guest";
+    return localStorage.getItem(`cosmi_settings_system_instructions_${uid}`) || "";
   });
   const [explainStyle, setExplainStyle] = useState(() => {
-    return localStorage.getItem("cosmi_settings_explain_style") || "Standard";
+    const uid = currentUser?.uid || "guest";
+    return localStorage.getItem(`cosmi_settings_explain_style_${uid}`) || "Standard";
   });
   const [writeStyle, setWriteStyle] = useState(() => {
-    return localStorage.getItem("cosmi_settings_write_style") || "Standard";
+    const uid = currentUser?.uid || "guest";
+    return localStorage.getItem(`cosmi_settings_write_style_${uid}`) || "Standard";
   });
   const [personality, setPersonality] = useState(() => {
-    return localStorage.getItem("cosmi_settings_personality") || "Success Student Mentor";
+    const uid = currentUser?.uid || "guest";
+    return localStorage.getItem(`cosmi_settings_personality_${uid}`) || "Success Student Mentor";
   });
 
   // Custom Dropdown Open States
@@ -158,7 +163,8 @@ export const Settings = ({
   }, [currentUser]);
 
   const [customAvatar, setCustomAvatar] = useState(() => {
-    return localStorage.getItem("cosmi_settings_avatar_url") || "";
+    const uid = currentUser?.uid || "guest";
+    return localStorage.getItem(`cosmi_settings_avatar_url_${uid}`) || "";
   });
   const [isSavingAll, setIsSavingAll] = useState(false);
 
@@ -183,13 +189,15 @@ export const Settings = ({
       const uid = currentUser?.uid || "guest";
       localStorage.setItem(`cosmi_settings_full_name_${uid}`, fullName);
       localStorage.setItem(`cosmi_settings_call_me_${uid}`, callMe);
+      // Deprecated global keys (still setting for backward compatibility if needed, but scoping is preferred)
       localStorage.setItem("cosmi_settings_full_name", fullName);
       localStorage.setItem("cosmi_settings_call_me", callMe);
-      localStorage.setItem("cosmi_settings_work_desc", workType);
-      localStorage.setItem("cosmi_settings_system_instructions", instructions);
-      localStorage.setItem("cosmi_settings_explain_style", explainStyle);
-      localStorage.setItem("cosmi_settings_write_style", writeStyle);
-      localStorage.setItem("cosmi_settings_personality", personality);
+      
+      localStorage.setItem(`cosmi_settings_work_desc_${uid}`, workType);
+      localStorage.setItem(`cosmi_settings_system_instructions_${uid}`, instructions);
+      localStorage.setItem(`cosmi_settings_explain_style_${uid}`, explainStyle);
+      localStorage.setItem(`cosmi_settings_write_style_${uid}`, writeStyle);
+      localStorage.setItem(`cosmi_settings_personality_${uid}`, personality);
       localStorage.setItem("cosmi_settings_appearance", appearanceTheme);
       localStorage.setItem("cosmi_settings_save_history", saveHistory.toString());
       localStorage.setItem("cosmi_settings_allow_training", allowTraining.toString());
@@ -209,9 +217,9 @@ export const Settings = ({
       setStorageMode(localStorageMode);
 
       if (customAvatar) {
-        localStorage.setItem("cosmi_settings_avatar_url", customAvatar);
+        localStorage.setItem(`cosmi_settings_avatar_url_${uid}`, customAvatar);
       } else {
-        localStorage.removeItem("cosmi_settings_avatar_url");
+        localStorage.removeItem(`cosmi_settings_avatar_url_${uid}`);
       }
 
       if (auth.currentUser && fullName && fullName !== auth.currentUser.displayName) {

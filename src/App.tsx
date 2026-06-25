@@ -6910,7 +6910,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       <div className="w-6 h-6 rounded-full bg-[#27272a] flex-shrink-0 flex items-center justify-center overflow-hidden border border-[#3f3f46]">
                         <img
                           src={
-                            localStorage.getItem("cosmi_settings_avatar_url") ||
+                            localStorage.getItem(`cosmi_settings_avatar_url_${currentUser?.uid || "guest"}`) ||
                             currentUser.photoURL ||
                             `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(currentUser.email || "Ron")}`
                           }
@@ -6949,7 +6949,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               <div className="w-10 h-10 rounded-full bg-[#27272a] flex-shrink-0 flex items-center justify-center overflow-hidden border border-[#3f3f46]">
                                 <img
                                   src={
-                                    localStorage.getItem("cosmi_settings_avatar_url") ||
+                                    localStorage.getItem(`cosmi_settings_avatar_url_${currentUser?.uid || "guest"}`) ||
                                     currentUser.photoURL ||
                                     `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(currentUser.email || "Ron")}`
                                   }
@@ -11671,9 +11671,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <div className="flex items-center justify-between py-1 px-1 rounded-lg">
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center shrink-0 border border-[#27272a] overflow-hidden text-[#e4e4e7]">
-                      {localStorage.getItem("cosmi_settings_avatar_url") || currentUser?.photoURL ? (
+                      {localStorage.getItem(`cosmi_settings_avatar_url_${currentUser?.uid || "guest"}`) || currentUser?.photoURL ? (
                         <img
-                          src={localStorage.getItem("cosmi_settings_avatar_url") || currentUser?.photoURL || ""}
+                          src={localStorage.getItem(`cosmi_settings_avatar_url_${currentUser?.uid || "guest"}`) || currentUser?.photoURL || ""}
                           alt="You"
                           className="w-full h-full object-cover"
                           referrerPolicy="no-referrer"
