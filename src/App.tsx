@@ -7247,7 +7247,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
           </div>
 
           {/* Right Header Navigation & Panel Controls */}
-          {!isAssistantOpen && (
+          {!isAssistantOpen && activeTab.type !== "chat" && (
             <div className={`absolute bottom-[3px] z-20 flex items-center [-webkit-app-region:no-drag] ${isDesktopApp ? "right-[145px]" : "right-2"}`}>
               <button
                 onClick={() => setIsAssistantOpen(true)}
