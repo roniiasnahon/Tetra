@@ -955,32 +955,51 @@ export function StatisticsTools({
          }
          textContent = fullText;
       } else {
-         // 1. Upload the file to memory/disk for .docx / specialized server parsing
-         const formData = new FormData();
-         formData.append("file", file);
-         
-         const uploadRes = await fetch("/api/upload", {
-           method: "POST",
-           body: formData,
-         });
+         // 1. Upload the file to memory/disk with local fallback
+         let fileId = "";
+         let uploadData;
+         try {
+            const formData = new FormData();
+            formData.append("file", file);
+            
+            const uploadRes = await fetch("/api/upload", {
+              method: "POST",
+              body: formData,
+            });
 
          const uploadText = await uploadRes.text();
-         if (!uploadRes.ok) {
-            if (uploadText.trim().startsWith("<!doctype") || uploadText.trim().startsWith("<html")) {
-               throw new Error(`Upload failed (Status ${uploadRes.status}): Server returned an HTML error page. (It might be 413 Payload Too Large from Nginx).`);
+         if (!uploadRes.ok || uploadText.trim().startsWith("<!doctype") || uploadText.trim().startsWith("<html")) {
+            throw new Error("Server upload returned an error page.");
+         }
+         
+         uploadData = JSON.parse(uploadText);
+         fileId = uploadData.fileId;
+         } catch (uploadErr) {
+            console.warn("Server upload failed, falling back to local file reader:", uploadErr);
+            fileId = "local-" + Date.now();
+            if (file.name.toLowerCase().endsWith(".txt") || file.name.toLowerCase().endsWith(".md") || file.name.toLowerCase().endsWith(".html") || file.name.toLowerCase().endsWith(".htm")) {
+               const reader = new FileReader();
+               const text = await new Promise<string>((resolve) => {
+                 reader.onload = (e) => resolve((e.target?.result as string) || "");
+                 reader.readAsText(file);
+               });
+               if (!(window as any).__textMemoryCache) (window as any).__textMemoryCache = new Map();
+               (window as any).__textMemoryCache.set(fileId, text);
+            } else {
+               throw new Error("Could not upload file to server, and local fallback parsing is not supported for this file type.");
             }
-            throw new Error(`Upload failed (Status ${uploadRes.status}): ${uploadText.substring(0, 50)}`);
          }
          
-         if (uploadText.trim().startsWith("<!doctype") || uploadText.trim().startsWith("<html")) {
-           throw new Error(`File upload failed. Express skipped the '/api/upload' POST route and Vite returned 200 OK index.html.`);
-         }
-         
-         const uploadData = JSON.parse(uploadText);
-         const fileId = uploadData.fileId;
-
          // 2. Extract text from the uploaded file
-         const textRes = await fetch(`/api/files/${fileId}/raw-text`);
+         let textRes;
+         if (fileId.startsWith("local-") && typeof window !== "undefined" && (window as any).__textMemoryCache?.has(fileId)) {
+            textRes = {
+               ok: true,
+               text: async () => JSON.stringify({ success: true, text: (window as any).__textMemoryCache.get(fileId) })
+            };
+         } else {
+            textRes = await fetch(`/api/files/${fileId}/raw-text`);
+         }
          if (textRes.ok) {
             const textResText = await textRes.text();
             if (!textResText.trim().startsWith("<!doctype") && !textResText.trim().startsWith("<html")) {

@@ -23,17 +23,7 @@ import mammoth from "mammoth";
 import PDFDocument from "pdfkit";
 import axios from "axios";
 import { parseStringPromise } from "xml2js";
-import { Storage, API } from "megajs";
-// Set up global error listener on megajs global API instance immediately on load to prevent unhandled ECONNRESET process crashes
-try {
-  if (API && (API as any).globalApi) {
-    ((API as any).globalApi as any).on("error", (err: any) => {
-      console.error("[MEGA GLOBAL API ERROR-PREVENTED]", err);
-    });
-  }
-} catch (e: any) {
-  console.warn("Failed to register global megajs API error handler", e.message);
-}
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import zlib from "zlib";
@@ -255,7 +245,7 @@ function cleanAndParseJSON(responseText: string): any {
     return JSON.parse(cleaned);
   } catch (err) {
     // Attempt pattern-matching for a JSON block within the response
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    const jsonMatch = cleaned?.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const candidate = jsonMatch[0];
       try {
@@ -288,12 +278,12 @@ function cleanAndParseJSON(responseText: string): any {
       );
       // Absolute fallback: build a simple plain object by parsing key-values using quick regexes
       const obj: any = {};
-      const titleMatch = cleaned.match(/"title"\s*:\s*"([^"]+)"/i);
-      const authorMatch = cleaned.match(/"author"\s*:\s*"([^"]+)"/i);
-      const summaryMatch = cleaned.match(
+      const titleMatch = cleaned?.match(/"title"\s*:\s*"([^"]+)"/i);
+      const authorMatch = cleaned?.match(/"author"\s*:\s*"([^"]+)"/i);
+      const summaryMatch = cleaned?.match(
         /"summary"\s*:\s*"([\s\S]+?)"\s*(?:,|\})/i,
       );
-      const fileTypeMatch = cleaned.match(/"fileType"\s*:\s*"([^"]+)"/i);
+      const fileTypeMatch = cleaned?.match(/"fileType"\s*:\s*"([^"]+)"/i);
 
       if (titleMatch) obj.title = titleMatch[1];
       if (authorMatch) obj.author = authorMatch[1];
@@ -383,11 +373,11 @@ async function extractDirectPdfFromLandingPage(
   htmlContent: string,
 ): Promise<Buffer | null> {
   try {
-    const matches = htmlContent.match(/href=["']([^"']+)["']/gi) || [];
+    const matches = htmlContent?.match(/href=["']([^"']+)["']/gi) || [];
     const candidateUrls: string[] = [];
 
     for (const match of matches) {
-      const parts = match.match(/href=["']([^"']+)["']/i);
+      const parts = match?.match(/href=["']([^"']+)["']/i);
       if (parts && parts[1]) {
         const link = parts[1];
         const lowerLink = link.toLowerCase();
@@ -578,7 +568,7 @@ async function attemptBypassDownload(url: string): Promise<Buffer> {
       ];
 
       // Try DOI extraction too as DOIs are robust identifiers
-      const doiMatch = url.match(/(10\.\d{4,9}\/[-._;()/:A-Z0-9]+)/i);
+      const doiMatch = url?.match(/(10\.\d{4,9}\/[-._;()/:A-Z0-9]+)/i);
       if (doiMatch) {
         let doi = doiMatch[1];
         if (doi.endsWith(")")) doi = doi.substring(0, doi.length - 1);
@@ -642,6 +632,52 @@ async function attemptBypassDownload(url: string): Promise<Buffer> {
         `[BYPASS] OpenAlex work backup resolution failed:`,
         oaErr.message,
       );
+    }
+
+    // Unpaywall fallback if OpenAlex failed or found nothing
+    const doiMatch = url?.match(/(10\.\d{4,9}\/[-._;()/:A-Z0-9]+)/i);
+    if (doiMatch) {
+      let doi = doiMatch[1];
+      if (doi.endsWith(")")) doi = doi.substring(0, doi.length - 1);
+      try {
+        console.log(`[BYPASS] OpenAlex failed. Querying Unpaywall fallback for DOI: ${doi}`);
+        const unpaywallUrl = `https://api.unpaywall.org/v2/${encodeURIComponent(doi)}?email=asnahonron@gmail.com`;
+        const unpaywallRes = await axios.get(unpaywallUrl, { timeout: 8000 });
+        if (unpaywallRes.data && unpaywallRes.data.is_oa) {
+          const unpaywallPdfLink = unpaywallRes.data.best_oa_location?.url_for_pdf;
+          if (unpaywallPdfLink && unpaywallPdfLink !== url) {
+            console.log(`[BYPASS] Found Unpaywall PDF: ${unpaywallPdfLink}`);
+            try {
+              const buffer = await robustDownloadPdf(unpaywallPdfLink);
+              const magic = buffer.toString("utf-8", 0, 4);
+              if (magic === "%PDF") {
+                console.log(`[BYPASS] Successfully downloaded PDF via Unpaywall PDF URL: ${unpaywallPdfLink}`);
+                return buffer;
+              }
+            } catch (err: any) {
+              console.warn(`[BYPASS] Unpaywall PDF download failed: ${unpaywallPdfLink}`);
+            }
+          }
+          if (unpaywallRes.data.oa_locations) {
+            for (const loc of unpaywallRes.data.oa_locations) {
+              if (loc.url_for_pdf && loc.url_for_pdf !== url && loc.url_for_pdf !== unpaywallPdfLink) {
+                try {
+                  const buffer = await robustDownloadPdf(loc.url_for_pdf);
+                  const magic = buffer.toString("utf-8", 0, 4);
+                  if (magic === "%PDF") {
+                    console.log(`[BYPASS] Successfully downloaded PDF via Unpaywall alternative: ${loc.url_for_pdf}`);
+                    return buffer;
+                  }
+                } catch (e: any) {
+                  // ignore
+                }
+              }
+            }
+          }
+        }
+      } catch (unpaywallErr: any) {
+        console.warn(`[BYPASS] Unpaywall lookup failed: ${unpaywallErr.message}`);
+      }
     }
 
     // Re-throw first error if match/fallback fails
@@ -711,118 +747,60 @@ const ai = new Proxy({} as GoogleGenAI, {
   },
 });
 
-function registerMegaErrorHandler(client: any) {
-  if (!client) return;
-  try {
-    client.on("error", (err: any) => {
-      console.error("[MEGA CLIENT ERROR-CAUGHT]", err);
-    });
-    if (client.api) {
-      (client.api as any).on("error", (err: any) => {
-        console.error("[MEGA API ERROR-CAUGHT]", err);
-      });
-    }
-    if (API && (API as any).globalApi) {
-      ((API as any).globalApi as any).on("error", (err: any) => {
-        console.error("[MEGA GLOBAL API ERROR-CAUGHT]", err);
-      });
-    }
-  } catch (err: any) {
-    console.warn("Failed to register mega error handler:", err.message);
+let r2Client: S3Client | null = null;
+const R2_BUCKET = process.env.R2_BUCKET_NAME || "";
+
+function getR2Client(): S3Client {
+  if (r2Client) return r2Client;
+
+  const accountId = process.env.R2_ACCOUNT_ID?.trim() || "";
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID?.trim() || "";
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim() || "";
+  const customEndpoint = process.env.R2_ENDPOINT?.trim() || "";
+
+  if (!accessKeyId || !secretAccessKey) {
+    const missing = [];
+    if (!accessKeyId) missing.push("R2_ACCESS_KEY_ID");
+    if (!secretAccessKey) missing.push("R2_SECRET_ACCESS_KEY");
+    console.warn(`[STORAGE] Cloudflare R2 credentials missing: ${missing.join(", ")}`);
+    throw new Error(`Cloudflare R2 credentials (${missing.join(", ")}) are missing.`);
   }
+
+  const endpoint = customEndpoint || (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : "");
+
+  if (!endpoint) {
+    console.warn("[STORAGE] Cloudflare R2 endpoint or R2_ACCOUNT_ID must be provided for R2 storage.");
+    throw new Error("Cloudflare R2 endpoint or R2_ACCOUNT_ID must be provided.");
+  }
+
+  console.log(`[STORAGE] Initializing Cloudflare R2 client for bucket: ${R2_BUCKET || "(not set)"}`);
+  r2Client = new S3Client({
+    region: "auto",
+    endpoint: endpoint,
+    credentials: {
+      accessKeyId,
+      secretAccessKey,
+    },
+    forcePathStyle: true,
+  });
+
+  return r2Client;
 }
 
-let megaClient: any = null;
-async function getMegaClient(): Promise<any> {
-  if (megaClient) return megaClient;
-  const rawSession = process.env.MEGA_SESSION_STRING;
-  const email = process.env.MEGA_EMAIL;
-  const password = process.env.MEGA_PASSWORD;
-  const masterKey = process.env.MEGA_MASTER_KEY;
-
-  const session =
-    rawSession && rawSession !== "undefined" && rawSession !== "null"
-      ? rawSession.trim()
-      : null;
-  const hasEmail =
-    email && email !== "undefined" && email !== "null" && email.trim() !== "";
-  const hasPassword =
-    password &&
-    password !== "undefined" &&
-    password !== "null" &&
-    password.trim() !== "";
-
-  if (hasEmail && hasPassword && (!session || !session.startsWith("{"))) {
-    // ALWAYS prefer email & password (unless session is a JSON string with key), because it derives the REAL cryptographic master key!
-    console.log(
-      "[MEGA] Authenticating using email and password to derive correct cryptographic keys...",
-    );
-    megaClient = new Storage({
-      email: email!.trim(),
-      password: password!.trim(),
-    });
-    registerMegaErrorHandler(megaClient);
-    await megaClient.ready;
-    console.log("[MEGA] Successfully authenticated with email/password.");
-  } else if (session) {
-    console.log("[MEGA] Authenticating using session key...");
-    let parsedSession: any = null;
-    try {
-      if (session.startsWith("{")) {
-        parsedSession = JSON.parse(session);
-      }
-    } catch (e: any) {
-      console.warn(
-        "[MEGA] Failed to parse MEGA_SESSION_STRING as JSON:",
-        e.message,
-      );
-    }
-
-    if (parsedSession && parsedSession.key && parsedSession.sid) {
-      console.log(
-        "[MEGA] Successfully restored session with real cryptographic master key from JSON.",
-      );
-      megaClient = Storage.fromJSON(parsedSession);
-      registerMegaErrorHandler(megaClient);
-      await megaClient.ready;
-      megaClient.status = "ready";
-      await megaClient.reload();
-    } else {
-      // It's a raw session ID string. Check if we have MASTER_KEY env var
-      const keyToUse =
-        masterKey && masterKey !== "undefined" && masterKey !== "null"
-          ? masterKey.trim()
-          : Buffer.alloc(16).toString("base64");
-
-      if (!masterKey) {
-        console.warn(
-          "[MEGA] WARNING: Using raw session ID with a blank dummy key. Files uploaded using this session will appear as 'undecrypted' on the MEGA web dashboard unless MEGA_MASTER_KEY or MEGA_EMAIL/MEGA_PASSWORD is set.",
-        );
-      } else {
-        console.log(
-          "[MEGA] Restoring session with raw session ID and retrieved MEGA_MASTER_KEY.",
-        );
-      }
-
-      megaClient = Storage.fromJSON({
-        key: keyToUse,
-        sid: session,
-        name: "User",
-        user: "User",
-        options: {} as any,
-      });
-      registerMegaErrorHandler(megaClient);
-      await megaClient.ready;
-      megaClient.status = "ready";
-      await megaClient.reload();
-    }
-  } else {
-    throw new Error(
-      "Neither MEGA_SESSION_STRING nor MEGA_EMAIL and MEGA_PASSWORD is configured correctly.",
-    );
+async function streamToBuffer(stream: any): Promise<Buffer> {
+  if (Buffer.isBuffer(stream)) {
+    return stream;
   }
-
-  return megaClient;
+  if (stream && typeof stream.transformToByteArray === "function") {
+    const arr = await stream.transformToByteArray();
+    return Buffer.from(arr);
+  }
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: any[] = [];
+    stream.on("data", (chunk: any) => chunks.push(chunk));
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
+    stream.on("error", reject);
+  });
 }
 
 import OpenAI from "openai";
@@ -1014,6 +992,7 @@ TONE & BEHAVIOR:
 OUTPUT FORMATTING REQUIREMENTS:
 You MUST output your ENTIRE response using exactly the following XML-style tags IN THIS EXACT ORDER.
 DO NOT output any plain text outside of these tags. DO NOT explain what the tags do.
+CRITICAL: NEVER generate meta-commentary discussing XML formatting, stray spaces, or tag structure. Just output the clean tags and their contents.
 
 <thought>
 Your detailed, step-by-step reasoning and academic planning.
@@ -1173,44 +1152,36 @@ async function saveFile(
     await writeFile(path.join(UPLOADS_DIR, `${fileId}.bin`), safeBuffer);
     console.log(`[STORAGE] Successfully saved ${fileId} to disk`);
   } catch (diskErr) {
-    console.error(`[STORAGE] Disk save failed for ${fileId}:`, diskErr);
+    console.warn(`[STORAGE] Disk save failed for ${fileId}:`, diskErr);
   }
 
-  // 3. Upload to Mega Storage in Background
+  // 3. Upload to Cloudflare R2 Storage in Background
   (async () => {
     try {
-      const mega = await getMegaClient();
-      console.log(
-        `[STORAGE] Uploading ${fileId} to Mega Storage in background...`,
-      );
-      const uploadBuffer = Buffer.alloc(safeBuffer.length); // extra defensive deep copy for mega
+      const r2 = getR2Client();
+      const bucketName = R2_BUCKET;
+      if (!bucketName) throw new Error("R2_BUCKET_NAME is not configured.");
+
+      console.log(`[STORAGE] Uploading ${fileId} to Cloudflare R2 Storage in background...`);
+      const uploadBuffer = Buffer.alloc(safeBuffer.length);
       safeBuffer.copy(uploadBuffer);
 
-      if (!mega.root) throw new Error("mega.root is undefined, cannot upload");
-      await new Promise<void>((resolve, reject) => {
-        const stream = mega.root.upload(
-          { name: fileId, size: uploadBuffer.length },
-          uploadBuffer,
-          (err: any) => {
-            if (err) return reject(err);
-            resolve();
-          },
-        );
-        // prevent unhandled stream errors in mega from crashing node
-        stream.on("error", (err: any) => {
-          console.warn(
-            `[STORAGE] Stream error during mega upload for ${fileId}`,
-            err.message,
-          );
-        });
-      });
+      await r2.send(
+        new PutObjectCommand({
+          Bucket: bucketName,
+          Key: fileId,
+          Body: uploadBuffer,
+          ContentType: data.mimetype || "application/octet-stream",
+        })
+      );
 
-      console.log(`[STORAGE] Successfully uploaded ${fileId} to Mega Storage`);
+      console.log(`[STORAGE] Successfully persisted ${fileId} to Cloudflare R2 Storage.`);
     } catch (storageErr: any) {
-      console.error(
-        `[STORAGE] Mega Storage upload FAILED for ${fileId}:`,
+      console.warn(
+        `[STORAGE] Cloudflare R2 Storage persistence failed for ${fileId}:`,
         storageErr.message || storageErr,
       );
+      console.warn(`[STORAGE] Note: Using local disk/memory fallback for ${fileId}.`);
     }
   })();
 }
@@ -1245,37 +1216,33 @@ async function getFile(fileId: string) {
     // Not on disk, try storage
   }
 
-  // 3. Try to load from Mega Storage
+  // 3. Try to load from Cloudflare R2 Storage
   try {
-    const mega = await getMegaClient();
-    console.log(`[STORAGE] Fetching ${fileId} from Mega Storage...`);
-    const file = mega.root?.children?.find((f: any) => f.name === fileId);
-    if (file) {
-      const buffer = await new Promise<Buffer>((resolve, reject) => {
-        // In MegaJS, if a callback is passed to download(), it buffers the entire file and passes err, data (Buffer).
-        file.download((err: any, dataOrStream: any) => {
-          if (err) return reject(err);
-          if (Buffer.isBuffer(dataOrStream)) {
-            return resolve(dataOrStream);
-          }
-          // Fallback for older/stream behavior
-          const bufs: Buffer[] = [];
-          dataOrStream.on("data", (chunk: any) => bufs.push(chunk));
-          dataOrStream.on("end", () => resolve(Buffer.concat(bufs)));
-          dataOrStream.on("error", reject);
-        });
-      });
+    const r2 = getR2Client();
+    const bucketName = R2_BUCKET;
+    if (!bucketName) throw new Error("R2_BUCKET_NAME is not configured.");
+
+    console.log(`[STORAGE] Fetching ${fileId} from Cloudflare R2 Storage...`);
+    const response = await r2.send(
+      new GetObjectCommand({
+        Bucket: bucketName,
+        Key: fileId,
+      })
+    );
+
+    if (response.Body) {
+      const buffer = await streamToBuffer(response.Body);
 
       const magic = buffer.toString("utf-8", 0, 5);
       if (!magic.startsWith("%PDF")) {
         console.warn(
-          `[STORAGE] WARNING: Retrieved file ${fileId} from Mega storage is NOT a PDF! Starts with: '${magic.replace(/[^ -~]+/g, "?")}'`,
+          `[STORAGE] WARNING: Retrieved file ${fileId} from Cloudflare R2 storage is NOT a PDF! Starts with: '${magic.replace(/[^ -~]+/g, "?")}'`,
         );
       }
 
       const data = {
         buffer,
-        mimetype: "application/octet-stream",
+        mimetype: response.ContentType || "application/octet-stream",
         originalname: fileId,
       };
 
@@ -1296,13 +1263,13 @@ async function getFile(fileId: string) {
       return data;
     } else {
       console.warn(
-        `[STORAGE] File ${fileId} not found in Mega bucket OR on disk`,
+        `[STORAGE] File ${fileId} not found in Cloudflare R2 bucket or was empty`,
       );
     }
-  } catch (err) {
-    console.error(
-      `[STORAGE] Error retrieving ${fileId} from Mega Storage:`,
-      err,
+  } catch (err: any) {
+    console.warn(
+      `[STORAGE] Error retrieving ${fileId} from Cloudflare R2 Storage:`,
+      err.message || err,
     );
   }
 
@@ -1493,6 +1460,19 @@ How to proceed with this interactive workspace:
 }
 
 const app = express();
+
+// Add request logger for debugging
+app.use((req, res, next) => {
+  if (!req.url.startsWith('/@vite') && !req.url.startsWith('/src') && !req.url.startsWith('/node_modules')) {
+    console.log(`[HTTP] ${req.method} ${req.url}`);
+  }
+  next();
+});
+
+// Health check endpoint
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", time: new Date().toISOString() });
+});
 export { app };
 
 async function startServer() {
@@ -1548,7 +1528,7 @@ async function startServer() {
     next();
   });
 
-  app.use(express.json({ limit: "15mb" }));
+  app.use(express.json({ limit: "100mb" }));
 
   // Helper to retrieve the current Firestore instance
   const getDbInstance = () => {
@@ -2084,7 +2064,7 @@ async function startServer() {
 
   const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 15 * 1024 * 1024 }, // 15MB limit
+    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
   });
 
   // Safe upload route using standard multer middleware
@@ -3008,7 +2988,7 @@ CRITICAL RULES:
               {
                 role: "system",
                 content:
-                  "You are a helpful assistant. Generate an appropriate, natural, and descriptive title based on the user's initial query. Keep it under 9 words. Avoid over-complicating or using overly dry or academic-sounding language unless the query is specifically about an academic paper. Absolutely DO NOT include parenthetical notes, conversational commentary, or any other text—output ONLY the exact title. For casual greetings or brief casual text (e.g., 'yo', 'hi', 'hello', 'hey'), output a simple, clean title like 'New Conversation' or 'Casual Chat'.",
+                  "You are a strict title generator. Generate an appropriate, natural, and descriptive title of maximum 7 words based on the user's initial query. Do NOT include ANY explanation, introduction, conversational text, parentheses, notes, or suggestions. Output ONLY the plain text title, nothing else. For casual greetings or brief casual text (e.g., 'yo', 'hi', 'hello', 'hey'), output a simple, clean title like 'New Conversation' or 'Casual Chat'.",
               },
               {
                 role: "user",
@@ -3033,7 +3013,7 @@ CRITICAL RULES:
                 {
                   role: "system",
                   content:
-                    "You are a helpful assistant. Generate an appropriate, natural, and descriptive title based on the user's initial query. Keep it under 9 words. Avoid over-complicating or using overly dry or academic-sounding language unless the query is specifically about an academic paper. Absolutely DO NOT include parenthetical notes, conversational commentary, or any other text—output ONLY the exact title. For casual greetings or brief casual text (e.g., 'yo', 'hi', 'hello', 'hey'), output a simple, clean title like 'New Conversation' or 'Casual Chat'.",
+                    "You are a strict title generator. Generate an appropriate, natural, and descriptive title of maximum 7 words based on the user's initial query. Do NOT include ANY explanation, introduction, conversational text, parentheses, notes, or suggestions. Output ONLY the plain text title, nothing else. For casual greetings or brief casual text (e.g., 'yo', 'hi', 'hello', 'hey'), output a simple, clean title like 'New Conversation' or 'Casual Chat'.",
                 },
                 {
                   role: "user",
@@ -3054,7 +3034,7 @@ CRITICAL RULES:
                 contents: userQuery,
                 config: {
                   systemInstruction:
-                    "You are a helpful assistant. Generate an appropriate, natural, and descriptive title based on the user's initial query. Keep it under 9 words. Avoid over-complicating or using overly dry or academic-sounding language unless the query is specifically about an academic paper. Absolutely DO NOT include parenthetical notes, conversational commentary, or any other text—output ONLY the exact title. For casual greetings or brief casual text (e.g., 'yo', 'hi', 'hello', 'hey'), output a simple, clean title like 'New Conversation' or 'Casual Chat'.",
+                    "You are a strict title generator. Generate an appropriate, natural, and descriptive title of maximum 7 words based on the user's initial query. Do NOT include ANY explanation, introduction, conversational text, parentheses, notes, or suggestions. Output ONLY the plain text title, nothing else. For casual greetings or brief casual text (e.g., 'yo', 'hi', 'hello', 'hey'), output a simple, clean title like 'New Conversation' or 'Casual Chat'.",
                   temperature: 0,
                 },
               });
@@ -3107,9 +3087,32 @@ CRITICAL RULES:
             .join(" ");
         };
 
-        const rawTitle =
-          titleComponentText.replace(/['"“”\*\.,!?;:]/g, "").trim() ||
-          "Untitled Chat";
+        // Parse and clean up any explanation/commentary that might have leaked from the LLM
+        let cleaned = titleComponentText;
+        
+        // Remove anything in parentheses (e.g. "(Note Since Your Query...)")
+        cleaned = cleaned.replace(/\([^)]*\)/g, "");
+        // Remove anything in square brackets
+        cleaned = cleaned.replace(/\[[^\]]*\]/g, "");
+        
+        // Extract first non-empty line
+        const lines = cleaned.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        cleaned = lines[0] || "";
+
+        // Strip typical labels
+        cleaned = cleaned.replace(/^(title|subject|topic|header|suggestion):\s*/i, "");
+        cleaned = cleaned.replace(/^(here is a title|suggested title):\s*/i, "");
+
+        // Strip punctuation
+        cleaned = cleaned.replace(/['"“”\*\.,!?;:]/g, "").trim();
+
+        // Enforce max 7 words
+        const words = cleaned.split(/\s+/).filter(Boolean);
+        if (words.length > 7) {
+          cleaned = words.slice(0, 7).join(" ");
+        }
+
+        const rawTitle = cleaned.trim() || "Untitled Chat";
         const title = toTitleCase(rawTitle);
         res.json({ title });
       } catch (innerError: any) {
@@ -3464,7 +3467,7 @@ OPTIMIZED SEARCH QUERY:`;
       } else {
         // Fallback to Gemini
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-2.0-flash",
           contents: prompt,
           config: {
             temperature: 0.1,
@@ -3519,8 +3522,8 @@ OPTIMIZED SEARCH QUERY:`;
       const webSearchEnabled = !!webSearch;
 
       let researchContext = "";
-      if (attachment && !attachment.mimetype?.startsWith("image/")) {
-        researchContext += `\n[SPECIAL FOCUS ATTACHMENT]: The user has attached the workspace document "${attachment.fileName}" (ID: ${attachment.fileId}) specifically to prompt this reply. Give absolute highest priority to files/data/claims contained within this file in your response.\n`;
+      if (attachment && attachment.fileId && !attachment.mimetype?.startsWith("image/")) {
+        researchContext += `\n[SPECIAL FOCUS ATTACHMENT]: The user has attached the workspace document "${attachment.fileName || 'Attached File'}" (ID: ${attachment.fileId}) specifically to prompt this reply. Give absolute highest priority to files/data/claims contained within this file in your response.\n`;
         try {
           const fileData = await getFile(attachment.fileId);
           if (fileData) {
@@ -3960,10 +3963,10 @@ Instead, do the following:
 
       // Extract full text sections if available to make them prominent for the AI
       const fullTextSections = userCitationList
-        .filter((c: any) => c.extractedText)
+        .filter((c: any) => c.extractedText || c.fullText)
         .map(
           (c: any) =>
-            `FULL TEXT CONTENT FOR SOURCE "${c.title}" (Use page markers for citations):\n${c.extractedText.substring(0, 30000)}`,
+            `FULL TEXT CONTENT FOR SOURCE "${c.title}" (Use page markers for citations):\n${(c.extractedText || c.fullText || "").substring(0, 30000)}`,
         ) // Limit per source to avoid context overflow
         .join("\n\n---\n\n");
 
@@ -3977,10 +3980,10 @@ RESEARCH CITATIONS SUMMARY (Library):
 ${JSON.stringify(
   userCitationList.map((c: any) => ({
     title: c.title,
-    author: c.author,
-    year: c.added,
+    author: c.author || c.authors,
+    year: c.year || c.added,
     fileId: c.fileId,
-    hasMappedFullText: !!c.extractedText,
+    hasMappedFullText: !!c.extractedText || !!c.fullText,
   })),
   null,
   2,
@@ -4102,7 +4105,10 @@ ${researchContext}
 
       let completionStream;
       let usedGeminiFallback = !!(
-        attachment && attachment.mimetype?.startsWith("image/")
+        attachment &&
+        (attachment.mimetype?.startsWith("image/") ||
+          attachment.mimetype?.includes("pdf") ||
+          (attachment.fileName && attachment.fileName.toLowerCase().endsWith(".pdf")))
       );
       let tryBasetenFirst =
         !usedGeminiFallback && requestedModel === "hokku-iv";
@@ -4113,6 +4119,8 @@ ${researchContext}
         !usedGeminiFallback && requestedModel === "mercury-2";
       let tryXiaomiFirst =
         !usedGeminiFallback && requestedModel === "mimo-v2.5-pro";
+      let tryGroqFirst =
+        !usedGeminiFallback && requestedModel === "llama-3.1-8b-instant";
       let tryMistralFirst =
         !usedGeminiFallback &&
         !tryBasetenFirst &&
@@ -4120,6 +4128,7 @@ ${researchContext}
         !tryRekaFirst &&
         !tryInceptionFirst &&
         !tryXiaomiFirst &&
+        !tryGroqFirst &&
         !requestedModel.includes("cohere") &&
         !requestedModel.includes("command-a");
       let tryCohereFirst =
@@ -4129,6 +4138,7 @@ ${researchContext}
         !tryRekaFirst &&
         !tryInceptionFirst &&
         !tryXiaomiFirst &&
+        !tryGroqFirst &&
         (requestedModel.includes("cohere") ||
           requestedModel.includes("command-a"));
       let mistralModelToUse = "mistral-large-latest";
@@ -4208,7 +4218,52 @@ ${researchContext}
           tryRekaFirst = false;
           tryInceptionFirst = false;
           tryXiaomiFirst = true;
+          tryGroqFirst = false;
           usedGeminiFallback = false;
+        } else if (requestedModel === "llama-3.1-8b-instant") {
+          tryMistralFirst = false;
+          tryCohereFirst = false;
+          tryBasetenFirst = false;
+          tryUpstageFirst = false;
+          tryRekaFirst = false;
+          tryInceptionFirst = false;
+          tryXiaomiFirst = false;
+          tryGroqFirst = true;
+          usedGeminiFallback = false;
+        }
+      }
+
+      if (tryGroqFirst) {
+        try {
+          console.log(`[LLM] Streaming chat with Groq (llama-3.1-8b-instant)...`);
+          const client = getGroqClient();
+          completionStream = await client.chat.completions.create({
+            model: "llama-3.1-8b-instant",
+            messages: messagesPayload,
+            temperature: 0.7,
+            stream: true,
+          });
+        } catch (err: any) {
+          console.warn(`[LLM] Groq streaming failed:`, err.message || err);
+
+          if (
+            err.message?.includes("GROQ_API_KEY") ||
+            err.message?.includes("configured")
+          ) {
+            throw new Error(
+              "GROQ_API_KEY is not defined. Please configure it in your Settings.",
+            );
+          }
+
+          if (requestedModel !== "llama-3.1-8b-instant") {
+            console.warn("[LLM] Falling back to Gemini...");
+            tryGroqFirst = false;
+            usedGeminiFallback = true;
+          } else {
+            throw new Error(
+              `Groq LLM failed: ${err.message || "Unknown error during streaming."}`,
+            );
+          }
         }
       }
 
@@ -4488,7 +4543,8 @@ ${researchContext}
           !tryUpstageFirst &&
           !tryRekaFirst &&
           !tryInceptionFirst &&
-          !tryXiaomiFirst) ||
+          !tryXiaomiFirst &&
+          !tryGroqFirst) ||
         usedGeminiFallback
       ) {
         console.log(`[LLM] Streaming chat with Gemini...`);
@@ -4523,12 +4579,17 @@ ${researchContext}
           }
         }
 
-        if (attachment && attachment.mimetype?.startsWith("image/")) {
+        if (
+          attachment &&
+          (attachment.mimetype?.startsWith("image/") ||
+            attachment.mimetype?.includes("pdf") ||
+            (attachment.fileName && attachment.fileName.toLowerCase().endsWith(".pdf")))
+        ) {
           try {
             const fileData = await getFile(attachment.fileId);
             if (fileData) {
               const base64Data = fileData.buffer.toString("base64");
-              // Find the last user message in geminiContents to attach the image part
+              // Find the last user message in geminiContents to attach the file part
               let addedToLast = false;
               for (let i = geminiContents.length - 1; i >= 0; i--) {
                 if (geminiContents[i].role === "user") {
@@ -4546,7 +4607,7 @@ ${researchContext}
                 geminiContents.push({
                   role: "user",
                   parts: [
-                    { text: "[Attached Photo]" },
+                    { text: "[Attached File]" },
                     {
                       inlineData: {
                         mimeType: fileData.mimetype,
@@ -4557,12 +4618,12 @@ ${researchContext}
                 });
               }
               console.log(
-                `[GEMINI MULTIMODAL] Successfully attached image ${attachment.fileName} size ${fileData.buffer.length} to conversational payload.`,
+                `[GEMINI MULTIMODAL] Successfully attached file ${attachment.fileName} size ${fileData.buffer.length} to conversational payload.`,
               );
             }
           } catch (err: any) {
             console.error(
-              "[GEMINI MULTIMODAL] Error loading attachment for image integration:",
+              "[GEMINI MULTIMODAL] Error loading attachment for integration:",
               err.message || err,
             );
           }
@@ -4653,7 +4714,7 @@ ${researchContext}
       }
 
       // Check if main chat has delegated task to the Mistral Editor Agent
-      const callAgentMatch = mainChatCollectedText.match(
+      const callAgentMatch = mainChatCollectedText?.match(
         /<callEditorAgent>([\s\S]*?)(?:<\/callEditorAgent>|$)/i,
       );
       if (callAgentMatch) {
@@ -4822,7 +4883,7 @@ CRITICAL PROTOCOLS:
 
         const year = entry.publication_year?.toString() || "2026";
         let pdfLink =
-          entry.best_oa_location?.pdf_url || entry.open_access?.oa_url;
+          entry.open_access?.oa_url || entry.best_oa_location?.pdf_url;
 
         // Try to find a direct Arxiv link if the main one isn't Arxiv but it's an Arxiv paper
         if (entry.ids?.arxiv) {
@@ -4871,6 +4932,51 @@ CRITICAL PROTOCOLS:
                     pdfRes = null;
                     continue;
                   }
+                }
+              }
+            }
+
+            // Unpaywall API fallback
+            if (!pdfRes) {
+              const doiClean = entry.doi
+                ? entry.doi.replace(
+                    /^(https?:\/\/)?(www\.)?(dx\.)?doi\.org\//i,
+                    "",
+                  )
+                : null;
+              if (doiClean) {
+                try {
+                  console.log(`[Unpaywall] Direct/OpenAlex fallback download failed. Trying Unpaywall for DOI: ${doiClean}`);
+                  const unpaywallUrl = `https://api.unpaywall.org/v2/${encodeURIComponent(doiClean)}?email=asnahonron@gmail.com`;
+                  const unpaywallRes = await axios.get(unpaywallUrl, { timeout: 8000 });
+                  if (unpaywallRes.data && unpaywallRes.data.is_oa) {
+                    const unpaywallPdfLink = unpaywallRes.data.best_oa_location?.url_for_pdf;
+                    if (unpaywallPdfLink && unpaywallPdfLink !== pdfLink) {
+                      console.log(`[Unpaywall] Found fallback open-access PDF: ${unpaywallPdfLink}`);
+                      try {
+                        pdfRes = await attemptDownload(unpaywallPdfLink);
+                        pdfLink = unpaywallPdfLink;
+                      } catch (e: any) {
+                        console.warn(`[Unpaywall] Failed to download PDF from Unpaywall URL: ${unpaywallPdfLink}`);
+                      }
+                    }
+                    if (!pdfRes && unpaywallRes.data.oa_locations) {
+                      for (const loc of unpaywallRes.data.oa_locations) {
+                        if (loc.url_for_pdf && loc.url_for_pdf !== pdfLink && loc.url_for_pdf !== unpaywallPdfLink) {
+                          try {
+                            await new Promise((resolve) => setTimeout(resolve, 500));
+                            pdfRes = await attemptDownload(loc.url_for_pdf);
+                            pdfLink = loc.url_for_pdf;
+                            break;
+                          } catch (e: any) {
+                            console.warn(`[Unpaywall] Fallback download failed for: ${loc.url_for_pdf}`);
+                          }
+                        }
+                      }
+                    }
+                  }
+                } catch (unpaywallErr: any) {
+                  console.warn(`[Unpaywall] API query failed: ${unpaywallErr.message}`);
                 }
               }
             }
@@ -5109,7 +5215,7 @@ ${textToAnalyze}
         console.log("[QUIZ_GEN_API] Calling Groq Qwen...");
         const client = getGroqClient();
         const completion = await client.chat.completions.create({
-          model: "qwen/qwen3-32b",
+          model: "llama-3.1-8b-instant",
           messages: [
             {
               role: "system",

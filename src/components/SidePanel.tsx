@@ -28,6 +28,16 @@ const mapLucideToMaterialSize = (className: string = '') => {
   return `${sizeClass} ${className}`;
 };
 
+const resolveAttachmentUrl = (id: string) => {
+  if (id.startsWith("local-") && typeof window !== "undefined") {
+    const win = window as any;
+    if (win.__pdfMemoryCache?.has(id)) {
+      return win.__pdfMemoryCache.get(id);
+    }
+  }
+  return `/api/files/${id}`;
+};
+
 const makeIcon = (name: string, fillDefault = false) => {
   return ({ className = '', fill = fillDefault, ...props }: ShimProps) => (
     <MaterialIcon
@@ -163,6 +173,27 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const [isCopied, setIsCopied] = useState(false);
   const [notesSavedStatus, setNotesSavedStatus] = useState<boolean>(false);
   const [isGeneratingNotes, setIsGeneratingNotes] = useState(false);
+  const [thinkingIndex, setThinkingIndex] = useState(0);
+
+  const thinkingLoops = [
+    "Cosmi thinking...",
+    "Cosmi is curating...",
+    "Cosmi is analyzing...",
+    "Cosmi is drafting...",
+    "Cosmi is polishing..."
+  ];
+
+  useEffect(() => {
+    if (!isGeneratingNotes) {
+      setThinkingIndex(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setThinkingIndex((prev) => (prev + 1) % thinkingLoops.length);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [isGeneratingNotes]);
+
   const [isTyping, setIsTyping] = useState(false);
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -586,9 +617,28 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         throw new Error(data.error || "Upload response success false");
       }
     } catch (err: any) {
-      const msg = getUserFriendlyErrorMessage(err);
-      setAttachmentError(msg);
-      showToast(`Attachment upload failed: ${msg}`, 'error', 4000, toastId);
+      console.warn("Attachment server upload failed, falling back to local client cache:", err);
+      const localFileId = "local-" + Date.now();
+      const objectUrl = URL.createObjectURL(file);
+      
+      if (typeof window !== "undefined") {
+        const win = window as any;
+        if (!win.__pdfMemoryCache) win.__pdfMemoryCache = new Map();
+        win.__pdfMemoryCache.set(localFileId, objectUrl);
+      }
+      
+      const newAttachment = {
+        id: localFileId,
+        name: file.name,
+        mimetype: file.type || "application/octet-stream",
+        timestamp: Date.now()
+      };
+
+      const updated = [newAttachment, ...attachments];
+      setAttachments(updated);
+      localStorage.setItem(`attachments_${docStorageKey}`, JSON.stringify(updated));
+      
+      showToast(`Attachment "${file.name}" imported client-side successfully`, 'success', 3000, toastId);
     } finally {
       setIsUploadingAttachment(false);
       // Reset input value
@@ -845,7 +895,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
           <div className="flex flex-col flex-1 min-h-0 bg-transparent text-[13px]">
             <div className="px-5 py-4 flex items-center justify-between border-b border-zinc-800/50">
               <span className="text-[11px] font-bold text-zinc-200 uppercase tracking-[0.15em]">Annotations</span>
-              <span className="text-[10px] text-zinc-500 font-mono font-bold tracking-tighter uppercase">{annotations.length} items</span>
+              <span className="text-[10px] text-zinc-500 font-bold uppercase">{annotations.length} items</span>
             </div>
             
             {annotations.length === 0 ? (
@@ -943,12 +993,12 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 ) : (
                   <img src="/cosmi.png" alt="Cosmi" className="w-3.5 h-3.5 object-contain shrink-0" referrerPolicy="no-referrer" />
                 )}
-                <span>{isGeneratingNotes ? "Cosmi thinking..." : isTyping ? "Writing..." : "Let Cosmi make your notes"}</span>
+                <span>{isGeneratingNotes ? thinkingLoops[thinkingIndex] : isTyping ? "Writing..." : "Let Cosmi make your notes"}</span>
               </button>
 
               <div className="flex items-center gap-1.5 text-[11px]">
                 {isTyping && (
-                  <span className="text-zinc-500 font-mono text-[10px] mr-1.5 animate-pulse">
+                  <span className="text-zinc-500 text-[10.5px] mr-1.5 animate-pulse font-sans font-medium tracking-tight">
                     Streaming...
                   </span>
                 )}
@@ -982,41 +1032,41 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             {isGeneratingNotes ? (
               <div className="flex-1 p-5 space-y-6 overflow-y-auto select-none">
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2">
+                  <div className="hidden items-center gap-2">
                     <div className="w-3.5 h-3.5 bg-zinc-800 rounded-full flex items-center justify-center shrink-0">
                       <span className="w-1.5 h-1.5 bg-zinc-600 rounded-full animate-ping" />
                     </div>
                     <span className="text-[10.5px] font-mono font-medium text-zinc-500 uppercase tracking-wider">Generating notes...</span>
                   </div>
-                  <div className="h-5 bg-zinc-800 rounded w-11/12"></div>
+                  <div className="h-5 shimmer-skeleton rounded w-11/12"></div>
                 </div>
 
                 {/* Section 1 skeleton: Executive summary */}
                 <div className="space-y-2.5">
-                  <div className="h-3.5 bg-zinc-800 rounded w-1/3"></div>
+                  <div className="h-3.5 shimmer-skeleton rounded w-1/3"></div>
                   <div className="space-y-1.5 pl-1">
-                    <div className="h-2.5 bg-zinc-800/60 rounded w-full"></div>
-                    <div className="h-2.5 bg-zinc-800/60 rounded w-11/12"></div>
-                    <div className="h-2.5 bg-zinc-800/60 rounded w-5/6"></div>
+                    <div className="h-2.5 shimmer-skeleton-subtle rounded w-full"></div>
+                    <div className="h-2.5 shimmer-skeleton-subtle rounded w-11/12"></div>
+                    <div className="h-2.5 shimmer-skeleton-subtle rounded w-5/6"></div>
                   </div>
                 </div>
 
                 {/* Section 2 skeleton: Core Concepts */}
                 <div className="space-y-3 pt-2">
-                  <div className="h-3.5 bg-zinc-800 rounded w-1/4"></div>
+                  <div className="h-3.5 shimmer-skeleton rounded w-1/4"></div>
                   <div className="space-y-2">
                     <div className="flex items-start gap-2 pl-1">
                       <div className="w-2 h-2 bg-zinc-800 rounded-full mt-1.5 shrink-0" />
                       <div className="flex-1 space-y-1">
-                        <div className="h-2.5 bg-zinc-800/60 rounded w-11/12"></div>
-                        <div className="h-2 bg-zinc-800/40 rounded w-3/4"></div>
+                        <div className="h-2.5 shimmer-skeleton-subtle rounded w-11/12"></div>
+                        <div className="h-2 shimmer-skeleton-muted rounded w-3/4"></div>
                       </div>
                     </div>
                     <div className="flex items-start gap-2 pl-1">
                       <div className="w-2 h-2 bg-zinc-800 rounded-full mt-1.5 shrink-0" />
                       <div className="flex-1 space-y-1">
-                        <div className="h-2.5 bg-zinc-800/60 rounded w-5/6"></div>
-                        <div className="h-2 bg-zinc-800/40 rounded w-2/3"></div>
+                        <div className="h-2.5 shimmer-skeleton-subtle rounded w-5/6"></div>
+                        <div className="h-2 shimmer-skeleton-muted rounded w-2/3"></div>
                       </div>
                     </div>
                   </div>
@@ -1024,10 +1074,10 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
                 {/* Section 3 skeleton: Key takeaways */}
                 <div className="space-y-2.5 pt-2">
-                  <div className="h-3.5 bg-zinc-800 rounded w-1/3"></div>
+                  <div className="h-3.5 shimmer-skeleton rounded w-1/3"></div>
                   <div className="space-y-1.5 pl-1">
-                    <div className="h-2 bg-zinc-800/40 rounded w-5/6"></div>
-                    <div className="h-2 bg-zinc-800/40 rounded w-11/12"></div>
+                    <div className="h-2 shimmer-skeleton-muted rounded w-5/6"></div>
+                    <div className="h-2 shimmer-skeleton-muted rounded w-11/12"></div>
                   </div>
                 </div>
               </div>
@@ -1149,7 +1199,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         {activeSubTab === 'sources' && (
           <div className="flex flex-col flex-1">
             <div className="px-4 pt-4 pb-2 flex justify-between items-center bg-transparent">
-              <span className="text-[11px] font-mono tracking-wider uppercase text-zinc-400 font-medium flex-1">Sources ({sources.length})</span>
+              <span className="text-[11px] tracking-wider uppercase text-zinc-400 font-medium flex-1">Sources ({sources.length})</span>
               <button 
                 onClick={() => setIsAddSourceModalOpen(true)}
                 className="p-1 hover:bg-[#1a1a1c] rounded-md cursor-pointer transition-all text-[#a1a1aa] hover:text-[#f4f4f5]"
@@ -1191,7 +1241,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                         />
                         <div className="min-w-0 flex-1">
                           <div className="font-semibold text-zinc-200 truncate leading-tight">{src.title}</div>
-                          <div className="text-[10px] text-zinc-500 font-mono truncate mt-0.5">{host}</div>
+                          <div className="text-[10px] text-zinc-500 truncate mt-0.5">{host}</div>
                         </div>
                       </div>
                       
@@ -1526,7 +1576,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
                         <div className="flex items-center gap-1 shrink-0">
                           <a 
-                            href={`/api/files/${att.id}`}
+                            href={resolveAttachmentUrl(att.id)}
                             download={att.name}
                             className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors"
                             title="Download reference"
@@ -1546,18 +1596,18 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                       {/* Display players/previews dynamically */}
                       {isAudio && (
                         <div className="pt-2 border-t border-zinc-900/40">
-                          <AudioVisualizerPlayer src={`/api/files/${att.id}`} />
+                          <AudioVisualizerPlayer src={resolveAttachmentUrl(att.id)} />
                         </div>
                       )}
 
                       {isImage && (
                         <button 
-                          onClick={() => setActiveLightboxImage({ src: `/api/files/${att.id}`, name: att.name })}
+                          onClick={() => setActiveLightboxImage({ src: resolveAttachmentUrl(att.id), name: att.name })}
                           className="w-full mt-1 relative rounded-lg overflow-hidden max-h-36 border border-zinc-900 flex justify-center bg-zinc-950 cursor-pointer focus:outline-none focus:ring-1 focus:ring-zinc-700 hover:opacity-90 transition-opacity border-none focus:ring-offset-0"
                           title="Click to view full image"
                         >
                           <img 
-                            src={`/api/files/${att.id}`} 
+                            src={resolveAttachmentUrl(att.id)} 
                             alt={att.name} 
                             className="max-w-full max-h-32 object-contain rounded" 
                             referrerPolicy="no-referrer"

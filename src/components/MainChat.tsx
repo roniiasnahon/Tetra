@@ -60,8 +60,8 @@ interface MainChatProps {
 export const modelsList = [
   {
     id: "auto",
-    label: "Ode I",
-    desc: "Fast and versatile; great for daily homework and file analysis",
+    label: "Villanelle Post",
+    desc: "Lightning-fast, multimodal intelligence",
   },
   {
     id: "hokku-iv",
@@ -85,23 +85,28 @@ export const modelsList = [
   },
   {
     id: "solar-pro2",
-    label: "Pantoum V",
-    desc: "High-performance reasoning and rapid analysis by Upstage AI",
+    label: "Pantoum",
+    desc: "High-performance reasoning and rapid analysis",
   },
   {
     id: "reka-flash",
-    label: "Villanelle Post",
-    desc: "Lightning-fast, multimodal intelligence by Reka AI",
+    label: "Flamenca",
+    desc: "Lightning-fast, multimodal intelligence",
   },
   {
     id: "mercury-2",
     label: "Cinquain Lite",
-    desc: "Advanced model by Inception Labs",
+    desc: "Advanced intelligent assistant for complex tasks",
   },
   {
     id: "mimo-v2.5-pro",
     label: "Triolett II",
-    desc: "High-performance multimodal model by Xiaomi",
+    desc: "High-performance multimodal processing",
+  },
+  {
+    id: "llama-3.1-8b-instant",
+    label: "Terzanelle",
+    desc: "High-speed conversational assistance",
   },
 ];
 
@@ -864,18 +869,16 @@ export const MainChat: React.FC<MainChatProps> = ({
                         }}
                       />
                       {/* Dropdown Menu */}
-                      <div className="absolute bottom-full right-0 mb-2 w-[220px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
+                      <div className="absolute bottom-full right-0 mb-2 w-[180px] bg-[#1e1e22] rounded-xl p-0.5 shadow-2xl z-[100] flex flex-col gap-0">
                         {modelsList
                           .filter(
                             (m) =>
                               ![
-                                "mistral-large-latest",
+                                "hokku-iv",
                                 "codestral-latest",
-                                "solar-pro2",
                                 "reka-flash",
                                 "mimo-v2.5-pro",
-                                "mercury-2",
-                                "command-a-plus-05-2026",
+                                "solar-pro2",
                               ].includes(m.id),
                           )
                           .map((m) => {
@@ -889,7 +892,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                                   setIsThinkingMenuOpen(false);
                                   setIsMoreModelsOpen(false);
                                 }}
-                                className={`relative group w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                className={`relative group w-full flex items-center gap-1.5 px-2 py-1 rounded-lg transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                                   isSelected
                                     ? "bg-zinc-800/25 text-white"
                                     : "text-zinc-300 hover:text-white"
@@ -900,15 +903,15 @@ export const MainChat: React.FC<MainChatProps> = ({
                                   {isSelected ? (
                                     <Icon
                                       icon="ph:check"
-                                      className="w-3.5 h-3.5 text-zinc-100 font-bold"
+                                      className="w-3 h-3 text-zinc-100 font-bold"
                                     />
                                   ) : (
-                                    <div className="w-3.5" />
+                                    <div className="w-3" />
                                   )}
                                 </div>
                                 {/* Right aligned text block */}
                                 <div className="text-left min-w-0">
-                                  <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
+                                  <span className="text-[12px] font-semibold text-zinc-100 font-jakarta leading-tight">
                                     {m.label}
                                   </span>
                                 </div>
@@ -928,36 +931,33 @@ export const MainChat: React.FC<MainChatProps> = ({
                             setIsMoreModelsOpen(!isMoreModelsOpen);
                             setIsThinkingMenuOpen(false);
                           }}
-                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                          className={`w-full flex items-center justify-between px-2 py-1 rounded-lg transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                             isMoreModelsOpen ? "bg-zinc-800/30" : ""
                           }`}
                         >
-                          <div className="flex items-center gap-2.5">
+                          <div className="flex items-center gap-1.5">
                             <div className="w-4 shrink-0 flex items-center justify-center">
                               {[
-                                "mistral-large-latest",
+                                "hokku-iv",
                                 "codestral-latest",
-                                "solar-pro2",
                                 "reka-flash",
                                 "mimo-v2.5-pro",
-                                "mercury-2",
-                                "command-a-plus-05-2026",
                               ].includes(selectedModel) ? (
                                 <Icon
                                   icon="ph:check"
-                                  className="w-3.5 h-3.5 text-zinc-100 font-bold"
+                                  className="w-3 h-3 text-zinc-100 font-bold"
                                 />
                               ) : (
-                                <div className="w-3.5" />
+                                <div className="w-3" />
                               )}
                             </div>
-                            <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
+                            <span className="text-[12px] font-semibold text-zinc-100 font-jakarta leading-tight">
                               More models
                             </span>
                           </div>
                           <Icon
                             icon="ph:caret-right-bold"
-                            className="w-3 h-3 text-zinc-500 mr-1.5 shrink-0"
+                            className="w-3 h-3 text-zinc-500 mr-1 shrink-0"
                           />
                         </div>
 
@@ -969,18 +969,16 @@ export const MainChat: React.FC<MainChatProps> = ({
                               animate={{ opacity: 1, x: 0, scale: 1 }}
                               exit={{ opacity: 0, x: -10, scale: 0.95 }}
                               transition={{ duration: 0.15, ease: "easeOut" }}
-                              className="absolute left-full bottom-8 ml-2 w-[220px] bg-[#1e1e22] rounded-2xl p-1.5 shadow-2xl z-[101] flex flex-col gap-0.5"
+                              className="absolute left-full bottom-8 ml-2 w-[180px] bg-[#1e1e22] rounded-xl p-0.5 shadow-2xl z-[101] flex flex-col gap-0"
                             >
                               {modelsList
                                 .filter((m) =>
                                   [
-                                    "mistral-large-latest",
+                                    "hokku-iv",
                                     "codestral-latest",
-                                    "solar-pro2",
                                     "reka-flash",
                                     "mimo-v2.5-pro",
-                                    "mercury-2",
-                                    "command-a-plus-05-2026",
+                                    "solar-pro2",
                                   ].includes(m.id),
                                 )
                                 .map((m) => {
@@ -994,7 +992,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                                         setIsThinkingMenuOpen(false);
                                         setIsMoreModelsOpen(false);
                                       }}
-                                      className={`relative group w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                      className={`relative group w-full flex items-center gap-1 px-1.5 py-1 rounded-lg transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                                         isSelected
                                           ? "bg-zinc-800/25 text-white"
                                           : "text-zinc-300 hover:text-white"
@@ -1005,15 +1003,15 @@ export const MainChat: React.FC<MainChatProps> = ({
                                         {isSelected ? (
                                           <Icon
                                             icon="ph:check"
-                                            className="w-3.5 h-3.5 text-zinc-100 font-bold"
+                                            className="w-3 h-3 text-zinc-100 font-bold"
                                           />
                                         ) : (
-                                          <div className="w-3.5" />
+                                          <div className="w-3" />
                                         )}
                                       </div>
                                       {/* Right aligned text block */}
                                       <div className="text-left min-w-0">
-                                        <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
+                                        <span className="text-[12px] font-semibold text-zinc-100 font-jakarta leading-tight">
                                           {m.label}
                                         </span>
                                       </div>
@@ -1039,24 +1037,24 @@ export const MainChat: React.FC<MainChatProps> = ({
                             setIsThinkingMenuOpen(!isThinkingMenuOpen);
                             setIsMoreModelsOpen(false);
                           }}
-                          className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                          className={`w-full flex items-center justify-between px-2 py-1 rounded-lg transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                             isThinkingMenuOpen ? "bg-zinc-800/30" : ""
                           }`}
                         >
-                          <div className="flex items-start gap-2.5">
+                          <div className="flex items-start gap-1.5">
                             <div className="w-4 shrink-0" />
-                            <div className="flex flex-col gap-0.5 text-left">
-                              <span className="text-[13.5px] font-semibold text-zinc-100 font-jakarta leading-tight">
+                            <div className="flex flex-col gap-0 text-left">
+                              <span className="text-[12px] font-semibold text-zinc-100 font-jakarta leading-tight">
                                 Thinking level
                               </span>
-                              <span className="text-[11.5px] text-zinc-400 font-jakarta leading-tight">
+                              <span className="text-[10px] text-zinc-400 font-jakarta leading-tight">
                                 {thinkingLevel}
                               </span>
                             </div>
                           </div>
                           <Icon
                             icon="ph:caret-right-bold"
-                            className="w-3 h-3 text-zinc-500 mr-1.5 shrink-0"
+                            className="w-3 h-3 text-zinc-500 mr-1 shrink-0"
                           />
                         </div>
 

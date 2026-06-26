@@ -305,8 +305,6 @@ const CitationLink = ({
               />
             )}
             <span className="capitalize">{activeSiteName}</span>
-            <span className="text-zinc-600 font-bold select-none">•</span>
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-mono">Verified Reference</span>
           </div>
         </div>
       )}

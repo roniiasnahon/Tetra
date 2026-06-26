@@ -15,6 +15,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1075.0",
     "@google/genai": "^2.4.0",
     "@iconify/react": "^6.0.2",
     "@solar-icons/react": "^1.1.1",

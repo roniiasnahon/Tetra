@@ -124,6 +124,24 @@ input[type="number"] {
   animation: shimmer 1.8s infinite linear;
 }
 
+.shimmer-skeleton {
+  background: linear-gradient(90deg, #27272a 25%, #3f3f46 50%, #27272a 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite linear;
+}
+
+.shimmer-skeleton-subtle {
+  background: linear-gradient(90deg, rgba(39, 39, 42, 0.6) 25%, rgba(63, 63, 70, 0.7) 50%, rgba(39, 39, 42, 0.6) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite linear;
+}
+
+.shimmer-skeleton-muted {
+  background: linear-gradient(90deg, rgba(39, 39, 42, 0.4) 25%, rgba(63, 63, 70, 0.5) 50%, rgba(39, 39, 42, 0.4) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite linear;
+}
+
 @keyframes slideProgress {
   0% {
     left: -40%;

@@ -513,6 +513,17 @@ const extractTextFromPdf = async (url: string): Promise<string> => {
   try {
     let pdfUrlToLoad = url;
 
+    // Resolve via memory/browser Cache API first for instant performance and offline/local fallback
+    const fileIdMatch = url.match(/\/api\/files\/([^\/]+)/);
+    if (fileIdMatch) {
+      const fileId = fileIdMatch[1];
+      try {
+        pdfUrlToLoad = await getOrCreateCachedPdf(fileId);
+      } catch (cacheErr) {
+        console.warn("Failed to retrieve PDF from cache, will try direct fetch:", cacheErr);
+      }
+    }
+
     // Only download if it's an external URL (starts with http)
     if (url.startsWith("http")) {
       const response = await fetch("/api/research/download-pdf", {
@@ -2024,11 +2035,11 @@ export default function App() {
       setTabIdToDelete(id);
       setIsDeleteConfirmOpen(true);
     } else {
-      deleteTab(id);
+      closeTab(id);
     }
   };
 
-  const deleteTab = async (id: string) => {
+  const closeTab = (id: string) => {
     const closedTab = tabs.find((t) => t.id === id);
     const closedTitle = closedTab ? closedTab.title : "Tab";
 
@@ -2064,6 +2075,15 @@ export default function App() {
     }
 
     showToast(`Closed "${closedTitle}"`, "info");
+    setIsChatMenuOpen(false);
+    setIsAssistantChatDropdownOpen(false);
+  };
+
+  const deleteChatPermanently = async (id: string) => {
+    // If the chat is currently open as a tab, close it first
+    if (tabs.some((t) => t.id === id)) {
+      closeTab(id);
+    }
 
     const uid = currentUser ? currentUser.uid : "guest";
     if (currentUser && storageMode === "database") {
@@ -2080,8 +2100,7 @@ export default function App() {
         return next;
       });
     }
-    setIsChatMenuOpen(false);
-    setIsAssistantChatDropdownOpen(false);
+    showToast("Chat deleted permanently", "info");
   };
 
   useEffect(() => {
@@ -2120,6 +2139,12 @@ export default function App() {
           e.preventDefault();
           setIsSidePanelOpen((prev) => !prev);
         }
+      }
+
+      // 5. Ctrl+T or Cmd+T to add a new tab
+      if ((e.ctrlKey || e.metaKey) && (e.key === "t" || e.key === "T")) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("request-new-chat"));
       }
     };
 
@@ -3748,7 +3773,15 @@ export default function App() {
           fileLabel.toLowerCase().endsWith(".htm")
         ) {
           try {
-            const textRes = await fetch(`/api/files/${data.fileId}/raw-text`);
+            let textRes;
+            if (data.fileId.startsWith("local-") && typeof window !== "undefined" && (window as any).__textMemoryCache?.has(data.fileId)) {
+              textRes = {
+                ok: true,
+                json: async () => ({ success: true, text: (window as any).__textMemoryCache.get(data.fileId) })
+              };
+            } else {
+              textRes = await fetch(`/api/files/${data.fileId}/raw-text`);
+            }
             if (textRes.ok) {
               const textData = await textRes.json();
               if (textData.success && textData.text) {
@@ -3804,7 +3837,7 @@ export default function App() {
 
           pages.forEach((pageContent: string, idx: number) => {
             if (!pageContent.trim() && idx === 0) return;
-            const pageNumMatch = idx > 0 ? markers[idx - 1].match(/\d+/) : null;
+            const pageNumMatch = idx > 0 ? markers[idx - 1]?.match(/\d+/) : null;
             const pageNum = pageNumMatch ? pageNumMatch[0] : (idx === 0 ? "1" : idx.toString());
 
             initialContent += `<div id="pdf-page-${pageNum}" class="mb-10 pt-4 border-t border-zinc-800/30 group/page">
@@ -3843,11 +3876,14 @@ export default function App() {
         setIsCreateDropdownOpen(false);
         setIsAssistantOpen(true);
 
-        if (extractedText) {
+        if (extractedText || fileLabel.toLowerCase().endsWith(".pdf")) {
           setTimeout(() => {
             handleSendMessage(
-              `Please thoroughly analyze the newly uploaded document titled "${fileLabel}". Here are the contents: \n\n${extractedText.substring(0, 10000)}\n\nProvide a comprehensive summary, highlight the main findings, and explain key claims in detail.`,
-              { isHidden: true },
+              `Please thoroughly analyze the newly uploaded document titled "${fileLabel}".${extractedText ? ` Here are the contents (partially extracted): \n\n${extractedText.substring(0, 10000)}\n\n` : `\n\n`}Provide a comprehensive summary, highlight the main findings, and explain key claims in detail.`,
+              { 
+                isHidden: true,
+                overrideAttachment: { fileId: data.fileId, fileName: fileLabel, mimetype: data.mimetype }
+              },
             );
           }, 500);
         } else {
@@ -3865,7 +3901,144 @@ export default function App() {
         throw new Error(data.message || "Invalid upload response");
       }
     } catch (err: any) {
-      console.error("Upload failed", err);
+      console.warn("Upload failed, falling back to local client-side processing:", err);
+      
+      const fileLabel = file.name;
+      const titlePlaceholder = fileLabel.replace(/\.[^/.]+$/, "");
+      const isImage = file.type?.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp"].includes(fileLabel.toLowerCase().split('.').pop() || "");
+      const isPdf = fileLabel.toLowerCase().endsWith(".pdf");
+      const isTextOrDoc = fileLabel.toLowerCase().endsWith(".docx") ||
+                          fileLabel.toLowerCase().endsWith(".txt") ||
+                          fileLabel.toLowerCase().endsWith(".md") ||
+                          fileLabel.toLowerCase().endsWith(".html") ||
+                          fileLabel.toLowerCase().endsWith(".htm");
+
+      if (isPdf || isTextOrDoc || isImage) {
+        const localFileId = "local-" + Date.now();
+        
+        setUploadTasks((prev) =>
+          prev.map((t) => (t.id === taskId ? { ...t, progress: 100, status: "success" } : t))
+        );
+
+        if (isImage) {
+          const objectUrl = URL.createObjectURL(file);
+          if (typeof window !== "undefined") {
+            const win = window as any;
+            if (!win.__pdfMemoryCache) win.__pdfMemoryCache = new Map();
+            win.__pdfMemoryCache.set(localFileId, objectUrl);
+          }
+          setAttachedFile({
+            fileId: localFileId,
+            fileName: file.name,
+            mimetype: file.type || "image/png",
+            url: `/api/files/${localFileId}`,
+          });
+          showToast(`Attachment "${file.name}" imported successfully (local mode)`, "success", 3000, toastId);
+          return;
+        }
+
+        await preCachePdfFile(localFileId, file);
+
+        let extractedText = "";
+        let summaryInfo = `This academic resource was uploaded and incorporated into your workspace. Select 'Ask Assistant' to summarize patterns or find citations.`;
+        let pagesCountString = "";
+
+        if (isPdf) {
+          try {
+            extractedText = await extractTextFromPdf(`/api/files/${localFileId}`);
+            if (extractedText) {
+              summaryInfo = `This PDF document is parsed and indexed successfully. You can write essays or ask questions about its exact contents.`;
+              const pagesMatch = extractedText.match(/--- Page \d+ of \d+ ---/g);
+              if (pagesMatch) {
+                pagesCountString = ` (${pagesMatch.length} pages mapped)`;
+              }
+            }
+          } catch (pdfErr) {
+            console.error("Local PDF mapping failed", pdfErr);
+          }
+        } else if (isTextOrDoc) {
+          try {
+            if (fileLabel.toLowerCase().endsWith(".txt") || fileLabel.toLowerCase().endsWith(".md") || fileLabel.toLowerCase().endsWith(".html") || fileLabel.toLowerCase().endsWith(".htm")) {
+              const reader = new FileReader();
+              extractedText = await new Promise<string>((resolve) => {
+                reader.onload = (e) => resolve((e.target?.result as string) || "");
+                reader.readAsText(file);
+              });
+              if (!(window as any).__textMemoryCache) (window as any).__textMemoryCache = new Map();
+              (window as any).__textMemoryCache.set(localFileId, extractedText);
+
+              if (fileLabel.toLowerCase().endsWith(".html") || fileLabel.toLowerCase().endsWith(".htm")) {
+                extractedText = extractedText
+                  .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+                  .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
+                  .replace(/<[^>]+>/g, " ")
+                  .replace(/\s+/g, " ")
+                  .trim();
+              }
+            }
+          } catch (textErr) {
+            console.error("Local text mapping failed", textErr);
+          }
+        }
+
+        const newDoc: any = {
+          id: localFileId,
+          title: titlePlaceholder,
+          fileName: fileLabel,
+          mimetype: isPdf ? "application/pdf" : (file.type || "text/plain"),
+          extractedText: extractedText || "",
+          summary: summaryInfo,
+          createdAt: Date.now(),
+          lastModified: Date.now(),
+        };
+
+        dbSetPaper(newDoc);
+        setPapers((prev) => [newDoc, ...prev]);
+
+        showToast(`Document "${fileLabel}" imported successfully (local mode)${pagesCountString}`, "success", 4000, toastId);
+
+        const newId = `tab-doc-${localFileId}`;
+        setTabs((prev) => [
+          ...prev,
+          {
+            id: newId,
+            title: titlePlaceholder,
+            type: "document",
+            fileId: localFileId,
+            mimetype: isPdf ? "application/pdf" : (file.type || "text/plain"),
+            isGeneratingNotes: false,
+            content: "",
+          },
+        ]);
+        setActiveTabId(newId);
+        setSidebarView("files");
+        setIsCreateDropdownOpen(false);
+        setIsAssistantOpen(true);
+
+        if (extractedText || isPdf) {
+          setTimeout(() => {
+            handleSendMessage(
+              `Please thoroughly analyze the newly uploaded document titled "${fileLabel}".${extractedText ? ` Here are the contents (partially extracted): \n\n${extractedText.substring(0, 10000)}\n\n` : `\n\n`}Provide a comprehensive summary, highlight the main findings, and explain key claims in detail.`,
+              { 
+                isHidden: true,
+                overrideAttachment: { fileId: localFileId, fileName: fileLabel, mimetype: isPdf ? "application/pdf" : (file.type || "text/plain") }
+              },
+            );
+          }, 500);
+        } else {
+          setTimeout(() => {
+            const assistantMsg: ChatMessage = {
+              id: String(Date.now()),
+              role: "assistant",
+              content: `### Document Mapped: ${fileLabel}\n\nI have successfully indexed **${fileLabel}** and mapped it to your workspace locally.`,
+              timestamp: Date.now(),
+            };
+            updateChatMessages((prev) => [...prev, assistantMsg], false);
+          }, 500);
+        }
+        return;
+      }
+
       const errMsg = getUserFriendlyErrorMessage(err);
       
       // Update upload tasks state with failure
@@ -4402,6 +4575,10 @@ export default function App() {
       return [];
     }
   });
+  const messagesRef = useRef(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   const [chatInput, setChatInput] = useState("");
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
@@ -4425,6 +4602,7 @@ export default function App() {
   const [thinkingLevel, setThinkingLevel] = useState<'Standard' | 'Deep' | 'Instant'>('Standard');
   const [isAgentModelMenuOpen, setIsAgentModelMenuOpen] = useState(false);
   const [isAgentThinkingMenuOpen, setIsAgentThinkingMenuOpen] = useState(false);
+  const [isAgentPlusMenuOpen, setIsAgentPlusMenuOpen] = useState(false);
   const [isAgentMoreModelsOpen, setIsAgentMoreModelsOpen] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => {
     return localStorage.getItem("cosmi_settings_web_search") === "true";
@@ -4625,9 +4803,17 @@ export default function App() {
     updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
     skipTabsUpdate = true,
   ) => {
+    let next: ChatMessage[];
     setMessages((prev) => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      if (!skipTabsUpdate) {
+      next = typeof updater === "function" ? updater(prev) : updater;
+      return next;
+    });
+
+    // Handle tab update OUTSIDE of setMessages callback to avoid nested state updates
+    if (!skipTabsUpdate) {
+      // Use setTimeout 0 to ensure this runs after setMessages has queued its update
+      // and we are not in the middle of another state update cycle
+      setTimeout(() => {
         let targetTabId =
           activeAssistantTabIdRef.current || activeTabIdRef.current;
         const currentTab = tabsRef.current.find((t) => t.id === targetTabId);
@@ -4654,23 +4840,30 @@ export default function App() {
             messages: next,
           };
           updatedTabs = [...updatedTabs, newChatTab];
-          // We can't setState inside setState cleanly, but we can setTabs:
-          setTimeout(() => setActiveAssistantTabId(newChatId), 0);
+          setActiveAssistantTabId(newChatId);
         }
 
         updatedTabs = updatedTabs.map((t) =>
           t.id === targetTabId ? { ...t, messages: next } : t,
         );
-        setTabs(updatedTabs);
+        
+        // Use functional update to ensure we have latest tabs
+        setTabs((prevTabs) => {
+           // Double check if we actually need to update to prevent extra renders
+           const tab = prevTabs.find(t => t.id === targetTabId);
+           if (tab && JSON.stringify(tab.messages) === JSON.stringify(next)) {
+             return prevTabs;
+           }
+           return updatedTabs;
+        });
 
         // Also save to persistent chat library
         const chatTab = updatedTabs.find((t) => t.id === targetTabId);
         if (chatTab) {
           saveChatToLibrary(currentUser?.uid || "guest", chatTab);
         }
-      }
-      return next;
-    });
+      }, 0);
+    }
   };
 
   useEffect(() => {
@@ -5007,8 +5200,9 @@ export default function App() {
     }
     
     const targetTab = tabs.find((t) => t.id === activeTabId);
+    if (!targetTab) return;
+
     const isDocNotPdf =
-      targetTab &&
       targetTab.type === "document" &&
       (!targetTab.fileId ||
         !(
@@ -5025,9 +5219,16 @@ export default function App() {
         editorRef.current.innerHTML = targetTab.content || "";
         lastContentRef.current = targetTab.content || "";
       }
-    } else if (targetTab && targetTab.type === "chat") {
-      setMessages(targetTab.messages || []);
-      setActiveAssistantTabId(targetTab.id);
+    } else if (targetTab.type === "chat") {
+      const tabMessages = targetTab.messages || [];
+      // Synchronize messages state ONLY if it actually differs and we aren't currently typing (streaming)
+      // We exclude messages from dependencies to avoid infinite loops when updating messages
+      if (JSON.stringify(tabMessages) !== JSON.stringify(messagesRef.current)) {
+        setMessages(tabMessages);
+      }
+      if (activeAssistantTabIdRef.current !== targetTab.id) {
+        setActiveAssistantTabId(targetTab.id);
+      }
       setChatInput(targetTab.chatInput || "");
     } else {
       setChatInput("");
@@ -5415,11 +5616,12 @@ Once you have content, I can help you draft sections, summarize findings, or for
       const localWorkType = localStorage.getItem("cosmi_settings_work_desc") || "Other";
 
       // Try hitting our real server-side Gemini research chat endpoint!
-      const currentAttachment = attachedFile ? {
-        fileId: attachedFile.fileId,
-        fileName: attachedFile.fileName,
-        mimetype: attachedFile.mimetype,
-        url: attachedFile.url
+      const finalAttachment = options.overrideAttachment !== undefined ? options.overrideAttachment : attachedFile;
+      const currentAttachment = finalAttachment ? {
+        fileId: finalAttachment.fileId,
+        fileName: finalAttachment.fileName,
+        mimetype: finalAttachment.mimetype,
+        url: finalAttachment.url
       } : null;
 
       const response = await fetch("/api/research/chat", {
@@ -5454,8 +5656,9 @@ Once you have content, I can help you draft sections, summarize findings, or for
             citations: papers.map((p, idx) => ({
               title: p.title,
               authors: p.author,
+              fileId: p.fileId,
               source: "Academic Import Database",
-              year: p.author.match(/\d{4}/)?.[0] || "2023",
+            year: p.author?.match(/\d{4}/)?.[0] || "2023",
               format: "APA",
               fullText:
                 idx < 15
@@ -5635,7 +5838,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                   const assistantMsg: ChatMessage = {
                                     id: String(Date.now() + Math.random()),
                                     role: "assistant",
-                                    content: `### ⚠️ Could not auto-download: ${p.title}\n\nThe full-text document is hosted behind a restricted publisher credential check or locked portal.\n\n* **Direct Link:** [Open original paper URL in browser](${p.url || "#"}) ↗\n* **Suggested Alternative:** Look for this title on open repositories like Google Scholar, ResearchGate, or arXiv.\n* **Manual Upload:** If you already have the PDF file downloaded locally on your device, simply drag and drop or click upload inside your folders sidebar to instantly parse, summarize, and cite the document here!`,
+                                    content: `### ⚠️ No free version available: ${p.title}\n\nThe full-text document is hosted behind a restricted publisher credential check or locked portal, and no free/open-access PDF could be found.\n\n* **Direct Link:** [Open original paper URL in browser](${p.url || "#"}) ↗\n* **Suggested Alternative:** Look for this title on open repositories like Google Scholar, ResearchGate, or arXiv.\n* **Manual Upload:** If you already have the PDF file downloaded locally on your device, simply drag and drop or click upload inside your folders sidebar to instantly parse, summarize, and cite the document here!`,
                                     timestamp: Date.now(),
                                   };
                                   updateChatMessages(
@@ -5670,7 +5873,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                         return;
                                       const pageNumMatch =
                                         idx > 0
-                                          ? markers[idx - 1].match(/\d+/)
+                                          ? markers[idx - 1]?.match(/\d+/)
                                           : null;
                                       const pageNum = pageNumMatch
                                         ? pageNumMatch[0]
@@ -6676,16 +6879,31 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                 {paper.author}
                               </p>
                               
-                              <button
-                                onClick={() => {
-                                  const citation = `\n\n> *Citation: ${paper.title} - ${paper.author}*`;
-                                  setDocumentContent((prev) => prev + citation);
-                                }}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/50 hover:bg-zinc-700/50 border border-transparent hover:border-zinc-600/50 text-zinc-300 text-[10px] font-medium transition-all opacity-0 group-hover:opacity-100 w-full justify-center active:scale-[0.98] cursor-pointer"
-                              >
-                                <Icon icon="ph:quotes" className="w-3 h-3" />
-                                Cite this paper
-                              </button>
+                              <div className="flex gap-1.5 mt-2.5">
+                                <button
+                                  onClick={() => {
+                                    const citation = `\n\n> *Citation: ${paper.title} - ${paper.author}*`;
+                                    setDocumentContent((prev) => prev + citation);
+                                  }}
+                                  className="flex-1 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/50 hover:bg-zinc-700/50 border border-transparent hover:border-zinc-600/50 text-zinc-300 text-[10px] font-medium transition-all opacity-0 group-hover:opacity-100 justify-center active:scale-[0.98] cursor-pointer"
+                                >
+                                  <Icon icon="ph:quotes" className="w-3 h-3" />
+                                  Cite
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const text = `Can you summarize the attached document "${paper.title}"?`;
+                                    handleSendMessage(text, { 
+                                      overrideAttachment: paper.fileId ? { fileId: paper.fileId, fileName: paper.title, mimetype: paper.mimetype || "application/pdf" } : null 
+                                    });
+                                  }}
+                                  className="flex-1 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/50 hover:bg-zinc-700/50 border border-transparent hover:border-zinc-600/50 text-zinc-300 text-[10px] font-medium transition-all opacity-0 group-hover:opacity-100 justify-center active:scale-[0.98] cursor-pointer"
+                                  title="AI will analyze and summarize the content of this document"
+                                >
+                                  <Icon icon="ph:magic-wand" className="w-3 h-3" />
+                                  Summarize
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -8795,6 +9013,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         onClick={() => {
                           if (selectionText) {
                             navigator.clipboard.writeText(selectionText);
+                            showToast("Selection copied to clipboard", "success");
                           }
                           setPdfContextMenu(null);
                         }}
@@ -8955,10 +9174,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                       <button
                         onClick={() => {
                           if (selectionText) {
-                            setChatInput(
+                            setAssistantInput(
                               `I found this interesting in the text: "${selectionText}". Can you explain it or link it to my existing research?`,
                             );
-                            if (!isSidePanelOpen) setIsSidePanelOpen(true);
+                            setIsAssistantOpen(true);
                           }
                           setPdfContextMenu(null);
                         }}
@@ -8969,7 +9188,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           icon="ph:sparkle"
                           className="w-4 h-4 text-zinc-500 group-hover:text-white"
                         />
-                        <span>Research Assistant</span>
+                        <span>Blob</span>
                       </button>
 
                       <div className="h-[1px] bg-[#2d2d30] mx-2 my-1" />
@@ -9055,26 +9274,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           className="w-4 h-4 text-zinc-500 group-hover:text-white"
                         />
                         <span>Read Selection</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          if (selectionText) {
-                            setChatInput(
-                              `Create a flashcard from this selection: "${selectionText}"`,
-                            );
-                            if (!isSidePanelOpen) setIsSidePanelOpen(true);
-                          }
-                          setPdfContextMenu(null);
-                        }}
-                        disabled={!selectionText}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12px] text-zinc-300 hover:bg-[#27272a] hover:text-white transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent group"
-                      >
-                        <Icon
-                          icon="ph:cards"
-                          className="w-4 h-4 text-zinc-500 group-hover:text-white"
-                        />
-                        <span>Create Flashcard</span>
                       </button>
 
                       <button
@@ -10594,26 +10793,96 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                 {/* Actions and Paper attachment triggers inside input frame */}
                 <div className="flex justify-between items-center px-2 pb-2">
-                  <div className="flex items-center gap-1.5">
+                  <div className="relative shrink-0 flex items-center gap-1.5">
                     <button
-                      onClick={handlePaperclipClick}
-                      className="text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#2d2d30] transition-colors p-[6px] rounded-md cursor-pointer flex items-center justify-center w-8 h-8 shrink-0 border border-transparent"
-                      title="Upload File or Photo"
-                    >
-                      <PaperclipRounded2 weight="Linear" size={18} color="currentColor" />
-                    </button>
-                    <button
-                      onClick={() => setWebSearchEnabled(!webSearchEnabled)}
-                      className={`flex items-center gap-1 px-2.5 py-1 rounded-[6px] transition-colors text-[11px] font-semibold cursor-pointer border ${
-                        webSearchEnabled
-                          ? "bg-zinc-800 border-zinc-700 text-white"
-                          : "border-transparent text-[#71717a] hover:text-[#e4e4e7] bg-transparent hover:bg-[#2d2d30]"
+                      type="button"
+                      onClick={() => setIsAgentPlusMenuOpen(!isAgentPlusMenuOpen)}
+                      className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors cursor-pointer shrink-0 ${
+                        isAgentPlusMenuOpen
+                          ? "bg-[#222222] text-[#e4e4e7]"
+                          : "text-[#71717a] hover:text-[#e4e4e7] bg-transparent hover:bg-[#222222]"
                       }`}
-                      title={webSearchEnabled ? "Disable web search grounding" : "Enable web search grounding"}
+                      title="Upload or Search Options"
                     >
-                      <Icon icon={webSearchEnabled ? "ph:globe-hemisphere-east-fill" : "ph:globe"} className="w-3.5 h-3.5 shrink-0" />
-                      <span>Web</span>
+                      <Plus
+                        className={`w-5 h-5 transition-transform duration-200 ${isAgentPlusMenuOpen ? "rotate-45" : ""}`}
+                      />
                     </button>
+
+                    {webSearchEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => setWebSearchEnabled(false)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-[#252528] hover:bg-[#2a2a2d] transition-colors rounded-full text-[#e4e4e7] cursor-pointer group shrink-0"
+                      >
+                        <Icon
+                          icon="ph:globe"
+                          className="w-[15px] h-[15px] text-[#a1a1aa] group-hover:text-[#e4e4e7] transition-colors"
+                        />
+                        <span className="text-[13px] font-normal leading-none font-sans">
+                          Search web
+                        </span>
+                      </button>
+                    )}
+
+                    {isAgentPlusMenuOpen && (
+                      <>
+                        {/* Transparent backdrop overlay for safe close */}
+                        <div
+                          className="fixed inset-0 z-[99] bg-transparent"
+                          onClick={() => setIsAgentPlusMenuOpen(false)}
+                        />
+
+                        {/* Plus Options Menu */}
+                        <div className="absolute bottom-full left-0 mb-2.5 w-[200px] bg-[#1a1a1e] border border-zinc-800/80 rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
+                          {/* Upload files */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsAgentPlusMenuOpen(false);
+                              handlePaperclipClick();
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-zinc-350 hover:text-white hover:bg-zinc-800/40 transition-none font-sans cursor-pointer"
+                          >
+                            <PaperclipRounded2
+                              weight="Linear"
+                              size={18}
+                              color="currentColor"
+                            />
+                            <span className="text-[13px] font-normal text-zinc-300 leading-none">
+                              Upload files
+                            </span>
+                          </button>
+
+                          {/* Web Search Grounding */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setWebSearchEnabled(!webSearchEnabled);
+                              setIsAgentPlusMenuOpen(false);
+                            }}
+                            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left font-sans cursor-pointer transition-none ${
+                              webSearchEnabled
+                                ? "bg-zinc-800/30 text-zinc-100"
+                                : "text-zinc-300 hover:text-white hover:bg-zinc-800/40"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <Icon
+                                icon="ph:globe"
+                                className={`w-[18px] h-[18px] shrink-0 ${webSearchEnabled ? "text-zinc-400" : "text-zinc-500"}`}
+                              />
+                              <span className="text-[13px] font-normal text-zinc-300 leading-none">
+                                Search web
+                              </span>
+                            </div>
+                            {webSearchEnabled && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
+                            )}
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1">
@@ -10661,7 +10930,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             transition={{ duration: 0.15, ease: "easeOut" }}
                             className="absolute bottom-full right-0 mb-2 w-[220px] bg-[#1e1e22] border border-zinc-800/80 rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5"
                           >
-                            {modelsList.filter(m => !['mistral-large-latest', 'codestral-latest', 'solar-pro2', 'reka-flash', 'mimo-v2.5-pro'].includes(m.id)).map((m) => {
+                            {modelsList.filter(m => !['mistral-large-latest', 'codestral-latest', 'reka-flash', 'mimo-v2.5-pro', 'solar-pro2'].includes(m.id)).map((m) => {
                               const isSelected = selectedModel === m.id;
                               return (
                                 <button
@@ -10704,7 +10973,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             >
                               <div className="flex items-center gap-2.5">
                                 <div className="w-4 shrink-0 flex items-center justify-center">
-                                  {['mistral-large-latest', 'codestral-latest', 'solar-pro2', 'reka-flash', 'mimo-v2.5-pro'].includes(selectedModel) ? (
+                                  {['mistral-large-latest', 'codestral-latest', 'reka-flash', 'mimo-v2.5-pro', 'solar-pro2'].includes(selectedModel) ? (
                                     <Icon icon="ph:check" className="w-3.5 h-3.5 text-zinc-100 font-bold" />
                                   ) : (
                                     <div className="w-3.5" />
@@ -10734,7 +11003,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                     <span className="text-[12px] font-bold text-zinc-400 uppercase tracking-widest ml-1">More Models</span>
                                   </div>
                                   <div className="overflow-y-auto max-h-[300px]">
-                                    {modelsList.filter(m => ['mistral-large-latest', 'codestral-latest', 'solar-pro2', 'reka-flash', 'mimo-v2.5-pro'].includes(m.id)).map((m) => {
+                                    {modelsList.filter(m => ['mistral-large-latest', 'codestral-latest', 'reka-flash', 'mimo-v2.5-pro', 'solar-pro2'].includes(m.id)).map((m) => {
                                       const isSelected = selectedModel === m.id;
                                       return (
                                         <button
@@ -11776,6 +12045,14 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </div>
                   </div>
 
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-zinc-300">New tab</span>
+                    <div className="flex gap-1.5">
+                      <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">Ctrl</kbd>
+                      <kbd className="px-2 py-1 bg-zinc-800/80 border border-zinc-700/80 rounded text-[13px] font-medium text-zinc-300">T</kbd>
+                    </div>
+                  </div>
+
                   {isDesktopApp && (
                     <>
                       <div className="flex items-center justify-between">
@@ -12683,7 +12960,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     <button
                       onClick={() => {
                         if (tabIdToDelete) {
-                          deleteTab(tabIdToDelete);
+                          closeTab(tabIdToDelete);
                         }
                         setIsDeleteConfirmOpen(false);
                         setTabIdToDelete(null);
@@ -12775,7 +13052,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                     </button>
                     <button
                       onClick={() => {
-                        deleteTab(chatIdToDelete);
+                        deleteChatPermanently(chatIdToDelete);
                         setChatIdToDelete(null);
                       }}
                       className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-full text-xs font-semibold transition-all cursor-pointer"
