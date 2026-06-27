@@ -1191,7 +1191,7 @@ export function StatisticsTools({
         </div>
         <div className="px-8 pt-6 pb-8 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-[#27272a] hover:scrollbar-thumb-[#3f3f46] flex-1">
           {valid ? (
-            <div className="space-y-4 font-mono text-[11.5px] text-[#a1a1aa]">
+            <div className="space-y-4 font-sans text-[11.5px] text-[#a1a1aa]">
               <div className="py-12 flex items-center justify-center select-none scale-[1.75] origin-center">
                 <MathLaTex math="n = \frac{N}{1 + N e^2}" displayMode={true} />
               </div>
@@ -1237,10 +1237,10 @@ export function StatisticsTools({
                         <div className="space-y-4 pt-4 border-t border-zinc-800/10">
                           <div className="grid grid-cols-1 gap-4">
                             {[
-                              { step: "1", title: "Square the Error", desc: <>Square the Margin of Error (<MathLaTex math="e^2" />): <span className="text-zinc-400">{e} × {e} = </span> <span className="text-zinc-200 font-mono">{eSq.toFixed(5)}</span></> },
-                              { step: "2", title: "Scale by Population", desc: <>Multiply the result by the total population (<MathLaTex math="N \cdot e^2" />): <span className="text-zinc-400">{N} × {eSq.toFixed(5)} = </span> <span className="text-zinc-200 font-mono">{product.toFixed(4)}</span></> },
-                              { step: "3", title: "Calculate Denominator", desc: <>Add 1 to the product to complete the divisor: <span className="text-zinc-400">1 + {product.toFixed(4)} = </span> <span className="text-zinc-200 font-mono">{denom.toFixed(4)}</span></> },
-                              { step: "4", title: "Final Division", desc: <>Divide the total population by the divisor: <span className="text-zinc-400">{N} / {denom.toFixed(4)} = </span> <span className="text-zinc-200 font-mono">{n.toFixed(4)}</span></> },
+                              { step: "1", title: "Square the Error", desc: <>Square the Margin of Error (<MathLaTex math="e^2" />): <span className="text-zinc-400">{e} × {e} = </span> <span className="text-zinc-200 font-sans">{eSq.toFixed(5)}</span></> },
+                              { step: "2", title: "Scale by Population", desc: <>Multiply the result by the total population (<MathLaTex math="N \cdot e^2" />): <span className="text-zinc-400">{N} × {eSq.toFixed(5)} = </span> <span className="text-zinc-200 font-sans">{product.toFixed(4)}</span></> },
+                              { step: "3", title: "Calculate Denominator", desc: <>Add 1 to the product to complete the divisor: <span className="text-zinc-400">1 + {product.toFixed(4)} = </span> <span className="text-zinc-200 font-sans">{denom.toFixed(4)}</span></> },
+                              { step: "4", title: "Final Division", desc: <>Divide the total population by the divisor: <span className="text-zinc-400">{N} / {denom.toFixed(4)} = </span> <span className="text-zinc-200 font-sans">{n.toFixed(4)}</span></> },
                               { step: "5", title: "The 'Ceiling' Rule", desc: <>Always round up to the nearest whole integer. Since you cannot survey a partial person/unit, <span className="text-zinc-200 font-bold">{n.toFixed(4)}</span> becomes <span className="text-zinc-100 font-bold underline decoration-zinc-600">{Math.ceil(n)}</span>.</> },
                             ].map((s) => (
                               <div key={s.step} className="flex gap-3">
@@ -1298,7 +1298,7 @@ export function StatisticsTools({
                 <div className="text-[10px] text-[#71717a] uppercase font-bold tracking-wider">Required Sample Size</div>
                 <div className="text-[11px] text-[#52525b] italic">(Rounded up to next whole count)</div>
               </div>
-              <div className="text-3xl font-bold font-mono text-[#f4f4f5]">{Math.ceil(n)}</div>
+              <div className="text-3xl font-bold font-sans text-[#f4f4f5]">{Math.ceil(n)}</div>
             </div>
           </div>
         )}
@@ -1407,7 +1407,7 @@ export function StatisticsTools({
                         <div className="space-y-4 pt-4 border-t border-zinc-800/10">
                           <div className="grid grid-cols-1 gap-4">
                             {[
-                              { step: "1", title: "Divide Values", desc: <>Divide the part by the total to find the decimal ratio: <span className="text-zinc-400">{p} / {t} = </span> <span className="text-zinc-200 font-mono">{(p/t).toFixed(5)}</span></> },
+                              { step: "1", title: "Divide Values", desc: <>Divide the part by the total to find the decimal ratio: <span className="text-zinc-400">{p} / {t} = </span> <span className="text-zinc-200 font-sans">{(p/t).toFixed(5)}</span></> },
                               { step: "2", title: "Convert to Percentage", desc: <>Multiply by 100 to convert the decimal into a percent: <span className="text-zinc-400">{(p/t).toFixed(5)} × 100 = </span> <span className="text-zinc-100 font-bold border-b border-zinc-700/50">{pct.toFixed(2)}%</span></> },
                             ].map((s) => (
                               <div key={s.step} className="flex gap-3">
@@ -1432,7 +1432,7 @@ export function StatisticsTools({
                   <div className="bg-[#10b981] h-full transition-all duration-300" style={{ width: `${pct}%` }}></div>
                   <div className="bg-[#27272a] h-full transition-all duration-300" style={{ width: `${remaining}%` }}></div>
                 </div>
-                <div className="flex justify-between text-[10px] text-[#71717a] font-mono">
+                <div className="flex justify-between text-[10px] text-[#71717a] font-sans">
                   <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#10b981]"></span> Target ({pct.toFixed(1)}%)</span>
                   <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#27272a]"></span> Remaining ({remaining.toFixed(1)}%)</span>
                 </div>
@@ -1450,7 +1450,7 @@ export function StatisticsTools({
                 <div className="text-[10px] text-[#71717a] uppercase font-bold tracking-wider">Calculated Proportion</div>
                 <div className="text-[11px] text-[#52525b] italic">Ratio = {(p / t).toFixed(5)}</div>
               </div>
-              <div className="text-3xl font-bold font-mono text-[#10b981]">{pct.toFixed(2)}%</div>
+              <div className="text-3xl font-bold font-sans text-[#10b981]">{pct.toFixed(2)}%</div>
             </div>
           </div>
         )}
@@ -1465,7 +1465,7 @@ export function StatisticsTools({
         <div className="space-y-2.5">
           {entries.map((entry, idx) => (
              <div key={idx} className="flex gap-2 relative group items-center">
-                <div className="text-[10.5px] font-mono text-zinc-650 w-4 text-center">{idx + 1}</div>
+                <div className="text-[10.5px] font-sans text-zinc-650 w-4 text-center">{idx + 1}</div>
                 <CustomNumberInput 
                   placeholder="Value (x)"
                   value={entry.value}
@@ -1592,8 +1592,8 @@ export function StatisticsTools({
                         <div className="space-y-4 pt-4 border-t border-zinc-800/10">
                           <div className="grid grid-cols-1 gap-4">
                             {[
-                              { step: "1", title: "Calculate Products", desc: <>Multiply each individual value (<MathLaTex math="x" />) by its corresponding weight (<MathLaTex math="w" />). Current sum of products: <span className="text-zinc-100 font-mono">{sumValueWeight.toFixed(2)}</span></> },
-                              { step: "2", title: "Sum the Weights", desc: <>Total the sum of all weights entered: <span className="text-zinc-100 font-mono">{sumWeight}</span></> },
+                              { step: "1", title: "Calculate Products", desc: <>Multiply each individual value (<MathLaTex math="x" />) by its corresponding weight (<MathLaTex math="w" />). Current sum of products: <span className="text-zinc-100 font-sans">{sumValueWeight.toFixed(2)}</span></> },
+                              { step: "2", title: "Sum the Weights", desc: <>Total the sum of all weights entered: <span className="text-zinc-100 font-sans">{sumWeight}</span></> },
                               { step: "3", title: "Final Division", desc: <>Divide the sum of products by the total weight: <span className="text-zinc-400">{sumValueWeight.toFixed(2)} / {sumWeight} = </span> <span className="text-zinc-100 font-bold border-b border-zinc-700/50">{mean.toFixed(4)}</span></> },
                             ].map((s) => (
                               <div key={s.step} className="flex gap-3">
@@ -1615,13 +1615,13 @@ export function StatisticsTools({
               <div className="overflow-x-auto rounded-lg max-h-[220px] overflow-y-auto border border-zinc-900">
                 <table className="w-full text-left text-[10.5px] border-collapse">
                   <thead>
-                    <tr className="bg-[#161618] border-b border-[#1e1e20] text-[#71717a] font-mono">
+                    <tr className="bg-[#161618] border-b border-[#1e1e20] text-[#71717a] font-sans">
                       <th className="px-3 py-1.5 font-semibold text-[#a1a1aa]">Value (x)</th>
                       <th className="px-3 py-1.5 font-semibold text-[#a1a1aa]">Weight (w)</th>
                       <th className="px-3 py-1.5 font-semibold text-[#a1a1aa] text-right">Product (x · w)</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#18181a] font-mono text-[#a1a1aa]">
+                  <tbody className="divide-y divide-[#18181a] font-sans text-[#a1a1aa]">
                     {validatedRows.map((row, i) => (
                       <tr key={i} className="hover:bg-zinc-900/10">
                         <td className="px-3 py-1.5">{row.val}</td>
@@ -1650,7 +1650,7 @@ export function StatisticsTools({
                 <div className="text-[10px] text-[#71717a] uppercase font-bold tracking-wider">Weighted Average</div>
                 <div className="text-[11px] text-[#52525b] italic">Elements evaluated = {validatedRows.length}</div>
               </div>
-              <div className="text-3xl font-bold font-mono text-[#38bdf8]">{mean.toFixed(4)}</div>
+              <div className="text-3xl font-bold font-sans text-[#38bdf8]">{mean.toFixed(4)}</div>
             </div>
           </div>
         )}
@@ -1867,8 +1867,8 @@ export function StatisticsTools({
                         <div className="space-y-4 pt-4 border-t border-zinc-800/10">
                           <div className="grid grid-cols-1 gap-4">
                             {[
-                              { step: "1", title: "Calculate Frequencies", desc: <>Multiply each point weight (<MathLaTex math="w" />) by the number of responses (<MathLaTex math="f" />) for that category. Total sum: <span className="text-zinc-100 font-mono">{sumValueWeight}</span></> },
-                              { step: "2", title: "Sum Respondents", desc: <>Total the number of people who participated in the survey: <span className="text-zinc-100 font-mono">{sumWeight}</span></> },
+                              { step: "1", title: "Calculate Frequencies", desc: <>Multiply each point weight (<MathLaTex math="w" />) by the number of responses (<MathLaTex math="f" />) for that category. Total sum: <span className="text-zinc-100 font-sans">{sumValueWeight}</span></> },
+                              { step: "2", title: "Sum Respondents", desc: <>Total the number of people who participated in the survey: <span className="text-zinc-100 font-sans">{sumWeight}</span></> },
                               { step: "3", title: "Divide for Index", desc: <>Divide the total weighted sum by the number of respondents: <span className="text-zinc-400">{sumValueWeight} / {sumWeight} = </span> <span className="text-zinc-100 font-bold border-b border-zinc-700/50">{mean.toFixed(3)}</span></> },
                             ].map((s) => (
                               <div key={s.step} className="flex gap-3">
@@ -1894,7 +1894,7 @@ export function StatisticsTools({
                   const pct = ratio * 100;
                   return (
                     <div key={idx} className="space-y-1">
-                      <div className="flex justify-between text-[10px] text-[#52525b] font-mono">
+                      <div className="flex justify-between text-[10px] text-[#52525b] font-sans">
                          <span>{c.label} (Weight: {c.weight}, Vol: {count})</span>
                          <span>{pct.toFixed(1)}%</span>
                       </div>
@@ -1915,12 +1915,12 @@ export function StatisticsTools({
           <div className="px-8 py-5 border-t border-[#1e1e20] shrink-0 space-y-3">
             <div className="flex items-center justify-between text-[11px] text-[#71717a]">
                <span>Weighted Summation</span>
-               <span className="font-mono text-[#e4e4e7]">{sumValueWeight} / {sumWeight} respondents</span>
+               <span className="font-sans text-[#e4e4e7]">{sumValueWeight} / {sumWeight} respondents</span>
             </div>
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] text-[#71717a] uppercase font-bold tracking-wider">Likert Grand Index</span>
-                <span className="text-2xl font-bold font-mono text-white">{mean.toFixed(3)}</span>
+                <span className="text-2xl font-bold font-sans text-white">{mean.toFixed(3)}</span>
               </div>
               <div className="flex items-center justify-between pt-1 border-t border-[#1d1d20]">
                 <span className="text-[10px] text-[#52525b] uppercase font-bold">Interpretation</span>

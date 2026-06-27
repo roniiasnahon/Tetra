@@ -616,13 +616,73 @@ const extractTextFromPdf = async (url: string): Promise<string> => {
     const pdfDoc = await loadingTask.promise;
     let fullText = "";
     const numPagesToParse = Math.min(pdfDoc.numPages, 15);
+    const pageTexts: { [pageNum: number]: string } = {};
+    const pagesNeedingOcr: number[] = [];
+
     for (let pageNum = 1; pageNum <= numPagesToParse; pageNum++) {
-      const page = await pdfDoc.getPage(pageNum);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map((item: any) => item.str || "")
-        .join(" ");
-      fullText += `--- Page ${pageNum} of ${pdfDoc.numPages} ---\n${pageText}\n\n`;
+      try {
+        const page = await pdfDoc.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items
+          .map((item: any) => item.str || "")
+          .join(" ")
+          .trim();
+        
+        pageTexts[pageNum] = pageText;
+        // If a page has virtually no selectable text, it's likely a scan or an image-based PDF
+        if (pageText.length < 60) {
+          pagesNeedingOcr.push(pageNum);
+        }
+      } catch (e) {
+        console.error(`Failed getting text for page ${pageNum}:`, e);
+      }
+    }
+
+    if (pagesNeedingOcr.length > 0) {
+      console.log(`[OCR] Scanned PDF or images detected. Pages needing OCR: ${pagesNeedingOcr.join(", ")}`);
+      for (const pageNum of pagesNeedingOcr) {
+        try {
+          const page = await pdfDoc.getPage(pageNum);
+          // Render page to canvas at 1.5x scale for high OCR accuracy
+          const viewport = page.getViewport({ scale: 1.5 });
+          const canvas = document.createElement("canvas");
+          const context = canvas.getContext("2d");
+          if (context) {
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+            
+            // Wait for pdf.js to render the page onto our off-screen canvas
+            await page.render({
+              canvasContext: context,
+              viewport: viewport,
+              canvas: canvas,
+            }).promise;
+
+            const base64Data = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+            
+            // Send base64 to server OCR endpoint
+            const ocrRes = await fetch("/api/ocr-image", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ base64: base64Data, mimeType: "image/jpeg" })
+            });
+            if (ocrRes.ok) {
+              const ocrData = await ocrRes.json();
+              if (ocrData.success && ocrData.text) {
+                // Prepend indicator that this was parsed using high-precision OCR
+                pageTexts[pageNum] = `[OCR Transcribed Page]\n` + ocrData.text;
+              }
+            }
+          }
+        } catch (ocrErr) {
+          console.error(`Failed OCR for page ${pageNum}:`, ocrErr);
+        }
+      }
+    }
+
+    for (let pageNum = 1; pageNum <= numPagesToParse; pageNum++) {
+      const text = pageTexts[pageNum] || "";
+      fullText += `--- Page ${pageNum} of ${pdfDoc.numPages} ---\n${text}\n\n`;
     }
     return fullText;
   } catch (error) {
@@ -2029,17 +2089,7 @@ export default function App() {
     dragStartIndexRef.current = null;
   };
 
-  const requestDeleteTab = (id: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (isDesktopApp) {
-      setTabIdToDelete(id);
-      setIsDeleteConfirmOpen(true);
-    } else {
-      closeTab(id);
-    }
-  };
-
-  const closeTab = (id: string) => {
+  const closeTab = React.useCallback((id: string) => {
     const closedTab = tabs.find((t) => t.id === id);
     const closedTitle = closedTab ? closedTab.title : "Tab";
 
@@ -2077,7 +2127,17 @@ export default function App() {
     showToast(`Closed "${closedTitle}"`, "info");
     setIsChatMenuOpen(false);
     setIsAssistantChatDropdownOpen(false);
-  };
+  }, [tabs, activeTabId, activeAssistantTabId]);
+
+  const requestDeleteTab = React.useCallback((id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (isDesktopApp) {
+      setTabIdToDelete(id);
+      setIsDeleteConfirmOpen(true);
+    } else {
+      closeTab(id);
+    }
+  }, [isDesktopApp, closeTab]);
 
   const deleteChatPermanently = async (id: string) => {
     // If the chat is currently open as a tab, close it first
@@ -3728,22 +3788,13 @@ export default function App() {
           )
         );
 
-        if (isImage) {
-          setAttachedFile({
-            fileId: data.fileId,
-            fileName: data.fileName,
-            mimetype: data.mimetype,
-            url: `/api/files/${data.fileId}`
-          });
-          return;
-        } else {
-          setAttachedFile({
-            fileId: data.fileId,
-            fileName: data.fileName,
-            mimetype: data.mimetype,
-            url: `/api/files/${data.fileId}`
-          });
-        }
+        // Always save attached file info
+        setAttachedFile({
+          fileId: data.fileId,
+          fileName: data.fileName,
+          mimetype: data.mimetype,
+          url: `/api/files/${data.fileId}`
+        });
 
         let extractedText = "";
         let summaryInfo = `This academic resource was uploaded and incorporated into your workspace. Select 'Ask Assistant' to summarize patterns or find citations.`;
@@ -3764,6 +3815,22 @@ export default function App() {
             }
           } catch (pdfErr) {
             console.error("PDF mapping failed", pdfErr);
+          }
+        } else if (isImage) {
+          try {
+            console.log("[OCR] Direct image upload detected. Triggering Gemini OCR...");
+            const textRes = await fetch(`/api/files/${data.fileId}/raw-text`);
+            if (textRes.ok) {
+              const textData = await textRes.json();
+              if (textData.success && textData.text) {
+                extractedText = textData.text;
+                summaryInfo = `This image has been OCR scanned and mapped successfully. You can start analyzing and asking the Assistant specifically about its claims.`;
+                const words = extractedText.trim().split(/\s+/).filter(Boolean).length;
+                pagesCountString = ` (${words} words OCR transcribed)`;
+              }
+            }
+          } catch (ocrErr) {
+            console.error("Image OCR mapping failed", ocrErr);
           }
         } else if (
           fileLabel.toLowerCase().endsWith(".docx") ||
@@ -3933,11 +4000,9 @@ export default function App() {
             mimetype: file.type || "image/png",
             url: `/api/files/${localFileId}`,
           });
-          showToast(`Attachment "${file.name}" imported successfully (local mode)`, "success", 3000, toastId);
-          return;
+        } else {
+          await preCachePdfFile(localFileId, file);
         }
-
-        await preCachePdfFile(localFileId, file);
 
         let extractedText = "";
         let summaryInfo = `This academic resource was uploaded and incorporated into your workspace. Select 'Ask Assistant' to summarize patterns or find citations.`;
@@ -3955,6 +4020,35 @@ export default function App() {
             }
           } catch (pdfErr) {
             console.error("Local PDF mapping failed", pdfErr);
+          }
+        } else if (isImage) {
+          try {
+            console.log("[OCR] Local image upload detected. Reading base64 for server OCR...");
+            const base64Data = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const result = reader.result as string;
+                resolve(result.split(",")[1]);
+              };
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+            });
+            const ocrRes = await fetch("/api/ocr-image", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ base64: base64Data, mimeType: file.type || "image/jpeg" })
+            });
+            if (ocrRes.ok) {
+              const ocrData = await ocrRes.json();
+              if (ocrData.success && ocrData.text) {
+                extractedText = ocrData.text;
+                summaryInfo = `This image has been OCR scanned and mapped successfully (local mode). You can start analyzing and asking the Assistant specifically about its claims.`;
+                const words = extractedText.trim().split(/\s+/).filter(Boolean).length;
+                pagesCountString = ` (${words} words OCR transcribed)`;
+              }
+            }
+          } catch (ocrErr) {
+            console.error("Local Image OCR failed", ocrErr);
           }
         } else if (isTextOrDoc) {
           try {
@@ -4224,7 +4318,12 @@ export default function App() {
             });
           });
           if (loadedFolders.length > 0) {
-            setFolders(loadedFolders);
+            setFolders(prev => {
+              if (JSON.stringify(prev) !== JSON.stringify(loadedFolders)) {
+                return loadedFolders;
+              }
+              return prev;
+            });
           } else {
             const defaultFolder: FolderItem = { id: "f1", name: "My Research", createdAt: Date.now() };
             setDoc(doc(db, "users", user.uid, "folders", defaultFolder.id), defaultFolder);
@@ -4253,7 +4352,12 @@ export default function App() {
               notes: data.notes || "",
             });
           });
-          setPapers(loadedPapers);
+          setPapers(prev => {
+            if (JSON.stringify(prev) !== JSON.stringify(loadedPapers)) {
+              return loadedPapers;
+            }
+            return prev;
+          });
         });
 
         const chatsColRef = collection(db, "users", user.uid, "chats");
@@ -4268,11 +4372,17 @@ export default function App() {
               messages: data.messages || [],
             });
           });
-          setAllChats(loadedChats.sort((a,b) => {
+          const sorted = loadedChats.sort((a,b) => {
             const aLast = a.messages && a.messages.length > 0 ? a.messages[a.messages.length - 1].timestamp : 0;
             const bLast = b.messages && b.messages.length > 0 ? b.messages[b.messages.length - 1].timestamp : 0;
             return bLast - aLast;
-          }));
+          });
+          setAllChats(prev => {
+            if (JSON.stringify(prev) !== JSON.stringify(sorted)) {
+              return sorted;
+            }
+            return prev;
+          });
         });
 
         const annosColRef = collection(db, "users", user.uid, "annotations");
@@ -4706,25 +4816,30 @@ export default function App() {
 
     // If the title changed, delete the old document
     if (tab.originalTitle && tab.originalTitle !== paperTitle) {
-    if (currentUser && storageMode === "database") {
-      const oldPaperId = encodeURIComponent(tab.originalTitle).replace(
-        /\./g,
-        "%2E",
-      );
-      try {
-        await deleteDoc(
-          doc(db, "users", currentUser.uid, "papers", oldPaperId),
+      if (currentUser && storageMode === "database") {
+        const oldPaperId = encodeURIComponent(tab.originalTitle).replace(
+          /\./g,
+          "%2E",
         );
-      } catch (err) {
-        console.error("Failed to delete renamed draft", err);
+        try {
+          await deleteDoc(
+            doc(db, "users", currentUser.uid, "papers", oldPaperId),
+          );
+        } catch (err) {
+          console.error("Failed to delete renamed draft", err);
+        }
       }
-    }
 
-      // Update tab's originalTitle so we don't try to delete it again
+      // Update tab's originalTitle, title, and content so the sync effect doesn't try to overwrite the editor
       setTabs((prev) =>
-        prev.map((t) =>
-          t.id === tab.id ? { ...t, originalTitle: paperTitle } : t,
-        ),
+        prev.map((t) => {
+          if (t.id === tab.id) {
+            const hasChanged = t.originalTitle !== paperTitle || t.title !== paperTitle || t.content !== tab.content;
+            if (!hasChanged) return t;
+            return { ...t, originalTitle: paperTitle, title: paperTitle, content: tab.content };
+          }
+          return t;
+        }),
       );
     }
 
@@ -4760,11 +4875,15 @@ export default function App() {
           encodeURIComponent(p.title).replace(/\./g, "%2E") !== paperId &&
           p.title !== tab.originalTitle,
       );
-      return [draftPaper, ...filtered];
+      const newPapers = [draftPaper, ...filtered];
+      if (JSON.stringify(prev) === JSON.stringify(newPapers)) {
+        return prev;
+      }
+      return newPapers;
     });
   };
 
-  const saveChatToLibrary = async (targetUserId: string, chatTab: Tab) => {
+  const saveChatToLibrary = React.useCallback(async (targetUserId: string, chatTab: Tab) => {
     if (!chatTab || chatTab.type !== "chat") return;
     
     const uid = currentUser ? currentUser.uid : "guest";
@@ -4797,7 +4916,7 @@ export default function App() {
         return next;
       });
     }
-  };
+  }, [currentUser, storageMode]);
 
   const updateChatMessages = (
     updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
@@ -4829,39 +4948,45 @@ export default function App() {
           foundChat = true;
         }
 
-        let updatedTabs = tabsRef.current;
-        if (!foundChat) {
-          const newChatId = `chat-${Date.now()}`;
-          targetTabId = newChatId;
-          const newChatTab: Tab = {
-            id: newChatId,
-            type: "chat",
-            title: "New chat",
-            messages: next,
-          };
-          updatedTabs = [...updatedTabs, newChatTab];
-          setActiveAssistantTabId(newChatId);
-        }
-
-        updatedTabs = updatedTabs.map((t) =>
-          t.id === targetTabId ? { ...t, messages: next } : t,
-        );
-        
-        // Use functional update to ensure we have latest tabs
         setTabs((prevTabs) => {
-           // Double check if we actually need to update to prevent extra renders
-           const tab = prevTabs.find(t => t.id === targetTabId);
-           if (tab && JSON.stringify(tab.messages) === JSON.stringify(next)) {
-             return prevTabs;
-           }
-           return updatedTabs;
-        });
+          let currentTargetId = targetTabId;
+          let finalTabs = prevTabs;
+          
+          if (!foundChat) {
+            const firstChat = prevTabs.find((t) => t.type === "chat");
+            if (firstChat) {
+              currentTargetId = firstChat.id;
+            } else {
+              const newChatId = `chat-${Date.now()}`;
+              currentTargetId = newChatId;
+              const newChatTab: Tab = {
+                id: newChatId,
+                type: "chat",
+                title: "New chat",
+                messages: next,
+              };
+              finalTabs = [...prevTabs, newChatTab];
+              setActiveAssistantTabId(newChatId);
+            }
+          }
 
-        // Also save to persistent chat library
-        const chatTab = updatedTabs.find((t) => t.id === targetTabId);
-        if (chatTab) {
-          saveChatToLibrary(currentUser?.uid || "guest", chatTab);
-        }
+          const existingTab = finalTabs.find(t => t.id === currentTargetId);
+          if (existingTab && JSON.stringify(existingTab.messages) === JSON.stringify(next)) {
+            return prevTabs; // No change needed
+          }
+
+          const result = finalTabs.map((t) =>
+            t.id === currentTargetId ? { ...t, messages: next } : t,
+          );
+          
+          // Also save to persistent chat library
+          const chatTab = result.find((t) => t.id === currentTargetId);
+          if (chatTab) {
+            saveChatToLibrary(currentUser?.uid || "guest", chatTab);
+          }
+          
+          return result;
+        });
       }, 0);
     }
   };
@@ -5211,38 +5336,55 @@ export default function App() {
         ));
 
     if (isDocNotPdf) {
-      setDocumentTitle(targetTab.title || "Untitled");
-      setDocumentContent(targetTab.content || "");
-      setDocSaveStatus("saved");
-      setChatInput("");
+      const newTitle = targetTab.title || "Untitled";
+      const newContent = targetTab.content || "";
+      
+      if (documentTitle !== newTitle) setDocumentTitle(newTitle);
+      if (documentContent !== newContent) setDocumentContent(newContent);
+      if (docSaveStatus !== "saved") setDocSaveStatus("saved");
+      if (chatInput !== "") setChatInput("");
       if (editorRef.current && (document.activeElement !== editorRef.current || loadedTabIdRef.current !== activeTabId)) {
-        editorRef.current.innerHTML = targetTab.content || "";
-        lastContentRef.current = targetTab.content || "";
+        if (editorRef.current.innerHTML !== (targetTab.content || "")) {
+          editorRef.current.innerHTML = targetTab.content || "";
+          lastContentRef.current = targetTab.content || "";
+        }
       }
     } else if (targetTab.type === "chat") {
       const tabMessages = targetTab.messages || [];
       // Synchronize messages state ONLY if it actually differs and we aren't currently typing (streaming)
       // We exclude messages from dependencies to avoid infinite loops when updating messages
-      if (JSON.stringify(tabMessages) !== JSON.stringify(messagesRef.current)) {
-        setMessages(tabMessages);
+      // Using functional update to ensure we check against the very latest state
+      if (!isAiTyping) {
+        setMessages(prev => {
+          if (JSON.stringify(tabMessages) !== JSON.stringify(prev)) {
+            return tabMessages;
+          }
+          return prev;
+        });
       }
-      if (activeAssistantTabIdRef.current !== targetTab.id) {
+
+      if (activeAssistantTabId !== targetTab.id) {
         setActiveAssistantTabId(targetTab.id);
       }
-      setChatInput(targetTab.chatInput || "");
+      const newChatInput = targetTab.chatInput || "";
+      if (chatInput !== newChatInput) setChatInput(newChatInput);
     } else {
-      setChatInput("");
+      if (chatInput !== "") setChatInput("");
       if (activeTabId !== "initial-home") {
-        setDocumentTitle("Untitled");
-        setDocumentContent("");
+        const title = targetTab.title || "Untitled";
+        if (documentTitle !== title) setDocumentTitle(title);
+        if (documentContent !== "") setDocumentContent("");
+        if (docSaveStatus !== "saved") setDocSaveStatus("saved");
         if (editorRef.current && (document.activeElement !== editorRef.current || loadedTabIdRef.current !== activeTabId)) {
-          editorRef.current.innerHTML = "";
-          lastContentRef.current = "";
+          if (editorRef.current.innerHTML !== "") {
+            editorRef.current.innerHTML = "";
+            lastContentRef.current = "";
+          }
         }
       }
     }
     loadedTabIdRef.current = activeTabId;
-  }, [activeTabId, tabs, isSessionLoaded]);
+  }, [activeTabId, tabs, isSessionLoaded, isAiTyping, activeAssistantTabId]);
 
   // Debounced auto-save of active document draft to Firestore/LocalStorage
   useEffect(() => {
@@ -5266,7 +5408,13 @@ export default function App() {
           ))
       ) {
         try {
-          await saveDraftToLibrary(currentTab);
+          // IMPORTANT: We must save the LATEST state values, not what's currently in the tabs array
+          // since the tabs array might be lagging behind the editor's local state.
+          await saveDraftToLibrary({
+            ...currentTab,
+            title: documentTitle,
+            content: documentContent
+          });
         } catch (err) {
           console.error("Auto-save failed to update paper draft:", err);
         }
@@ -5435,8 +5583,74 @@ Once you have content, I can help you draft sections, summarize findings, or for
     [],
   );
 
+  const highlightTextOnPage = React.useCallback((pageId: string, searchStr: string) => {
+    const pageEl = document.getElementById(pageId);
+    if (!pageEl) return;
+
+    const elementsToReset = pageEl.querySelectorAll("[data-highlighted='true']");
+    elementsToReset.forEach((el: any) => {
+      el.style.backgroundColor = "";
+      el.removeAttribute("data-highlighted");
+    });
+
+    if (!searchStr || searchStr.trim().length < 4) {
+      pageEl.style.transition = "background-color 0.5s ease";
+      pageEl.style.backgroundColor = "rgba(224, 207, 184, 0.15)";
+      setTimeout(() => {
+        pageEl.style.backgroundColor = "";
+      }, 4000);
+      return;
+    }
+
+    const normalizedSearch = searchStr.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+    if (normalizedSearch.length < 4) return;
+
+    const targets = pageEl.querySelectorAll("p, span, div.textLayer > span, li");
+    let bestMatch: HTMLElement | null = null;
+    let bestScore = 0;
+
+    targets.forEach((el: any) => {
+      const text = el.textContent || "";
+      const normalizedText = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ");
+      if (!normalizedText.trim()) return;
+
+      const searchWords = normalizedSearch.split(" ");
+      let matches = 0;
+      searchWords.forEach((word) => {
+        if (word && normalizedText.includes(word)) {
+          matches++;
+        }
+      });
+
+      const score = matches / searchWords.length;
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = el;
+      }
+    });
+
+    if (bestMatch && bestScore > 0.25) {
+      const targetEl = bestMatch as HTMLElement;
+      targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      targetEl.style.transition = "background-color 0.5s ease";
+      targetEl.style.backgroundColor = "rgba(224, 207, 184, 0.35)";
+      targetEl.setAttribute("data-highlighted", "true");
+      
+      setTimeout(() => {
+        targetEl.style.backgroundColor = "";
+        targetEl.removeAttribute("data-highlighted");
+      }, 6000);
+    } else {
+      pageEl.style.transition = "background-color 0.5s ease";
+      pageEl.style.backgroundColor = "rgba(224, 207, 184, 0.15)";
+      setTimeout(() => {
+        pageEl.style.backgroundColor = "";
+      }, 4000);
+    }
+  }, []);
+
   const handleCitationClick = React.useCallback(
-    (page: number, title: string) => {
+    (page: number, title: string, contextText?: string) => {
       const normalizedTarget = title.replace(/_/g, " ").trim().toLowerCase();
 
       // 1. Try to find a matching tab
@@ -5462,6 +5676,15 @@ Once you have content, I can help you draft sections, summarize findings, or for
           const pageEl = document.getElementById(`pdf-page-${page}`);
           if (pageEl) {
             pageEl.scrollIntoView({ behavior: "smooth", block: "start" });
+            if (contextText) {
+              highlightTextOnPage(`pdf-page-${page}`, contextText);
+            } else {
+              pageEl.style.transition = "background-color 0.5s ease";
+              pageEl.style.backgroundColor = "rgba(224, 207, 184, 0.15)";
+              setTimeout(() => {
+                pageEl.style.backgroundColor = "";
+              }, 4000);
+            }
           }
         }, 500);
       } else {
@@ -5484,12 +5707,21 @@ Once you have content, I can help you draft sections, summarize findings, or for
             const pageEl = document.getElementById(`pdf-page-${page}`);
             if (pageEl) {
               pageEl.scrollIntoView({ behavior: "smooth", block: "start" });
+              if (contextText) {
+                highlightTextOnPage(`pdf-page-${page}`, contextText);
+              } else {
+                pageEl.style.transition = "background-color 0.5s ease";
+                pageEl.style.backgroundColor = "rgba(224, 207, 184, 0.15)";
+                setTimeout(() => {
+                  pageEl.style.backgroundColor = "";
+                }, 4000);
+              }
             }
           }, 800);
         }
       }
     },
-    [tabs, activeTabId, papers],
+    [tabs, activeTabId, papers, highlightTextOnPage],
   );
 
   // Sending chat messages
@@ -5557,9 +5789,11 @@ Once you have content, I can help you draft sections, summarize findings, or for
         setAssistantInput("");
       } else {
         setChatInput("");
-        setTabs((prev) =>
-          prev.map((t) => (t.id === activeTabId ? { ...t, chatInput: "" } : t)),
-        );
+        setTabs((prev) => {
+          const updated = prev.map((t) => (t.id === activeTabId ? { ...t, chatInput: "" } : t));
+          if (JSON.stringify(prev) === JSON.stringify(updated)) return prev;
+          return updated;
+        });
       }
     }
 
@@ -7815,11 +8049,6 @@ Once you have content, I can help you draft sections, summarize findings, or for
                               ?.name || "Library"
                           : "Library"}
                       </h1>
-                      {!selectedFolderId && (
-                        <p className="text-[#71717a] text-[11px] mt-1">
-                          Files, research assets, and citation repository
-                        </p>
-                      )}
                     </div>
 
                     <div className="relative w-64">

@@ -619,7 +619,7 @@ const CodeBlockComponent = ({ language, code, isBig }: { language: string; code:
   );
 };
 
-export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationClick, isStreaming, isBig }: { content: string, timestamp: number, onCitationClick?: (page: number, title: string) => void, isStreaming?: boolean, isBig?: boolean }) => {
+export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationClick, isStreaming, isBig }: { content: string, timestamp: number, onCitationClick?: (page: number, title: string, contextText?: string) => void, isStreaming?: boolean, isBig?: boolean }) => {
   
   // Transform custom syntax [[page:N|Title]] into markdown links with special prefix
   // We use encodeURIComponent for the title to handle spaces and special chars in the hash URL
@@ -633,7 +633,11 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
     )
   );
 
-  const components = {
+  const handleCitationClick = React.useCallback((page: number, title: string, contextText?: string) => {
+    onCitationClick?.(page, title, contextText);
+  }, [onCitationClick]);
+
+  const components = useMemo(() => ({
     p: ({children}: any) => <div className={`mb-4 last:mb-0 leading-relaxed text-[#d4d4d8] ${isBig ? "text-[16.5px]" : "text-[15px]"}`}>{children}</div>,
     h1: ({children}: any) => <h1 className={`font-semibold mb-6 mt-4 text-white tracking-tight ${isBig ? "text-3xl" : "text-2xl"}`}>{children}</h1>,
     h2: ({children}: any) => <h2 className={`font-medium mb-4 mt-6 text-[#f4f4f5] tracking-tight ${isBig ? "text-2xl" : "text-xl"}`}>{children}</h2>,
@@ -651,9 +655,7 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
              <blockquote 
                className="border-l-2 border-blue-500/50 pl-4 my-6 bg-blue-500/5 py-3 pr-4 rounded-r-lg hover:bg-blue-500/10 cursor-pointer transition-colors group"
                onClick={() => {
-                 if (onCitationClick) {
-                   onCitationClick(1, title);
-                 }
+                 handleCitationClick(1, title);
                }}
              >
                <div className="flex items-center gap-2 mb-1.5">
@@ -729,10 +731,31 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
             const cleanLabel = title.replace(/_/g, ' ');
             return (
               <button 
-                onClick={() => onCitationClick?.(page, title)}
-                className="inline-flex items-center gap-1 bg-zinc-800 hover:bg-zinc-700 text-blue-400 px-1.5 py-0.5 rounded text-[11px] font-mono border border-zinc-700 transition-colors mx-0.5 cursor-pointer align-middle"
+                onClick={() => {
+                  let contextText = "";
+                  if (content) {
+                    const citationKey = `[[page:${page}|${title}]]`;
+                    const idx = content.indexOf(citationKey);
+                    if (idx !== -1) {
+                      const startIdx = Math.max(0, idx - 180);
+                      const rawSnippet = content.substring(startIdx, idx);
+                      const lines = rawSnippet.split('\n');
+                      const lastLine = lines[lines.length - 1] || "";
+                      contextText = lastLine
+                        .replace(/[\*\_\`\#]/g, '')
+                        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+                        .trim();
+                      if (contextText.length > 100) {
+                        const sentences = contextText.split(/[.!?]\s+/);
+                        contextText = sentences[sentences.length - 1] || contextText;
+                      }
+                    }
+                  }
+                  handleCitationClick(page, title, contextText);
+                }}
+                className="inline-flex items-center gap-1 bg-zinc-800/80 hover:bg-zinc-700/80 text-[#e0cfb8] px-2.5 py-0.5 rounded-full text-[11px] font-sans border border-zinc-700/50 transition-colors mx-0.5 cursor-pointer align-middle shadow-none"
               >
-                <Icon icon="ph:bookmark-simple-fill" className="w-3 h-3" />
+                <Icon icon="ph:bookmark-simple-fill" className="w-3 h-3 text-[#e0cfb8]" />
                 📄 {cleanLabel} (p. {page})
               </button>
             );
@@ -828,7 +851,7 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
     thead: ({ children }: any) => <thead className="bg-[#1a1a1a]">{children}</thead>,
     th: ({ children }: any) => <th className="border border-zinc-800 p-2 text-left font-bold text-zinc-100">{children}</th>,
     td: ({ children }: any) => <td className="border border-zinc-800 p-2 text-zinc-300">{children}</td>,
-  };
+  }), [isBig, content, handleCitationClick]);
 
   return (
     <div className={isStreaming ? "streaming-cursor" : ""}>

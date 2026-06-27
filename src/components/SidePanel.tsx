@@ -161,12 +161,13 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   // Default to comments for PDFs and notes for normal docs
   useEffect(() => {
     if (!isOpen) return;
-    if (activeTab?.mimetype === 'application/pdf' || activeTab?.fileId) {
-      setActiveSubTab('comments');
-    } else {
-      setActiveSubTab('notes');
-    }
-  }, [docStorageKey, isOpen, activeTab]);
+    const isDocPdf = activeTab?.mimetype === 'application/pdf' || activeTab?.fileId;
+    const targetTab = isDocPdf ? 'comments' : 'notes';
+    setActiveSubTab(prev => {
+      if (prev !== targetTab) return targetTab;
+      return prev;
+    });
+  }, [docStorageKey, isOpen, activeTab?.mimetype, activeTab?.fileId]);
 
   // Notes state
   const [notes, setNotes] = useState<string>('');
@@ -246,7 +247,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const matchingPaper = useMemo(() => {
     if (!activeTab) return null;
     return papers.find(p => p.fileId === activeTab.fileId || p.title === activeTab.title) || null;
-  }, [papers, activeTab]);
+  }, [papers, activeTab?.fileId, activeTab?.title]);
 
   // Effect to load stored data when tab changes
   useEffect(() => {
@@ -261,27 +262,39 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       setIsTyping(false);
       lastLoadedDocRef.current = docStorageKey;
       const savedNotes = matchingPaper?.notes || localStorage.getItem(`notes_${docStorageKey}`) || '';
-      setNotes(savedNotes);
-      setNotesSavedStatus(false);
-    } else if (matchingPaper && !notes && matchingPaper.notes) {
+      setNotes(prev => {
+        if (prev !== savedNotes) return savedNotes;
+        return prev;
+      });
+      if (notesSavedStatus !== false) setNotesSavedStatus(false);
+    } else if (matchingPaper && matchingPaper.notes) {
       // Fallback if notes load asynchronously from database after initial load empty
-      setNotes(matchingPaper.notes);
+      setNotes(prev => {
+        if (!prev && matchingPaper.notes && prev !== matchingPaper.notes) return matchingPaper.notes;
+        return prev;
+      });
     }
 
     // 2. Load Details overrides
     const savedAuthor = localStorage.getItem(`author_${docStorageKey}`) || matchingPaper?.author || '';
     const savedUrl = localStorage.getItem(`url_${docStorageKey}`) || matchingPaper?.url || '';
-    setCustomAuthor(savedAuthor);
-    setCustomUrl(savedUrl);
-    setIsEditingDetails(false);
+    setCustomAuthor(prev => prev !== savedAuthor ? savedAuthor : prev);
+    setCustomUrl(prev => prev !== savedUrl ? savedUrl : prev);
+    if (isEditingDetails) setIsEditingDetails(false);
 
     // 3. Load Sources
     const savedSourcesStr = localStorage.getItem(`sources_${docStorageKey}`);
     if (savedSourcesStr) {
       try {
-        setSources(JSON.parse(savedSourcesStr));
+        const parsed = JSON.parse(savedSourcesStr);
+        setSources(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(parsed)) {
+            return parsed;
+          }
+          return prev;
+        });
       } catch (err) {
-        setSources([]);
+        setSources(prev => prev.length > 0 ? [] : prev);
       }
     } else {
       // Auto-initialize with original source if available
@@ -294,10 +307,15 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             url: defaultUrl
           }
         ];
-        setSources(initSourcesList);
-        localStorage.setItem(`sources_${docStorageKey}`, JSON.stringify(initSourcesList));
+        setSources(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(initSourcesList)) {
+            localStorage.setItem(`sources_${docStorageKey}`, JSON.stringify(initSourcesList));
+            return initSourcesList;
+          }
+          return prev;
+        });
       } else {
-        setSources([]);
+        setSources(prev => prev.length > 0 ? [] : prev);
       }
     }
 
@@ -305,36 +323,50 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     const savedQuizStr = localStorage.getItem(`quiz_${docStorageKey}`);
     if (savedQuizStr) {
       try {
-        setQuizData(JSON.parse(savedQuizStr));
+        const parsed = JSON.parse(savedQuizStr);
+        setQuizData(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(parsed)) {
+            return parsed;
+          }
+          return prev;
+        });
       } catch {
-        setQuizData(null);
+        setQuizData(prev => prev !== null ? null : prev);
       }
     } else {
-      setQuizData(null);
+      setQuizData(prev => prev !== null ? null : prev);
     }
 
     // 5. Load Attachments state
     const savedAttachmentsStr = localStorage.getItem(`attachments_${docStorageKey}`);
     if (savedAttachmentsStr) {
       try {
-        setAttachments(JSON.parse(savedAttachmentsStr));
+        const parsed = JSON.parse(savedAttachmentsStr);
+        setAttachments(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(parsed)) {
+            return parsed;
+          }
+          return prev;
+        });
       } catch {
-        setAttachments([]);
+        setAttachments(prev => prev.length > 0 ? [] : prev);
       }
     } else {
-      setAttachments([]);
+      setAttachments(prev => prev.length > 0 ? [] : prev);
     }
 
-    // Reset quiz runtime state upon document switch
-    setCurrentQuestionIndex(0);
-    setSelectedOptionIndex(null);
-    setQuizScore(0);
-    setQuizFinished(false);
-    setQuizHistory({});
-    setQuizError('');
-    setAttachmentError('');
+    // Reset quiz runtime state upon document switch if key changed
+    if (keyChanged) {
+      if (currentQuestionIndex !== 0) setCurrentQuestionIndex(0);
+      if (selectedOptionIndex !== null) setSelectedOptionIndex(null);
+      if (quizScore !== 0) setQuizScore(0);
+      if (quizFinished !== false) setQuizFinished(false);
+      if (Object.keys(quizHistory).length > 0) setQuizHistory({});
+      if (quizError !== '') setQuizError('');
+      if (attachmentError !== '') setAttachmentError('');
+    }
 
-  }, [docStorageKey, isOpen, matchingPaper, activeTab]);
+  }, [docStorageKey, isOpen, matchingPaper, activeTab?.id]);
 
   // Auto-save notes
   const saveNotesToDB = (val: string) => {
@@ -509,7 +541,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       readingTime,
       chars: cleanText.length
     };
-  }, [activeTab, matchingPaper]);
+  }, [activeTab?.content, matchingPaper]);
 
   // Sources management
   const handleAddSource = (e: React.FormEvent) => {

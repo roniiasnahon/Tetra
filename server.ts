@@ -13,6 +13,7 @@ process.on("unhandledRejection", (reason, promise) => {
   console.error("[PROCESS UNHANDLED REJECTION]", reason);
 });
 
+import "express-async-errors";
 import express from "express";
 import path from "path";
 import fs from "fs";
@@ -39,651 +40,77 @@ try {
   console.error("Failed to load firebase-applet-config.json dynamically:", e);
 }
 
-function decompressResponse(buffer: Buffer, contentEncoding?: string): Buffer {
-  if (!buffer || buffer.length === 0) return buffer;
-  const encoding = (contentEncoding || "").toLowerCase().trim();
+import { decompressResponse, tryDecompressFallback, extractAllContentStrings, cleanJsonLeak, cleanAndParseJSON, sniffMimeType, extractDirectPdfFromLandingPage, robustDownloadPdf, attemptBypassDownload, extractTextFromHtml } from "./src/api/utils/file-parsers.js";
+import { z } from "zod";
+import {
+  SendVerificationSchema,
+  VerifyCodeSchema,
+  CustomTokenSchema,
+  OcrImageSchema,
+  DownloadPdfSchema,
+  ResolveDoiSchema,
+  ParseTextSchema,
+  SynthesizeSchema,
+  SummarizeUrlSchema,
+  GenerateTitleSchema,
+  ChatSchema,
+  SearchArxivSchema,
+  GeneratePdfSchema,
+  AnalyzeStatsSchema,
+  GenerateQuizSchema,
+  GenerateNotesSchema,
+  VoyageEmbedSchema,
+  VoyageRerankSchema,
+  LinkPreviewSchema,
+  FileIdSchema,
+  SearchPapersSchema
+} from "./src/api/utils/validators.js";
+import { getGeminiClient, getVoyageClient, getBasetenClient, getMistralClient, getGroqClient, getCohereClient, getUpstageClient, getRekaClient, getInceptionClient, getXiaomiClient } from "./src/api/services/ai.js";
+import { saveFile, getFile, getR2Client, getCachedPaper, setCachedPaper } from "./src/api/services/storage.js";
+
+const ai = getGeminiClient();
+const PORT = 3000;
+
+const systemInstruction = `You are an AI Student Success Mentor. Your job is to help the user write, organize, and research their document while keeping them motivated and on track! You are exceptionally enthusiastic, relatable, and encouraging—think of yourself as a helpful senior student or a cool academic coach. You love deep-diving into topics and providing comprehensive, high-quality drafts.
+
+You are given the current research context of the user workspace:
+1. "Notes": Loose, raw ideas, citations fragments, or reference quotes.
+2. "Citations": Formatted bibliography entries (APA, MLA, IEEE, Chicago) containing meta-attributes.
+3. "Outline / Drafts": The current document state.
+
+TONE & BEHAVIOR:
+- **Relatable & Student-Friendly**: Use an engaging, warm, and supportive tone.
+- **Smart Editor**: ONLY provide draft edits or delegate to the specialized agent, **Blob**, if the user explicitly asks for writing, editing, generating, draft-making, or rewriting.
+- **Interactive PDF Mapping**: When you refer to content from a mapped PDF in the "Citations" list, you MUST include an interactive citation in your chat response using the following format: '[[page:NUMBER|SOURCE_TITLE]]'.
+- **Academic Excellence**: When you do write, never sacrifice quality. Provide multi-paragraph, detailed, and highly polished content.
+- **Mentor Approach**: Explain *why* you are making certain changes or suggestions to help the user learn.
+
+OUTPUT FORMATTING REQUIREMENTS:
+You MUST output your ENTIRE response using exactly the following XML-style tags IN THIS EXACT ORDER.
+DO NOT output any plain text outside of these tags. DO NOT explain what the tags do.
+
+<thought>
+Your detailed, step-by-step reasoning and academic planning.
+</thought>
+<chat>
+Your warm, encouraging mentor-style conversational response here. This is where your conversational chat, explanations of changes, and helpful greetings belong.
+</chat>
+
+CRITICAL PROTOCOL FOR SOURCE RESEARCH & DOWNLOADS:
+If the user asks to "find", "search", "lookup", "download", or "get sources/papers/research" about any topic:
+1. Briefly state in <chat> that you are searching for real academic papers.
+2. You MUST append a <searchRealPapers> XML element immediately after your </chat> element containing ONLY a single short search query string.
+3. **NO HALLUCINATED ABSTRACTS ON DOWNLOAD FAILURE**.
+
+CRITICAL RULE ABOUT DOCUMENT EDITING (DELEGATION TO EDITOR AGENT):
+If AND ONLY IF the user EXPLICITLY asks you to "write an essay", "create a document", "draft a text", "generate an outline", "write a section", "rewrite/edit the content", YOU MUST delegate this task to our specialized agent, **Blob**.
+Immediately after your </chat> element, append a <callEditorAgent> XML element containing a comprehensive prompt detailing what Blob should write.
+`;
 
-  if (encoding === "gzip") {
-    try {
-      return zlib.gunzipSync(buffer);
-    } catch (e: any) {
-      console.error(
-        "[DECOMPRESS] Failed to gunzip based on header:",
-        e.message,
-      );
-    }
-  } else if (encoding === "deflate") {
-    try {
-      return zlib.inflateSync(buffer);
-    } catch (e: any) {
-      console.error(
-        "[DECOMPRESS] Failed to deflate based on header:",
-        e.message,
-      );
-    }
-  } else if (encoding === "br") {
-    try {
-      return zlib.brotliDecompressSync(buffer);
-    } catch (e: any) {
-      console.error(
-        "[DECOMPRESS] Failed to brotli decompress based on header:",
-        e.message,
-      );
-    }
-  }
 
-  // Fallback signature-based checks:
-  if (buffer[0] === 0x1f && buffer[1] === 0x8b) {
-    try {
-      console.log("[DECOMPRESS] Detected GZIP signature. Decompressing...");
-      return zlib.gunzipSync(buffer);
-    } catch (e: any) {
-      console.error("[DECOMPRESS] Failed signature check gunzip:", e.message);
-    }
-  }
 
-  if (
-    buffer[0] === 0x78 &&
-    (buffer[1] === 0x01 || buffer[1] === 0x9c || buffer[1] === 0xda)
-  ) {
-    try {
-      console.log("[DECOMPRESS] Detected Deflate signature. Decompressing...");
-      return zlib.inflateSync(buffer);
-    } catch (e: any) {
-      console.error("[DECOMPRESS] Failed signature check deflate:", e.message);
-    }
-  }
 
-  return buffer;
-}
 
-function tryDecompressFallback(buffer: Buffer): Buffer {
-  if (!buffer || buffer.length < 4) return buffer;
-  if (buffer.length >= 4 && buffer.toString("utf-8", 0, 4) === "%PDF") {
-    return buffer;
-  }
-
-  // Try Brotli
-  try {
-    const brotliOut = zlib.brotliDecompressSync(buffer);
-    if (brotliOut.length >= 4 && brotliOut.toString("utf-8", 0, 4) === "%PDF") {
-      console.log("[DECOMPRESS] Fallback Brotli decompression succeeded!");
-      return brotliOut;
-    }
-  } catch (e) {}
-
-  // Try Gzip
-  try {
-    const gzipOut = zlib.gunzipSync(buffer);
-    if (gzipOut.length >= 4 && gzipOut.toString("utf-8", 0, 4) === "%PDF") {
-      console.log("[DECOMPRESS] Fallback Gzip decompression succeeded!");
-      return gzipOut;
-    }
-  } catch (e) {}
-
-  // Try Deflate
-  try {
-    const deflateOut = zlib.inflateSync(buffer);
-    if (
-      deflateOut.length >= 4 &&
-      deflateOut.toString("utf-8", 0, 4) === "%PDF"
-    ) {
-      console.log("[DECOMPRESS] Fallback Deflate decompression succeeded!");
-      return deflateOut;
-    }
-  } catch (e) {}
-
-  return buffer;
-}
-
-function extractAllContentStrings(
-  obj: any,
-  excludedKeys: string[] = [
-    "title",
-    "author",
-    "fileType",
-    "added",
-    "fullTextStatus",
-    "id",
-  ],
-): string[] {
-  let results: string[] = [];
-  if (obj === null || obj === undefined) return results;
-
-  if (typeof obj === "string") {
-    const trimmed = obj.trim();
-    if (
-      trimmed &&
-      trimmed !== "..." &&
-      !trimmed.toLowerCase().startsWith("note") &&
-      !trimmed.toLowerCase().startsWith("document")
-    ) {
-      results.push(trimmed);
-    }
-    return results;
-  }
-
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      results.push(...extractAllContentStrings(item, excludedKeys));
-    }
-    return results;
-  }
-
-  if (typeof obj === "object") {
-    for (const key of Object.keys(obj)) {
-      if (excludedKeys.includes(key)) continue;
-      results.push(...extractAllContentStrings(obj[key], excludedKeys));
-    }
-  }
-
-  return results;
-}
-
-function cleanJsonLeak(text: string): string {
-  if (!text) return "";
-  let clean = text.trim();
-
-  // If the text literally begins with markdown backticks
-  if (clean.startsWith("```")) {
-    clean = clean
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```$/, "")
-      .trim();
-  }
-
-  // Remove structural keys, nested list wrappers and formatting residues
-  // e.g., '", "some_key":{' or '", "some_key":"' or '", "some_key":['
-  clean = clean.replace(/",\s*"[a-zA-Z0-9_]+"\s*:\s*\{/g, "\n\n");
-  clean = clean.replace(/",\s*"[a-zA-Z0-9_]+"\s*:\s*\[/g, "\n\n");
-  clean = clean.replace(/",\s*"[a-zA-Z0-9_]+"\s*:\s*"/g, "\n\n");
-  clean = clean.replace(/",\s*"[a-zA-Z0-9_]+"\s*:\s*/g, "\n\n");
-
-  // Strip any remaining curly braces or square brackets
-  clean = clean.replace(/[\{\}\[\]]/g, " ");
-
-  // Remove direct inline structural objects that might have been stringified
-  clean = clean.replace(/"[a-zA-Z0-9_]+"\s*:\s*"/g, " ");
-  clean = clean.replace(/"[a-zA-Z0-9_]+"\s*:\s*/g, " ");
-
-  // Clean empty array remnants inside strings
-  clean = clean.replace(/"\s*,\s*"/g, "\n\n");
-  clean = clean.replace(/"\s*:\s*"/g, ": ");
-
-  // Remove trailing or leading quotes and structural dividers at word edges
-  clean = clean.replace(/([^\w])"([^\w])/g, "$1$2");
-
-  // Clean double quotes at ends/starts
-  if (clean.startsWith('"') && clean.endsWith('"')) {
-    clean = clean.substring(1, clean.length - 1);
-  }
-
-  // Standardize spacing and normalize paragraphs
-  clean = clean.replace(/\r/g, "");
-  clean = clean.replace(/\n{3,}/g, "\n\n");
-  clean = clean.replace(/[ \t]+/g, " ");
-
-  return clean.trim();
-}
-
-function cleanAndParseJSON(responseText: string): any {
-  let cleaned = (responseText || "").trim();
-
-  if (!cleaned) {
-    return {};
-  }
-
-  // Remove markdown fencing if present
-  if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "");
-    cleaned = cleaned.replace(/\s*```$/, "");
-  }
-
-  cleaned = cleaned.trim();
-
-  try {
-    return JSON.parse(cleaned);
-  } catch (err) {
-    // Attempt pattern-matching for a JSON block within the response
-    const jsonMatch = cleaned?.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const candidate = jsonMatch[0];
-      try {
-        return JSON.parse(candidate);
-      } catch (e) {
-        // Let's try to repair unclosed quotes or missing brackets if truncated
-        let repaired = candidate.trim();
-        if (!repaired.endsWith("}")) {
-          // If truncated inside a string value
-          if (repaired.includes('"') && repaired.split('"').length % 2 === 0) {
-            repaired += '"';
-          }
-          repaired += "}";
-          try {
-            return JSON.parse(repaired);
-          } catch (e2) {}
-        }
-      }
-    }
-
-    try {
-      const sanitized = cleaned.replace(
-        /[\u0000-\u0008\u000B-\u000C\u000E-\u001F\u007F-\u009F]/g,
-        "",
-      );
-      return JSON.parse(sanitized);
-    } catch (err2) {
-      console.warn(
-        "[cleanAndParseJSON] Direct parsing failed, attempting fuzzy key-value extraction fallback.",
-      );
-      // Absolute fallback: build a simple plain object by parsing key-values using quick regexes
-      const obj: any = {};
-      const titleMatch = cleaned?.match(/"title"\s*:\s*"([^"]+)"/i);
-      const authorMatch = cleaned?.match(/"author"\s*:\s*"([^"]+)"/i);
-      const summaryMatch = cleaned?.match(
-        /"summary"\s*:\s*"([\s\S]+?)"\s*(?:,|\})/i,
-      );
-      const fileTypeMatch = cleaned?.match(/"fileType"\s*:\s*"([^"]+)"/i);
-
-      if (titleMatch) obj.title = titleMatch[1];
-      if (authorMatch) obj.author = authorMatch[1];
-      if (summaryMatch) {
-        obj.summary = summaryMatch[1];
-      } else {
-        // Safe, clean JSON-leak stripped fallback summary
-        obj.summary = cleanJsonLeak(responseText);
-      }
-      if (fileTypeMatch) obj.fileType = fileTypeMatch[1];
-
-      if (obj.title || obj.summary) {
-        return obj;
-      }
-
-      throw err;
-    }
-  }
-}
-
-function sniffMimeType(buffer: Buffer): {
-  mimetype: string;
-  extension: string;
-} {
-  if (buffer.length >= 4 && buffer.toString("utf-8", 0, 4) === "%PDF") {
-    return { mimetype: "application/pdf", extension: "pdf" };
-  }
-
-  const sample = buffer
-    .toString("utf-8", 0, Math.min(buffer.length, 1024))
-    .trim()
-    .toLowerCase();
-
-  if (
-    sample.startsWith("<") ||
-    sample.includes("<html") ||
-    sample.includes("<!doctype") ||
-    sample.includes("<head") ||
-    sample.includes("<body") ||
-    sample.includes("<title")
-  ) {
-    return { mimetype: "text/html", extension: "html" };
-  }
-
-  if (sample.startsWith("{") || sample.startsWith("[")) {
-    try {
-      JSON.parse(sample);
-      return { mimetype: "application/json", extension: "json" };
-    } catch (_) {
-      if (sample.includes('"') && sample.includes(":")) {
-        return { mimetype: "application/json", extension: "json" };
-      }
-    }
-  }
-
-  if (
-    sample.startsWith("<?xml") ||
-    sample.includes("<xml") ||
-    sample.includes("<rss") ||
-    sample.includes("<feed")
-  ) {
-    return { mimetype: "application/xml", extension: "xml" };
-  }
-
-  let isText = true;
-  const checkLen = Math.min(buffer.length, 512);
-  for (let i = 0; i < checkLen; i++) {
-    const charCode = buffer[i];
-    if (
-      charCode === 0 ||
-      (charCode < 32 && charCode !== 9 && charCode !== 10 && charCode !== 13)
-    ) {
-      isText = false;
-      break;
-    }
-  }
-
-  if (isText && buffer.length > 0) {
-    return { mimetype: "text/plain", extension: "txt" };
-  }
-
-  return { mimetype: "application/octet-stream", extension: "bin" };
-}
-
-async function extractDirectPdfFromLandingPage(
-  landingPageUrl: string,
-  htmlContent: string,
-): Promise<Buffer | null> {
-  try {
-    const matches = htmlContent?.match(/href=["']([^"']+)["']/gi) || [];
-    const candidateUrls: string[] = [];
-
-    for (const match of matches) {
-      const parts = match?.match(/href=["']([^"']+)["']/i);
-      if (parts && parts[1]) {
-        const link = parts[1];
-        const lowerLink = link.toLowerCase();
-
-        // Match common repository and direct PDF landing page triggers
-        if (
-          lowerLink.includes("bitstream") ||
-          lowerLink.includes("bitstreams") ||
-          lowerLink.includes("/download") ||
-          lowerLink.includes("/retrieve/") ||
-          lowerLink.includes("/datastream/") ||
-          lowerLink.includes("/stream/") ||
-          lowerLink.includes("/files/") ||
-          lowerLink.endsWith(".pdf") ||
-          lowerLink.includes(".pdf?") ||
-          lowerLink.includes("paper-pdf") ||
-          lowerLink.includes("article-pdf")
-        ) {
-          // Resolve relative URL
-          let resolved = link;
-          if (link.startsWith("//")) {
-            resolved = `https:${link}`;
-          } else if (link.startsWith("/")) {
-            try {
-              const u = new URL(landingPageUrl);
-              resolved = `${u.protocol}//${u.host}${link}`;
-            } catch (_) {}
-          } else if (!link.startsWith("http")) {
-            try {
-              const u = new URL(landingPageUrl);
-              const pathBase =
-                u.origin +
-                u.pathname.substring(0, u.pathname.lastIndexOf("/") + 1);
-              resolved = `${pathBase}${link}`;
-            } catch (_) {}
-          }
-          if (!candidateUrls.includes(resolved)) {
-            candidateUrls.push(resolved);
-          }
-        }
-      }
-    }
-
-    console.log(
-      `[CRAWLER] Found ${candidateUrls.length} candidate PDF download URLs on the landing page: ${landingPageUrl}`,
-    );
-
-    // Attempt download sequentially for candidates
-    for (const link of candidateUrls) {
-      if (link === landingPageUrl) continue;
-
-      console.log(`[CRAWLER] Trying candidate download URL: ${link}`);
-      try {
-        const res = await axios.get(link, {
-          responseType: "arraybuffer",
-          timeout: 10000,
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            Accept:
-              "application/pdf,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            Referer: landingPageUrl,
-          },
-        });
-        const buf = Buffer.from(res.data);
-        if (buf.length >= 4 && buf.toString("utf-8", 0, 4) === "%PDF") {
-          console.log(
-            `[CRAWLER] Success! Downloaded robust PDF from fallback candidate: ${link}`,
-          );
-          return buf;
-        }
-      } catch (err: any) {
-        console.warn(
-          `[CRAWLER] Failed candidate download for ${link}: ${err.message}`,
-        );
-      }
-    }
-  } catch (err: any) {
-    console.error(`[CRAWLER] Landing page PDF extraction failed:`, err);
-  }
-  return null;
-}
-
-async function robustDownloadPdf(url: string): Promise<Buffer> {
-  const headers: any = {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    Accept:
-      "application/pdf,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    Referer: "https://www.google.com/",
-    "Cache-Control": "no-cache",
-    Pragma: "no-cache",
-    "Upgrade-Insecure-Requests": "1",
-  };
-
-  try {
-    const domain = new URL(url).hostname;
-    if (
-      domain.includes("ajpmonline.org") ||
-      domain.includes("sciencedirect.com") ||
-      domain.includes("elsevier.com") ||
-      domain.includes("pubs.aip.org")
-    ) {
-      headers["Referer"] = `https://${domain}/`;
-      headers["User-Agent"] =
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-    }
-  } catch (e) {}
-
-  console.log(`[ROBUST_DOWNLOAD] Attempting download from: ${url}`);
-  const response = await axios.get(url, {
-    responseType: "arraybuffer",
-    headers: headers,
-    timeout: 15000,
-  });
-
-  const contentEncodingRaw = response.headers
-    ? response.headers["content-encoding"] ||
-      response.headers["Content-Encoding"] ||
-      ""
-    : "";
-  const contentEncoding = Array.isArray(contentEncodingRaw)
-    ? contentEncodingRaw[0]
-    : String(contentEncodingRaw);
-
-  let decompressed = decompressResponse(
-    Buffer.from(response.data),
-    contentEncoding,
-  );
-  decompressed = tryDecompressFallback(decompressed);
-
-  const magic = decompressed.toString("utf-8", 0, 5);
-  const isHtml =
-    magic.trim().startsWith("<") ||
-    magic.trim().toLowerCase().startsWith("!doc") ||
-    magic.toLowerCase().includes("<html");
-
-  if (isHtml) {
-    console.log(
-      `[ROBUST_DOWNLOAD] Loaded page is HTML, not PDF. Crawling for direct PDF attachments...`,
-    );
-    const crawledPdf = await extractDirectPdfFromLandingPage(
-      url,
-      decompressed.toString("utf-8"),
-    );
-    if (crawledPdf) {
-      return crawledPdf;
-    }
-  }
-
-  return decompressed;
-}
-
-async function attemptBypassDownload(url: string): Promise<Buffer> {
-  try {
-    const buffer = await robustDownloadPdf(url);
-    const sniffed = sniffMimeType(buffer);
-
-    // If it's explicitly a PDF, we are good.
-    if (sniffed.mimetype === "application/pdf") {
-      return buffer;
-    }
-
-    // If it's HTML, it means robustDownloadPdf failed to find a direct PDF even after crawling
-    if (sniffed.mimetype === "text/html") {
-      const titleMatch = buffer.toString("utf-8").match(/<title>([^<]+)<\/title>/i);
-      const pageTitle = titleMatch ? titleMatch[1] : "Unknown HTML Page";
-      
-      if (pageTitle.toLowerCase().includes("radware") || pageTitle.toLowerCase().includes("captcha") || pageTitle.toLowerCase().includes("blocked")) {
-        throw new Error(`Access blocked by security filter (Radware/Captcha) at the source: ${pageTitle}`);
-      }
-      
-      throw new Error(`Downloaded content is a web page ("${pageTitle}"), not a PDF. The source might be behind a login or proxy.`);
-    }
-
-    // Fallback for other types if they are large enough to be something useful (though we usually want PDFs here)
-    if (buffer.length > 100) {
-      return buffer;
-    }
-    throw new Error("Downloaded file is empty or not a valid format");
-  } catch (firstErr: any) {
-    // Silently attempt OpenAlex lookup without noisy warnings
-    try {
-      // Look up URL in OpenAlex locations using both full URL and any extracted DOI
-      const lookupsUrls = [
-        `https://api.openalex.org/works?filter=locations.landing_page_url:${encodeURIComponent(url)}&mailto=asnahonron@gmail.com`,
-      ];
-
-      // Try DOI extraction too as DOIs are robust identifiers
-      const doiMatch = url?.match(/(10\.\d{4,9}\/[-._;()/:A-Z0-9]+)/i);
-      if (doiMatch) {
-        let doi = doiMatch[1];
-        if (doi.endsWith(")")) doi = doi.substring(0, doi.length - 1);
-        lookupsUrls.unshift(
-          `https://api.openalex.org/works/https://doi.org/${doi}?mailto=asnahonron@gmail.com`,
-        );
-      }
-
-      for (const queryOaUrl of lookupsUrls) {
-        try {
-          const oaRes = await axios.get(queryOaUrl, { timeout: 10000 });
-          const workData = oaRes.data;
-
-          let entry = null;
-          if (workData && workData.results && workData.results.length > 0) {
-            entry = workData.results[0];
-          } else if (workData && workData.id) {
-            entry = workData;
-          }
-
-          if (entry) {
-            console.log(
-              `[BYPASS] Found matching OpenAlex paper: "${entry.title}"`,
-            );
-            const locations = entry.locations || [];
-            console.log(
-              `[BYPASS] Paper has ${locations.length} alternative locations to try.`,
-            );
-
-            for (const loc of locations) {
-              const fallbackUrl = loc.pdf_url || loc.landing_page_url;
-              if (fallbackUrl && fallbackUrl !== url) {
-                console.log(
-                  `[BYPASS] Attempting fallback download from: ${fallbackUrl}`,
-                );
-                try {
-                  const buffer = await robustDownloadPdf(fallbackUrl);
-                  const magic = buffer.toString("utf-8", 0, 4);
-                  if (magic === "%PDF") {
-                    console.log(
-                      `[BYPASS] Successfully bypassed 403 and retrieved PDF from alternative location: ${fallbackUrl}`,
-                    );
-                    return buffer;
-                  }
-                } catch (fallbackErr: any) {
-                  console.warn(
-                    `[BYPASS] Fallback URL failed: ${fallbackUrl} - ${fallbackErr.message}`,
-                  );
-                }
-              }
-            }
-          }
-        } catch (itemErr: any) {
-          console.warn(
-            `[BYPASS] Single OpenAlex candidate lookup failed: ${itemErr.message}`,
-          );
-        }
-      }
-    } catch (oaErr: any) {
-      console.error(
-        `[BYPASS] OpenAlex work backup resolution failed:`,
-        oaErr.message,
-      );
-    }
-
-    // Unpaywall fallback if OpenAlex failed or found nothing
-    const doiMatch = url?.match(/(10\.\d{4,9}\/[-._;()/:A-Z0-9]+)/i);
-    if (doiMatch) {
-      let doi = doiMatch[1];
-      if (doi.endsWith(")")) doi = doi.substring(0, doi.length - 1);
-      try {
-        console.log(`[BYPASS] OpenAlex failed. Querying Unpaywall fallback for DOI: ${doi}`);
-        const unpaywallUrl = `https://api.unpaywall.org/v2/${encodeURIComponent(doi)}?email=asnahonron@gmail.com`;
-        const unpaywallRes = await axios.get(unpaywallUrl, { timeout: 8000 });
-        if (unpaywallRes.data && unpaywallRes.data.is_oa) {
-          const unpaywallPdfLink = unpaywallRes.data.best_oa_location?.url_for_pdf;
-          if (unpaywallPdfLink && unpaywallPdfLink !== url) {
-            console.log(`[BYPASS] Found Unpaywall PDF: ${unpaywallPdfLink}`);
-            try {
-              const buffer = await robustDownloadPdf(unpaywallPdfLink);
-              const magic = buffer.toString("utf-8", 0, 4);
-              if (magic === "%PDF") {
-                console.log(`[BYPASS] Successfully downloaded PDF via Unpaywall PDF URL: ${unpaywallPdfLink}`);
-                return buffer;
-              }
-            } catch (err: any) {
-              console.warn(`[BYPASS] Unpaywall PDF download failed: ${unpaywallPdfLink}`);
-            }
-          }
-          if (unpaywallRes.data.oa_locations) {
-            for (const loc of unpaywallRes.data.oa_locations) {
-              if (loc.url_for_pdf && loc.url_for_pdf !== url && loc.url_for_pdf !== unpaywallPdfLink) {
-                try {
-                  const buffer = await robustDownloadPdf(loc.url_for_pdf);
-                  const magic = buffer.toString("utf-8", 0, 4);
-                  if (magic === "%PDF") {
-                    console.log(`[BYPASS] Successfully downloaded PDF via Unpaywall alternative: ${loc.url_for_pdf}`);
-                    return buffer;
-                  }
-                } catch (e: any) {
-                  // ignore
-                }
-              }
-            }
-          }
-        }
-      } catch (unpaywallErr: any) {
-        console.warn(`[BYPASS] Unpaywall lookup failed: ${unpaywallErr.message}`);
-      }
-    }
-
-    // Re-throw first error if match/fallback fails
-    throw firstErr;
-  }
-}
 
 // Initialize Firebase Admin safely
 if (!admin.apps.length) {
@@ -711,755 +138,23 @@ if (!admin.apps.length) {
 }
 
 // Lazy/Safe proxy initializer for GoogleGenAI to prevent failure if API key is not present during build/evaluation time
-let aiInstance: GoogleGenAI | null = null;
-try {
-  if (process.env.GEMINI_API_KEY) {
-    aiInstance = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-      httpOptions: {
-        headers: {
-          "User-Agent": "aistudio-build",
-        },
-      },
-    });
-  }
-} catch (e) {
-  console.error("Failed to eagerly initialize GoogleGenAI:", e);
-}
 
-const ai = new Proxy({} as GoogleGenAI, {
-  get(target, prop, receiver) {
-    if (!aiInstance) {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        throw new Error("GEMINI_API_KEY is not configured.");
-      }
-      aiInstance = new GoogleGenAI({
-        apiKey: apiKey,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build",
-          },
-        },
-      });
-    }
-    return Reflect.get(aiInstance, prop, receiver);
-  },
-});
-
-let r2Client: S3Client | null = null;
-const R2_BUCKET = process.env.R2_BUCKET_NAME || "";
-
-function getR2Client(): S3Client {
-  if (r2Client) return r2Client;
-
-  const accountId = process.env.R2_ACCOUNT_ID?.trim() || "";
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID?.trim() || "";
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim() || "";
-  const customEndpoint = process.env.R2_ENDPOINT?.trim() || "";
-
-  if (!accessKeyId || !secretAccessKey) {
-    const missing = [];
-    if (!accessKeyId) missing.push("R2_ACCESS_KEY_ID");
-    if (!secretAccessKey) missing.push("R2_SECRET_ACCESS_KEY");
-    console.warn(`[STORAGE] Cloudflare R2 credentials missing: ${missing.join(", ")}`);
-    throw new Error(`Cloudflare R2 credentials (${missing.join(", ")}) are missing.`);
-  }
-
-  const endpoint = customEndpoint || (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : "");
-
-  if (!endpoint) {
-    console.warn("[STORAGE] Cloudflare R2 endpoint or R2_ACCOUNT_ID must be provided for R2 storage.");
-    throw new Error("Cloudflare R2 endpoint or R2_ACCOUNT_ID must be provided.");
-  }
-
-  console.log(`[STORAGE] Initializing Cloudflare R2 client for bucket: ${R2_BUCKET || "(not set)"}`);
-  r2Client = new S3Client({
-    region: "auto",
-    endpoint: endpoint,
-    credentials: {
-      accessKeyId,
-      secretAccessKey,
-    },
-    forcePathStyle: true,
-  });
-
-  return r2Client;
-}
-
-async function streamToBuffer(stream: any): Promise<Buffer> {
-  if (Buffer.isBuffer(stream)) {
-    return stream;
-  }
-  if (stream && typeof stream.transformToByteArray === "function") {
-    const arr = await stream.transformToByteArray();
-    return Buffer.from(arr);
-  }
-  return new Promise<Buffer>((resolve, reject) => {
-    const chunks: any[] = [];
-    stream.on("data", (chunk: any) => chunks.push(chunk));
-    stream.on("end", () => resolve(Buffer.concat(chunks)));
-    stream.on("error", reject);
-  });
-}
-
-import OpenAI from "openai";
-
-// Port must be 3000
-const PORT = 3000;
-
-let basetenClient: OpenAI | null = null;
-let mistralClient: OpenAI | null = null;
-let groqClient: OpenAI | null = null;
-let cohereClient: OpenAI | null = null;
-let upstageClient: OpenAI | null = null;
-let rekaClient: OpenAI | null = null;
-let inceptionClient: OpenAI | null = null;
-let xiaomiClient: OpenAI | null = null;
-import { VoyageAIClient } from "voyageai";
-let voyageClient: VoyageAIClient | null = null;
-
-function getVoyageClient(): VoyageAIClient {
-  if (!voyageClient) {
-    const apiKey = process.env.VOYAGE_API_KEY;
-    if (!apiKey) {
-      throw new Error(
-        "VOYAGE_API_KEY is not configured. Please set it in the Secrets panel.",
-      );
-    }
-    voyageClient = new VoyageAIClient({ apiKey });
-  }
-  return voyageClient;
-}
-
-function getBasetenClient(): OpenAI {
-  if (!basetenClient) {
-    const apiKey = process.env.BASETEN_API_KEY;
-    if (!apiKey) {
-      throw new Error(
-        "BASETEN_API_KEY is not configured. Please set it in the Secrets panel.",
-      );
-    }
-    basetenClient = new OpenAI({
-      apiKey: apiKey,
-      baseURL: "https://inference.baseten.co/v1",
-    });
-  }
-  return basetenClient;
-}
-
-function getMistralClient(): OpenAI {
-  if (!mistralClient) {
-    const apiKey = process.env.MISTRAL_API_KEY;
-    if (!apiKey) {
-      throw new Error(
-        "MISTRAL_API_KEY is not configured. Please set it in the Secrets panel.",
-      );
-    }
-    mistralClient = new OpenAI({
-      apiKey: apiKey,
-      baseURL: "https://api.mistral.ai/v1",
-    });
-  }
-  return mistralClient;
-}
-
-function getGroqClient(): OpenAI {
-  if (!groqClient) {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) {
-      throw new Error(
-        "GROQ_API_KEY is not configured. Please set it in the Secrets panel.",
-      );
-    }
-    groqClient = new OpenAI({
-      apiKey: apiKey,
-      baseURL: "https://api.groq.com/openai/v1",
-    });
-  }
-  return groqClient;
-}
-
-function getCohereClient(): OpenAI {
-  if (!cohereClient) {
-    const apiKey = process.env.COHERE_API_KEY;
-    if (!apiKey) {
-      throw new Error(
-        "COHERE_API_KEY is not configured. Please set it in the Secrets panel.",
-      );
-    }
-    cohereClient = new OpenAI({
-      apiKey: apiKey,
-      baseURL: "https://api.cohere.com/compatibility/v1",
-    });
-  }
-  return cohereClient;
-}
-
-function getUpstageClient(): OpenAI {
-  if (!upstageClient) {
-    const apiKey =
-      process.env.UPSTAGE_API_KEY || "up_f7qyEzCstwwEFZ7fDTkoBmeheHNTj";
-    if (!apiKey) {
-      throw new Error(
-        "UPSTAGE_API_KEY is not configured. Please set it in the Secrets panel.",
-      );
-    }
-    upstageClient = new OpenAI({
-      apiKey: apiKey,
-      baseURL: "https://api.upstage.ai/v1/solar",
-    });
-  }
-  return upstageClient;
-}
-
-function getRekaClient(): OpenAI {
-  if (!rekaClient) {
-    const apiKey =
-      process.env.REKA_API_KEY ||
-      "e398a6b88250adf466c469981fb8b29925967c18a1dbf1ad02aecb54c2d62d67";
-    if (!apiKey) {
-      throw new Error(
-        "REKA_API_KEY is not configured. Please set it in the Secrets panel.",
-      );
-    }
-    rekaClient = new OpenAI({
-      apiKey: apiKey,
-      baseURL: "https://api.reka.ai/v1",
-    });
-  }
-  return rekaClient;
-}
-
-function getInceptionClient(): OpenAI {
-  if (!inceptionClient) {
-    const apiKey =
-      process.env.INCEPTION_API_KEY || "sk_972524b90b306e7a2bf68731c7ef646d";
-    if (!apiKey) {
-      throw new Error(
-        "INCEPTION_API_KEY is not configured. Please set it in the Secrets panel.",
-      );
-    }
-    inceptionClient = new OpenAI({
-      apiKey: apiKey,
-      baseURL: "https://api.inceptionlabs.ai/v1",
-    });
-  }
-  return inceptionClient;
-}
-
-function getXiaomiClient(): OpenAI {
-  if (!xiaomiClient) {
-    const apiKey =
-      process.env.XIAOMI_API_KEY || "sk-s14gvi7k26iigkps96520rf7n76pw52povykiw07m9nuuq91";
-    if (!apiKey) {
-      throw new Error(
-        "XIAOMI_API_KEY is not configured. Please set it in the Secrets panel.",
-      );
-    }
-    xiaomiClient = new OpenAI({
-      apiKey: apiKey,
-      baseURL: "https://api.xiaomimimo.com/v1",
-    });
-  }
-  return xiaomiClient;
-}
-
-function extractTextFromHtml(html: string): string {
-  let text = html;
-  text = text.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, "");
-  text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
-  text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
-  text = text.replace(/<[^>]+>/g, " ");
-  text = text.replace(/\s+/g, " ").trim();
-  return text.substring(0, 15000);
-}
-
-const systemInstruction = `You are an AI Student Success Mentor. Your job is to help the user write, organize, and research their document while keeping them motivated and on track! You are exceptionally enthusiastic, relatable, and encouraging—think of yourself as a helpful senior student or a cool academic coach. You love deep-diving into topics and providing comprehensive, high-quality drafts.
-
-You are given the current research context of the user workspace:
-1. "Notes": Loose, raw ideas, citations fragments, or reference quotes.
-2. "Citations": Formatted bibliography entries (APA, MLA, IEEE, Chicago) containing meta-attributes.
-3. "Outline / Drafts": The current document state.
-
-TONE & BEHAVIOR:
-- **Relatable & Student-Friendly**: Use an engaging, warm, and supportive tone. Use phrases like "Let's crush this!", "Great progress so far!", or "That's a brilliant angle."
-- **Smart Editor**: ONLY provide draft edits or delegate to the specialized agent, **Blob**, if the user explicitly asks for writing, editing, generating, draft-making, or rewriting. If the user is just saying "hi", "thanks", "that's nice", or chatting casually, YOU MUST NOT include document editing tags or call any agents.
-- **Interactive PDF Mapping**: When you refer to content from a mapped PDF in the "Citations" list, you MUST include an interactive citation in your chat response using the following format: '[[page:NUMBER|SOURCE_TITLE]]' (e.g., "The results show an increase in velocity [[page:4|Abstract_Physics.pdf]]"). This allows the user to click and jump directly to that page. You can identify page numbers by looking for "--- Page N of M ---" markers in the provided full text context.
-- **Academic Excellence**: When you do write, never sacrifice quality. Provide multi-paragraph, detailed, and highly polished content.
-- **Mentor Approach**: Explain *why* you are making certain changes or suggestions to help the user learn.
-
-OUTPUT FORMATTING REQUIREMENTS:
-You MUST output your ENTIRE response using exactly the following XML-style tags IN THIS EXACT ORDER.
-DO NOT output any plain text outside of these tags. DO NOT explain what the tags do.
-CRITICAL: NEVER generate meta-commentary discussing XML formatting, stray spaces, or tag structure. Just output the clean tags and their contents.
-
-<thought>
-Your detailed, step-by-step reasoning and academic planning.
-</thought>
-<chat>
-Your warm, encouraging mentor-style conversational response here. This is where your conversational chat, explanations of changes, and helpful greetings belong.
-</chat>
-
-CRITICAL PROTOCOL FOR SOURCE RESEARCH & DOWNLOADS:
-If the user asks to "find", "search", "lookup", "download", or "get sources/papers/research" about any topic (e.g. "jpeg", "quantum computing", "photosynthesis"):
-1. Briefly state in <chat> that you are searching for real academic papers.
-2. You MUST append a <searchRealPapers> XML element immediately after your </chat> element. This element MUST contain ONLY a single, short search query string centered specifically around the user's requested topic.
-3. NEVER keep "machine learning" as the default query if the user is asking about something else (like "jpeg"). Replace it with their actual topic!
-4. **NO HALLUCINATED ABSTRACTS ON DOWNLOAD FAILURE**: If a paper's automated PDF download fails (as indicated by the search state results), you MUST NOT synthesize an abstract or brief. Instead, provide the URL link directly to the user so they can browse it, suggest they manually upload the document if they have the file, and recommend alternative papers or search directions.
-Examples:
-- If user wants "jpeg":
-<searchRealPapers>jpeg</searchRealPapers>
-- If user wants "graphene":
-<searchRealPapers>graphene</searchRealPapers>
-- If user wants "machine learning":
-<searchRealPapers>machine learning</searchRealPapers>
-Do NOT hallucinate or generate paper contents using any other custom tags. Only provide the search/lookup query string inside the <searchRealPapers> tag. The system will download 1 real PDF paper natively and display it.
-
-CRITICAL RULE ABOUT DOCUMENT EDITING (DELEGATION TO EDITOR AGENT):
-If AND ONLY IF the user EXPLICITLY asks you to "write an essay", "create a document", "draft a text", "generate an outline", "write a section", "rewrite/edit the content", or similar commands, YOU MUST delegate this heavy drafting task to our specialized agent, **Blob**.
-Do NOT write <title> or <replaceContent> tags yourself.
-Instead, do the following:
-1. In your <chat> response, enthusiastically explain to the user that you are calling **Blob** (our specialized content creator agent) to compose the document/essay with ultimate professional precision.
-2. Immediately after your </chat> element, append a <callEditorAgent> XML element containing a comprehensive prompt detailing what Blob should write, including any user guidelines, chosen topic, outline notes, and academic context.
-
-Example output:
-<thought>
-The user wants deep research draft on machine learning. I will coordinate with Blob to compose this.
-</thought>
-<chat>
-That is a brilliant topic to cover! I am calling **Blob**, our specialized writing agent, to compose a comprehensive, beautiful essay on machine learning. Blob will format it perfectly and add it to your workspace in just a few seconds!
-</chat>
-<callEditorAgent>Write a deep academic essay on Machine Learning, focusing on neural network foundations, deep learning breakthroughs, and potential future trends in AI safety. Use clean headers.</callEditorAgent>
-`;
-
-const geminiResponseSchema = {
-  type: Type.OBJECT,
-  properties: {
-    // Add internal reasoning to thoughts
-    thought: {
-      type: Type.STRING,
-      description:
-        "Internal monologue and reasoning process of the AI research assistant.",
-    },
-    content: {
-      type: Type.STRING,
-      description:
-        "An engaging, student-friendly, and encouraging conversational response. Explain what you've done and offer next steps.",
-    },
-    suggestion: {
-      type: Type.OBJECT,
-      description: "Structured action to perform in the workspace.",
-      properties: {
-        type: {
-          type: Type.STRING,
-          description: "Action type",
-          enum: ["edit_document", "citations"],
-        },
-        title: {
-          type: Type.STRING,
-          description: "Title of the document.",
-        },
-        appendContent: {
-          type: Type.STRING,
-          description: "Markdown string to append to current doc.",
-        },
-        replaceContent: {
-          type: Type.STRING,
-          description:
-            "Full markdown string for the document draft or comprehensive outline.",
-        },
-        citations: {
-          type: Type.ARRAY,
-          description: "Bibliography records.",
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              authors: { type: Type.STRING },
-              source: { type: Type.STRING },
-              year: { type: Type.STRING },
-              format: {
-                type: Type.STRING,
-                enum: ["APA", "MLA", "Chicago", "IEEE"],
-              },
-            },
-            required: ["title", "authors", "source", "year", "format"],
-          },
-        },
-      },
-      required: ["type"],
-    },
-  },
-  required: ["content", "thought"],
-};
-
-const UPLOADS_DIR = process.env.VERCEL
-  ? path.join("/tmp", "uploads")
-  : path.join(process.cwd(), "uploads");
-
-// Helper to ensure uploads directory exists
-async function ensureUploadsDir() {
-  try {
-    await access(UPLOADS_DIR);
-  } catch {
-    await mkdir(UPLOADS_DIR, { recursive: true });
-    console.log(`[STORAGE] Created local uploads directory: ${UPLOADS_DIR}`);
-  }
-}
 
 // In-memory file registry (as a cache)
-const uploadedFiles = new Map<
-  string,
-  { buffer: Buffer; mimetype: string; originalname: string }
->();
 
-async function saveFile(
-  fileId: string,
-  data: { buffer: Buffer; mimetype: string; originalname: string },
-) {
-  // Defensive deep copy to prevent in-place mutations (e.g., from Mega JS) from destroying the cached/disk buffer
-  const safeBuffer = Buffer.alloc(data.buffer.length);
-  Buffer.from(data.buffer).copy(safeBuffer);
 
-  // 0. Validate PDF content if applicable
-  if (
-    (data.mimetype === "application/pdf" ||
-      data.originalname.toLowerCase().endsWith(".pdf")) &&
-    safeBuffer.length > 4
-  ) {
-    const magic = safeBuffer.toString("utf-8", 0, 5);
-    if (!magic.startsWith("%PDF")) {
-      const errorMsg = `[STORAGE] File ${fileId} (${data.originalname}) claims to be PDF or has .pdf extension but does not start with %PDF. Magic bytes: ${magic}. This file might not be a valid PDF.`;
-      console.warn(errorMsg);
-    }
-  }
+// Load downloaded papers cache from disk
 
-  // 1. Update cache
-  uploadedFiles.set(fileId, { ...data, buffer: safeBuffer });
 
-  // 2. Save to Disk (Fallback)
-  try {
-    await ensureUploadsDir();
-    const diskMetadata = {
-      mimetype: data.mimetype,
-      originalname: data.originalname,
-    };
-    await writeFile(
-      path.join(UPLOADS_DIR, `${fileId}.json`),
-      JSON.stringify(diskMetadata),
-    );
-    await writeFile(path.join(UPLOADS_DIR, `${fileId}.bin`), safeBuffer);
-    console.log(`[STORAGE] Successfully saved ${fileId} to disk`);
-  } catch (diskErr) {
-    console.warn(`[STORAGE] Disk save failed for ${fileId}:`, diskErr);
-  }
 
-  // 3. Upload to Cloudflare R2 Storage in Background
-  (async () => {
-    try {
-      const r2 = getR2Client();
-      const bucketName = R2_BUCKET;
-      if (!bucketName) throw new Error("R2_BUCKET_NAME is not configured.");
 
-      console.log(`[STORAGE] Uploading ${fileId} to Cloudflare R2 Storage in background...`);
-      const uploadBuffer = Buffer.alloc(safeBuffer.length);
-      safeBuffer.copy(uploadBuffer);
 
-      await r2.send(
-        new PutObjectCommand({
-          Bucket: bucketName,
-          Key: fileId,
-          Body: uploadBuffer,
-          ContentType: data.mimetype || "application/octet-stream",
-        })
-      );
 
-      console.log(`[STORAGE] Successfully persisted ${fileId} to Cloudflare R2 Storage.`);
-    } catch (storageErr: any) {
-      console.warn(
-        `[STORAGE] Cloudflare R2 Storage persistence failed for ${fileId}:`,
-        storageErr.message || storageErr,
-      );
-      console.warn(`[STORAGE] Note: Using local disk/memory fallback for ${fileId}.`);
-    }
-  })();
-}
-
-async function getFile(fileId: string) {
-  // 1. Check cache first
-  if (uploadedFiles.has(fileId)) {
-    return uploadedFiles.get(fileId);
-  }
-
-  // 2. Try to load from Disk
-  try {
-    const jsonPath = path.join(UPLOADS_DIR, `${fileId}.json`);
-    const binPath = path.join(UPLOADS_DIR, `${fileId}.bin`);
-
-    await access(jsonPath);
-    await access(binPath);
-
-    const metadata = JSON.parse(await readFile(jsonPath, "utf-8"));
-    const buffer = await readFile(binPath);
-
-    const data = {
-      buffer,
-      mimetype: metadata.mimetype,
-      originalname: metadata.originalname,
-    };
-
-    uploadedFiles.set(fileId, data);
-    console.log(`[STORAGE] Retrieved ${fileId} from disk`);
-    return data;
-  } catch (diskErr) {
-    // Not on disk, try storage
-  }
-
-  // 3. Try to load from Cloudflare R2 Storage
-  try {
-    const r2 = getR2Client();
-    const bucketName = R2_BUCKET;
-    if (!bucketName) throw new Error("R2_BUCKET_NAME is not configured.");
-
-    console.log(`[STORAGE] Fetching ${fileId} from Cloudflare R2 Storage...`);
-    const response = await r2.send(
-      new GetObjectCommand({
-        Bucket: bucketName,
-        Key: fileId,
-      })
-    );
-
-    if (response.Body) {
-      const buffer = await streamToBuffer(response.Body);
-
-      const magic = buffer.toString("utf-8", 0, 5);
-      if (!magic.startsWith("%PDF")) {
-        console.warn(
-          `[STORAGE] WARNING: Retrieved file ${fileId} from Cloudflare R2 storage is NOT a PDF! Starts with: '${magic.replace(/[^ -~]+/g, "?")}'`,
-        );
-      }
-
-      const data = {
-        buffer,
-        mimetype: response.ContentType || "application/octet-stream",
-        originalname: fileId,
-      };
-
-      // Update cache and disk
-      uploadedFiles.set(fileId, data);
-      try {
-        await ensureUploadsDir();
-        await writeFile(
-          path.join(UPLOADS_DIR, `${fileId}.json`),
-          JSON.stringify({
-            mimetype: data.mimetype,
-            originalname: data.originalname,
-          }),
-        );
-        await writeFile(path.join(UPLOADS_DIR, `${fileId}.bin`), data.buffer);
-      } catch (e) {}
-
-      return data;
-    } else {
-      console.warn(
-        `[STORAGE] File ${fileId} not found in Cloudflare R2 bucket or was empty`,
-      );
-    }
-  } catch (err: any) {
-    console.warn(
-      `[STORAGE] Error retrieving ${fileId} from Cloudflare R2 Storage:`,
-      err.message || err,
-    );
-  }
-
-  // 4. SELF-HEALING FALLBACK: Query Firestore across all papers to see if we can find this paper's metadata to reconstruct it!
-  try {
-    console.log(
-      `[STORAGE] File ID ${fileId} not found. Initiating Firestore papers collection query for self-healing...`,
-    );
-    const customDbId = (firebaseConfig as any).firestoreDatabaseId;
-    let firestore = customDbId
-      ? getFirestore(admin.app(), customDbId)
-      : admin.firestore();
-    const papersRef = firestore.collectionGroup("papers");
-    const paperSnap = await papersRef
-      .where("fileId", "==", fileId)
-      .limit(1)
-      .get();
-
-    if (!paperSnap.empty) {
-      const paperDoc = paperSnap.docs[0].data();
-      const title = paperDoc.title || "Unknown Title";
-      const author = paperDoc.author || "Unknown Author";
-      const year = paperDoc.added || "2026";
-      const abstract =
-        paperDoc.summary || paperDoc.description || "No abstract available.";
-
-      console.log(
-        `[STORAGE] Self-healing found metadata in Firestore for ${fileId}: "${title}" by ${author}. Reconstructing PDF...`,
-      );
-
-      const doc = new PDFDocument({ margin: 50 });
-      const buffers: Buffer[] = [];
-      doc.on("data", buffers.push.bind(buffers));
-
-      doc
-        .fontSize(22)
-        .font("Helvetica-Bold")
-        .fillColor("#0f172a")
-        .text(title, { align: "center" });
-      doc.moveDown(0.5);
-      doc
-        .fontSize(12)
-        .font("Helvetica-Oblique")
-        .fillColor("#475569")
-        .text(`${author} (${year})`, { align: "center" });
-      doc.moveDown(2);
-
-      doc
-        .fontSize(10)
-        .font("Helvetica-Bold")
-        .fillColor("#b45309")
-        .text(
-          "[ACCESS NOTE: The original full-text PDF for this paper is hosted behind a publisher portal. Direct automated scholar-sync returned a security token check. An interactive Scholar Note has been generated based on the metadata index.]",
-          { align: "center" },
-        );
-      doc.moveDown(1.5);
-
-      const sectionTitleColor = "#1e293b";
-      const bodyTextColor = "#334155";
-
-      if (abstract && abstract !== "No abstract available.") {
-        doc
-          .fontSize(14)
-          .font("Helvetica-Bold")
-          .fillColor(sectionTitleColor)
-          .text("Research Abstract");
-        doc.moveDown(0.5);
-        doc
-          .fontSize(11)
-          .font("Helvetica")
-          .fillColor(bodyTextColor)
-          .text(abstract, { align: "justify", lineGap: 3 });
-        doc.moveDown(1.5);
-      }
-
-      doc
-        .fontSize(14)
-        .font("Helvetica-Bold")
-        .fillColor(sectionTitleColor)
-        .text("Scholarly Insight & Context");
-      doc.moveDown(0.5);
-      const synthesizedOverview = `This document represents a metadata-enriched Scholar Note. 
-
-How to proceed with this interactive workspace:
-1. Annotation: Use sidebar tools to mark sections of interest in this abstract.
-2. Citation Management: This paper is indexed in your workspace with its DOI/PaperID.
-3. Analysis: If you have access to the physical PDF, you can manually upload it to replace this placeholder.
-
-The synthesis engine has verified this reference as a valid citation for your current research draft.`;
-      doc
-        .fontSize(11)
-        .font("Helvetica")
-        .fillColor(bodyTextColor)
-        .text(synthesizedOverview, { align: "justify", lineGap: 3 });
-
-      const pdfDataPromise = new Promise<Buffer>((resolve) => {
-        doc.on("end", () => {
-          resolve(Buffer.concat(buffers));
-        });
-      });
-
-      doc.end();
-      const pdfData = await pdfDataPromise;
-
-      const reconstructedData = {
-        buffer: pdfData,
-        mimetype: "application/pdf",
-        originalname: `${title.replace(/[^a-zA-Z0-9]/g, "_")}_Scholar_Note.pdf`,
-      };
-
-      // Put it in cache/disk so we serve fast next times
-      await saveFile(fileId, reconstructedData);
-      console.log(
-        `[STORAGE] Self-healing complete for ${fileId}. Reconstitution successful!`,
-      );
-      return reconstructedData;
-    } else {
-      console.warn(
-        `[STORAGE] No Firestore papers found with fileId matching: ${fileId}`,
-      );
-    }
-  } catch (err: any) {
-    console.warn(
-      `[STORAGE] Self-healing lookup / PDF reconstruction failed (metadata fetch error) for ${fileId}: ${err.message || err}`,
-    );
-    // Graceful fallback: generate a generic Note PDF so the app doesn't break
-    console.log(
-      `[STORAGE] Generating generic fallback Scholar Note for ${fileId}...`,
-    );
-    const doc = new PDFDocument({ margin: 50 });
-    const buffers: Buffer[] = [];
-    doc.on("data", buffers.push.bind(buffers));
-
-    doc
-      .fontSize(22)
-      .font("Helvetica-Bold")
-      .fillColor("#0f172a")
-      .text("Research Reference Document", { align: "center" });
-    doc.moveDown(0.5);
-    doc
-      .fontSize(12)
-      .font("Helvetica-Oblique")
-      .fillColor("#475569")
-      .text(`ID: ${fileId}`, { align: "center" });
-    doc.moveDown(2);
-
-    doc
-      .fontSize(10)
-      .font("Helvetica-Bold")
-      .fillColor("#b45309")
-      .text(
-        "[ACCESS NOTE: The original full-text PDF for this paper is hosted behind a publisher portal. An interactive Scholar Note has been generated.]",
-        { align: "center" },
-      );
-    doc.moveDown(1.5);
-
-    const synthesizedOverview = `This document represents a metadata-enriched Scholar Note placeholder. The original file could not be automatically downloaded or the database query returned insufficient permissions.
-
-How to proceed with this interactive workspace:
-1. Annotation: Use sidebar tools to mark sections of interest.
-2. Analysis: If you have access to the physical PDF, you can manually upload it to replace this placeholder.`;
-
-    doc
-      .fontSize(11)
-      .font("Helvetica")
-      .fillColor("#334155")
-      .text(synthesizedOverview, { align: "justify", lineGap: 3 });
-
-    const pdfDataPromise = new Promise<Buffer>((resolve) => {
-      doc.on("end", () => {
-        resolve(Buffer.concat(buffers));
-      });
-    });
-
-    doc.end();
-    const pdfData = await pdfDataPromise;
-
-    const reconstructedData = {
-      buffer: pdfData,
-      mimetype: "application/pdf",
-      originalname: `Reference_${fileId}.pdf`,
-    };
-
-    return reconstructedData;
-  }
-
-  return null;
-}
+import apiRouter from "./src/api/routes/index.js";
 
 const app = express();
+
+app.use("/api", apiRouter);
 
 // Add request logger for debugging
 app.use((req, res, next) => {
@@ -1476,8 +171,7 @@ app.get("/api/health", (req, res) => {
 export { app };
 
 async function startServer() {
-  await ensureUploadsDir();
-
+    
   // Robust static asset serving for images/assets to prevent SPA fallback
   app.use((req, res, next) => {
     const urlPath = req.path;
@@ -1842,8 +536,8 @@ async function startServer() {
               `[PREVIEW] You.com endpoint ${endpoint} failed:`,
               youErr.message || youErr,
             );
-            if (youErr.response?.status === 401) {
-              break; // Invalid key, stop
+            if (youErr.response?.status === 401 || youErr.response?.status === 403) {
+              break; // Invalid/unauthorized key, stop
             }
           }
         }
@@ -2109,22 +803,14 @@ async function startServer() {
           mimetype: req.file.mimetype,
         });
       } catch (routeErr: any) {
-        console.error("[UPLOAD] Route handler error:", routeErr);
-        res
-          .status(500)
-          .json({
-            success: false,
-            error:
-              routeErr.message ||
-              "Internal server error during final upload processing.",
-          });
+        throw routeErr;
       }
     },
   );
 
   app.post("/api/auth/custom-token", async (req, res) => {
     try {
-      const { idToken } = req.body;
+      const { idToken } = CustomTokenSchema.parse(req.body);
       if (!idToken) {
         return res.status(400).json({ error: "Missing idToken" });
       }
@@ -2138,13 +824,13 @@ async function startServer() {
 
       res.json({ customToken });
     } catch (err: any) {
-      console.error("[AUTH] Error creating custom token:", err);
-      res.status(500).json({ error: "Failed to create custom token" });
+      throw err;
     }
   });
 
   app.get("/api/files/:id", async (req, res) => {
-    const file = await getFile(req.params.id);
+    const { id } = FileIdSchema.parse(req.params);
+    const file = await getFile(id);
     if (!file) {
       return res.status(404).send("File not found");
     }
@@ -2157,14 +843,35 @@ async function startServer() {
   });
 
   app.get("/api/files/:id/raw-text", async (req, res) => {
-    const file = await getFile(req.params.id);
+    const { id } = FileIdSchema.parse(req.params);
+    const file = await getFile(id);
     if (!file) {
       return res.status(404).json({ success: false, error: "File not found" });
     }
 
     try {
-      const extension = file.originalname.toLowerCase().split(".").pop();
-      if (extension === "docx") {
+      const extension = (file.originalname || "").toLowerCase().split(".").pop();
+      const mimetype = file.mimetype || "application/octet-stream";
+      const isImage = mimetype.startsWith("image/") || ["png", "jpg", "jpeg", "webp", "gif"].includes(extension || "");
+
+      if (isImage) {
+        console.log(`[OCR] Auto-running OCR on uploaded image ${req.params.id} via Gemini API...`);
+        const imagePart = {
+          inlineData: {
+            mimeType: mimetype.startsWith("image/") ? mimetype : "image/jpeg",
+            data: file.buffer.toString("base64"),
+          },
+        };
+        const promptPart = {
+          text: "Extract and transcribe all text from this image. Output only the plain text found in the image, preserving the layout as much as possible. Do not add any conversational commentary, explanations, or wrapper markdown blocks."
+        };
+        const response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: { parts: [imagePart, promptPart] }
+        });
+        const transText = response.text || "";
+        return res.json({ success: true, text: transText });
+      } else if (extension === "docx") {
         const result = await mammoth.extractRawText({ buffer: file.buffer });
         return res.json({ success: true, text: result.value });
       } else if (
@@ -2185,12 +892,40 @@ async function startServer() {
       }
     } catch (err: any) {
       console.error("Error extracting text from file:", err);
-      res
-        .status(500)
-        .json({
-          success: false,
-          error: err.message || "Failed to extract text from file",
-        });
+      throw err;
+    }
+  });
+
+  app.post("/api/ocr-image", async (req, res) => {
+    try {
+      const { base64, mimeType } = OcrImageSchema.parse(req.body);
+      if (!base64) {
+        return res.status(400).json({ success: false, error: "Missing image base64 data" });
+      }
+
+      const safeMimeType = mimeType || "image/jpeg";
+      console.log(`[OCR] Direct image OCR request (${safeMimeType}, base64 length: ${base64.length})`);
+
+      const imagePart = {
+        inlineData: {
+          mimeType: safeMimeType,
+          data: base64,
+        },
+      };
+
+      const promptPart = {
+        text: "Extract and transcribe all text from this image. Output only the plain text found in the image, preserving the layout as much as possible. Do not add any conversational commentary, explanations, or wrapper markdown blocks."
+      };
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: { parts: [imagePart, promptPart] }
+      });
+
+      const transcribedText = response.text || "";
+      res.json({ success: true, text: transcribedText });
+    } catch (err: any) {
+      throw err;
     }
   });
 
@@ -2238,8 +973,7 @@ async function startServer() {
       });
       res.json({ success: true, fileId, fileName: originalname, mimetype });
     } catch (err: any) {
-      console.error("[PDF Download] Error:", err);
-      res.status(500).json({ success: false, error: err.message });
+      throw err;
     }
   });
 
@@ -2318,9 +1052,9 @@ async function startServer() {
 
       throw new Error("No data returned from OpenAlex");
     } catch (error: any) {
-      console.warn(
-        `[DOI_RESOLVE] OpenAlex failed: ${error.message}. Trying generic CrossRef lookup...`,
-      );
+        console.warn(
+          `[DOI_RESOLVE] OpenAlex failed: ${error.message}. Trying generic CrossRef lookup...`
+        );
 
       try {
         const crossrefUrl = `https://api.crossref.org/works/${encodeURIComponent(doiClean)}`;
@@ -2970,7 +1704,7 @@ CRITICAL RULES:
   // Short 2-4 word Chat Title Generator Endpoint
   app.post("/api/research/generate-title", async (req, res) => {
     try {
-      const { userQuery } = req.body;
+      const { userQuery } = GenerateTitleSchema.parse(req.body);
       if (!userQuery) {
         return res.json({ title: "New Chat" });
       }
@@ -4828,7 +3562,7 @@ CRITICAL PROTOCOLS:
 
   app.post("/api/search-arxiv", async (req, res) => {
     try {
-      const { query } = req.body;
+      const { query } = SearchArxivSchema.parse(req.body);
       if (!query) {
         return res.status(400).json({ success: false, error: "Missing query" });
       }
@@ -4893,9 +3627,27 @@ CRITICAL PROTOCOLS:
           }
         }
 
+        const normalizedTitle = title
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .slice(0, 50)
+          .replace(/^-+|-+$/g, "");
+
         let fileId = null;
         let mimetype = "application/pdf";
-        if (pdfLink) {
+
+        let existingCachedPaper = null;
+        if (pdfLink && (await getCachedPaper(pdfLink)) !== null) {
+          existingCachedPaper = (await getCachedPaper(pdfLink));
+        } else if (normalizedTitle && (await getCachedPaper(normalizedTitle)) !== null) {
+          existingCachedPaper = (await getCachedPaper(normalizedTitle));
+        }
+
+        if (existingCachedPaper) {
+          console.log(`[DEDUPLICATION] Reusing existing downloaded PDF for "${title}" with fileId: ${existingCachedPaper.fileId}`);
+          fileId = existingCachedPaper.fileId;
+          mimetype = existingCachedPaper.mimetype;
+        } else if (pdfLink) {
           try {
             // wait a little bit to respect rate limits
             await new Promise((resolve) => setTimeout(resolve, 500));
@@ -4983,7 +3735,8 @@ CRITICAL PROTOCOLS:
 
             if (pdfRes) {
               try {
-                fileId = `semantic-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+                const cleanTitle = normalizedTitle || "paper";
+                fileId = `semantic-${cleanTitle}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
                 const buffer = Buffer.from(pdfRes.data);
                 const sniffed = sniffMimeType(buffer);
 
@@ -5003,6 +3756,19 @@ CRITICAL PROTOCOLS:
                     originalname: `${title.replace(/[^a-zA-Z0-9]/g, "_")}.${sniffed.extension}`,
                   });
                   mimetype = sniffed.mimetype;
+
+                  // Save to our deduplication cache
+                  const cacheEntry = {
+                    fileId,
+                    title,
+                    pdfUrl: pdfLink,
+                    mimetype: sniffed.mimetype,
+                  };
+                  await setCachedPaper(normalizedTitle, cacheEntry);
+                  if (pdfLink) {
+                    await setCachedPaper(pdfLink, cacheEntry);
+                  }
+                  
                 } else {
                   console.warn(
                     `Downloaded content for ${title} has unsupported mime type: ${sniffed.mimetype}. No fallback generated.`,
@@ -5050,7 +3816,7 @@ CRITICAL PROTOCOLS:
 
   app.post("/api/generate-pdf", async (req, res) => {
     try {
-      const { title, author, year, abstract, fullText } = req.body;
+      const { title, author, year, abstract, fullText } = GeneratePdfSchema.parse(req.body);
 
       const doc = new PDFDocument({ margin: 50 });
       const buffers: Buffer[] = [];
@@ -5129,7 +3895,7 @@ CRITICAL PROTOCOLS:
   // Statistics Tool AI File Analyzer
   app.post("/api/statistics/analyze", async (req, res) => {
     try {
-      const { textContent, filename } = req.body;
+      const { textContent, filename } = AnalyzeStatsSchema.parse(req.body);
       if (!textContent) {
         return res
           .status(400)
@@ -5174,7 +3940,7 @@ Output in clear Markdown formatting.`,
   // Dynamic AI Quiz Generator Endpoint using Groq Qwen with Gemini fallback
   app.post("/api/research/generate-quiz", async (req, res) => {
     try {
-      const { content, title } = req.body;
+      const { content, title } = GenerateQuizSchema.parse(req.body);
       if (!content) {
         return res
           .status(400)
@@ -5315,7 +4081,7 @@ ${textToAnalyze}
   // Generate structured study notes from document text
   app.post("/api/research/generate-notes", async (req, res) => {
     try {
-      const { content, title } = req.body;
+      const { content, title } = GenerateNotesSchema.parse(req.body);
       if (!content) {
         return res
           .status(400)
@@ -5423,7 +4189,7 @@ ${textToAnalyze}
 
   app.post("/api/voyage/embed", async (req, res) => {
     try {
-      const { texts, model = "voyage-3" } = req.body;
+      const { texts, model = "voyage-3" } = VoyageEmbedSchema.parse(req.body);
       if (!texts || !Array.isArray(texts) || texts.length === 0) {
         return res
           .status(400)
@@ -5453,7 +4219,7 @@ ${textToAnalyze}
 
   app.post("/api/voyage/rerank", async (req, res) => {
     try {
-      const { query, documents, topK = null, model = "rerank-2" } = req.body;
+      const { query, documents, topK = null, model = "rerank-2" } = VoyageRerankSchema.parse(req.body);
       if (
         !query ||
         !documents ||

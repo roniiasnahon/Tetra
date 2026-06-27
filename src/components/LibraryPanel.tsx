@@ -641,11 +641,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                 ? folders.find((f) => f.id === selectedFolderId)?.name || lt("library", "Library")
                 : lt("library", "Library")}
             </h1>
-            {!selectedFolderId && (
-              <p className="text-[#71717a] text-[11px] mt-1">
-                {lt("desc", "Files, research assets, and citation repository")}
-              </p>
-            )}
+            
           </div>
 
           <div className="relative w-64">
