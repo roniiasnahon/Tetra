@@ -4831,16 +4831,19 @@ export default function App() {
       }
 
       // Update tab's originalTitle, title, and content so the sync effect doesn't try to overwrite the editor
-      setTabs((prev) =>
-        prev.map((t) => {
+      setTabs((prev) => {
+        let changed = false;
+        const nextTabs = prev.map((t) => {
           if (t.id === tab.id) {
             const hasChanged = t.originalTitle !== paperTitle || t.title !== paperTitle || t.content !== tab.content;
             if (!hasChanged) return t;
+            changed = true;
             return { ...t, originalTitle: paperTitle, title: paperTitle, content: tab.content };
           }
           return t;
-        }),
-      );
+        });
+        return changed ? nextTabs : prev;
+      });
     }
 
     const draftPaper: PaperItem = {
@@ -4948,45 +4951,49 @@ export default function App() {
           foundChat = true;
         }
 
+        let newChatId = "";
+        if (!foundChat) {
+          newChatId = `chat-${Date.now()}`;
+          targetTabId = newChatId;
+          setActiveAssistantTabId(newChatId);
+        }
+
+        const finalTargetId = targetTabId;
+
         setTabs((prevTabs) => {
-          let currentTargetId = targetTabId;
           let finalTabs = prevTabs;
           
           if (!foundChat) {
+            // Double check if a chat tab snuck in
             const firstChat = prevTabs.find((t) => t.type === "chat");
-            if (firstChat) {
-              currentTargetId = firstChat.id;
-            } else {
-              const newChatId = `chat-${Date.now()}`;
-              currentTargetId = newChatId;
+            if (!firstChat) {
               const newChatTab: Tab = {
-                id: newChatId,
+                id: finalTargetId,
                 type: "chat",
                 title: "New chat",
                 messages: next,
               };
               finalTabs = [...prevTabs, newChatTab];
-              setActiveAssistantTabId(newChatId);
             }
           }
 
-          const existingTab = finalTabs.find(t => t.id === currentTargetId);
+          const existingTab = finalTabs.find(t => t.id === finalTargetId);
           if (existingTab && JSON.stringify(existingTab.messages) === JSON.stringify(next)) {
             return prevTabs; // No change needed
           }
 
-          const result = finalTabs.map((t) =>
-            t.id === currentTargetId ? { ...t, messages: next } : t,
+          return finalTabs.map((t) =>
+            t.id === finalTargetId ? { ...t, messages: next } : t,
           );
-          
-          // Also save to persistent chat library
-          const chatTab = result.find((t) => t.id === currentTargetId);
+        });
+        
+        // Save to persistent chat library after state has time to settle
+        setTimeout(() => {
+          const chatTab = tabsRef.current.find((t) => t.id === finalTargetId);
           if (chatTab) {
             saveChatToLibrary(currentUser?.uid || "guest", chatTab);
           }
-          
-          return result;
-        });
+        }, 50);
       }, 0);
     }
   };
