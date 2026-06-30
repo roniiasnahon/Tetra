@@ -137,6 +137,34 @@ const renderLinkifiedText = (text: string) => {
   });
 };
 
+const GREETINGS = [
+  (name: string) => name ? `${name}, let's go?` : "Let's go?",
+  (name: string) => name ? `What's on your mind, ${name}?` : "What's on your mind?",
+  (name: string) => name ? `How can I help you today, ${name}?` : "How can I help you today?",
+  (name: string) => name ? `What shall we create today, ${name}?` : "What shall we create today?",
+  (name: string) => name ? `${name}, what are we working on?` : "What are we working on?",
+  (name: string) => name ? `Where should we start, ${name}?` : "Where should we start?",
+  (name: string) => name ? `${name}, ready to dive in?` : "Ready to dive in?",
+  (name: string) => name ? `What can I draft for you, ${name}?` : "What can I draft for you?",
+  (name: string) => name ? `${name}, what's the plan?` : "What's the plan?",
+  (name: string) => name ? `Let's make something great, ${name}.` : "Let's make something great.",
+  (name: string) => name ? `${name}, how can I support you?` : "How can I support you?",
+  (name: string) => name ? `What are we researching today, ${name}?` : "What are we researching today?",
+  (name: string) => name ? `Let's build something, ${name}.` : "Let's build something.",
+  (name: string) => name ? `${name}, what can I write for you?` : "What can I write for you?",
+  (name: string) => name ? `Let's solve some problems, ${name}.` : "Let's solve some problems.",
+  (name: string) => name ? `What are we exploring next, ${name}?` : "What are we exploring next?"
+];
+
+const getStableGreetingIndex = (tabId: string) => {
+  let hash = 0;
+  if (!tabId) return 0;
+  for (let i = 0; i < tabId.length; i++) {
+    hash = tabId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return Math.abs(hash) % GREETINGS.length;
+};
+
 export const MainChat: React.FC<MainChatProps> = ({
   tab,
   messages,
@@ -288,6 +316,552 @@ export const MainChat: React.FC<MainChatProps> = ({
     handleSendMessage();
   };
 
+  const customFullName = localStorage.getItem(
+    `cosmi_settings_full_name_${currentUser?.uid || "guest"}`
+  );
+  const preferredName =
+    customFullName
+      ? customFullName.trim().split(" ")[0]
+      : currentUser?.displayName
+        ? currentUser.displayName.split(" ")[0]
+        : "";
+
+  const renderChatInput = () => {
+    return (
+      <div className="w-full max-w-2xl bg-[#1a1a1a] border border-zinc-800 rounded-[28px] p-2 flex flex-col transition-all relative">
+        {/* Mention dropdown */}
+        <AnimatePresence>
+          {mentionState.show && filteredPapers.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.95 }}
+              transition={{ duration: 0.1 }}
+              className="absolute bottom-full left-4 mb-2 w-[320px] bg-[#1a1a1a] border border-zinc-800 rounded-2xl p-1.5 shadow-xl z-[150] flex flex-col gap-0.5 max-h-[220px] overflow-y-auto"
+            >
+              <div className="px-2 py-1.5 text-[11px] font-bold text-zinc-500 uppercase tracking-wider border-b border-zinc-850 mb-1">
+                Your Library Documents ({filteredPapers.length})
+              </div>
+              {filteredPapers.map((p, idx) => {
+                const isSelected = idx === mentionState.selectedIndex;
+                return (
+                  <button
+                    key={p.fileId || p.title + idx}
+                    onClick={() => selectPaper(p)}
+                    onMouseEnter={() =>
+                      setMentionState((prev) => ({
+                        ...prev,
+                        selectedIndex: idx,
+                      }))
+                    }
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all text-left ${
+                      isSelected
+                        ? "bg-zinc-800 text-white"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    <Icon
+                      icon="ph:file-pdf"
+                      className="w-4 h-4 text-rose-450 shrink-0"
+                    />
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[13px] font-medium truncate">
+                        {p.title}
+                      </span>
+                      {p.author && (
+                        <span className="text-[10px] text-zinc-500 truncate">
+                          {p.author}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {attachedFile && (
+          <div className="mx-2 mt-1 mb-2 animate-fade-in w-fit">
+            {attachedFile.mimetype?.startsWith("image/") ? (
+              <div className="relative group w-fit">
+                <img
+                  src={attachedFile.url}
+                  alt="attachment preview"
+                  className="w-16 h-16 object-cover rounded-xl border border-zinc-700"
+                  referrerPolicy="no-referrer"
+                />
+                <button
+                  onClick={() => setAttachedFile(null)}
+                  className="absolute -top-2 -right-2 bg-zinc-800 border border-zinc-700 text-zinc-350 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-md hover:bg-zinc-750 cursor-pointer"
+                  title="Remove image"
+                >
+                  <Icon icon="ph:x" className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <div className="bg-[#1a1a1c] border border-[#2d2d30] rounded-2xl px-3 py-2 flex items-center justify-between gap-3 shadow-sm max-w-sm">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-zinc-800/80 flex items-center justify-center text-zinc-450 shrink-0 shadow-inner">
+                    <Icon icon="ph:file-text" className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0 pr-2">
+                    <p className="text-[13px] font-semibold text-zinc-200 truncate pr-2">
+                      {attachedFile.fileName}
+                    </p>
+                    <p className="text-[10px] font-mono text-zinc-550 uppercase tracking-wider mt-0.5">
+                      DOCUMENT FILE
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setAttachedFile(null)}
+                  className="text-zinc-500 hover:text-zinc-300 transition-colors p-1.5 hover:bg-zinc-800 rounded-lg shrink-0 cursor-pointer border border-transparent hover:border-zinc-700"
+                  title="Remove attachment"
+                >
+                  <Icon icon="ph:x" className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="px-3 pt-2 pb-3">
+          <TextareaAutosize
+            ref={mainTextareaRef}
+            key={`main-chat-input-${tab.id}`}
+            id={`main-chat-input-${tab.id}`}
+            name={`main-chat-input-${tab.id}`}
+            autoComplete="off"
+            placeholder="Ask Cosmi..."
+            value={chatInput}
+            onChange={(e) => {
+              handleTextareaChange(e.target.value, e.target.selectionStart);
+            }}
+            onKeyDown={(e) => {
+              if (mentionState.show && filteredPapers.length > 0) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setMentionState((prev) => ({
+                    ...prev,
+                    selectedIndex:
+                      (prev.selectedIndex + 1) % filteredPapers.length,
+                  }));
+                  return;
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setMentionState((prev) => ({
+                    ...prev,
+                    selectedIndex:
+                      (prev.selectedIndex - 1 + filteredPapers.length) %
+                      filteredPapers.length,
+                  }));
+                  return;
+                } else if (e.key === "Enter") {
+                  e.preventDefault();
+                  selectPaper(filteredPapers[mentionState.selectedIndex]);
+                  return;
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  setMentionState((prev) => ({ ...prev, show: false }));
+                  return;
+                }
+              }
+
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onSend();
+              }
+            }}
+            className="w-full bg-transparent text-[14.5px] text-[#e4e4e7] placeholder-[#52525b] resize-none focus:outline-none min-h-[24px] max-h-[300px] leading-relaxed font-sans"
+          />
+        </div>
+
+        <div className="flex items-center justify-between px-1">
+          {/* Left Plus/Upload Icon */}
+          <div className="relative shrink-0 flex items-center gap-2">
+            <button
+              onClick={() => setIsPlusMenuOpen(!isPlusMenuOpen)}
+              className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors cursor-pointer shrink-0 ${
+                isPlusMenuOpen
+                  ? "bg-[#222222] text-[#e4e4e7]"
+                  : "text-[#71717a] hover:text-[#e4e4e7] bg-transparent hover:bg-[#222222]"
+              }`}
+              title="Upload or Search Options"
+            >
+              <Plus
+                className={`w-5 h-5 transition-transform duration-200 ${isPlusMenuOpen ? "rotate-45" : ""}`}
+              />
+            </button>
+
+            {webSearchVal && (
+              <button
+                onClick={() => setWebSearchEnabled(false)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#252528] hover:bg-[#2a2a2d] transition-colors rounded-full text-[#e4e4e7] cursor-pointer group shrink-0"
+              >
+                <Icon
+                  icon="ph:globe"
+                  className="w-[15px] h-[15px] text-[#a1a1aa] group-hover:text-[#e4e4e7] transition-colors"
+                />
+                <span className="text-[13px] font-normal leading-none font-jakarta">
+                  Search web
+                </span>
+              </button>
+            )}
+
+            {isPlusMenuOpen && (
+              <>
+                {/* Transparent backdrop overlay for safe close */}
+                <div
+                  className="fixed inset-0 z-[99] bg-transparent"
+                  onClick={() => setIsPlusMenuOpen(false)}
+                />
+
+                {/* Plus Options Menu */}
+                <div className="absolute bottom-full left-0 mb-2.5 w-[200px] bg-[#1a1a1e] rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
+                  {/* Upload files */}
+                  <button
+                    onClick={() => {
+                      setIsPlusMenuOpen(false);
+                      handlePaperclipClick();
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-zinc-350 hover:text-white hover:bg-zinc-850/40 transition-none font-jakarta cursor-pointer"
+                  >
+                    <PaperclipRounded2
+                      weight="Linear"
+                      size={18}
+                      color="currentColor"
+                    />
+                    <span className="text-[13px] font-normal text-zinc-300 leading-none">
+                      Upload files
+                    </span>
+                  </button>
+
+                  {/* Web Search Grounding */}
+                  <button
+                    onClick={() => {
+                      setWebSearchEnabled(!webSearchVal);
+                      setIsPlusMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left font-jakarta cursor-pointer transition-none ${
+                      webSearchVal
+                        ? "bg-zinc-800/30 text-zinc-100"
+                        : "text-zinc-300 hover:text-white hover:bg-zinc-850/40"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Icon
+                        icon="ph:globe"
+                        className={`w-[18px] h-[18px] shrink-0 ${webSearchVal ? "text-zinc-400" : "text-zinc-500"}`}
+                      />
+                      <span className="text-[13px] font-normal text-zinc-300 leading-none">
+                        Search web
+                      </span>
+                    </div>
+                    {webSearchVal && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-zinc-550" />
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Right Menu and Send */}
+          <div className="flex items-center gap-2">
+            {/* Model Choosing Dropdown Inline */}
+            <div className="relative shrink-0">
+              <button
+                onClick={() => {
+                  if (isModelMenuOpen) {
+                    setIsThinkingMenuOpen(false);
+                  }
+                  setIsModelMenuOpen(!isModelMenuOpen);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors text-xs font-semibold cursor-pointer bg-transparent hover:bg-[#222222] font-jakarta text-[#71717a]"
+                title="Choose AI Model"
+              >
+                <span className="flex items-center gap-1.5">
+                  <span className="text-white">
+                    {modelsList.find((m) => m.id === selectedModel)
+                      ?.label || "Ode I"}
+                  </span>
+                  {thinkingLevel !== "Standard" && (
+                    <span className="text-zinc-400 opacity-50 font-normal text-[10.5px] ml-1">
+                      {thinkingLevel}
+                    </span>
+                  )}
+                </span>
+                <Icon icon="ph:caret-down" className="w-3 h-3 text-[#71717a]" />
+              </button>
+
+              <AnimatePresence>
+                {isModelMenuOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-[99] bg-transparent"
+                      onClick={() => {
+                        setIsModelMenuOpen(false);
+                        setIsThinkingMenuOpen(false);
+                        setIsMoreModelsOpen(false);
+                      }}
+                    />
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      transition={{ duration: 0.1 }}
+                      className="absolute bottom-full right-0 mb-2.5 w-[200px] bg-[#1a1a1e] border border-zinc-800/80 rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5"
+                    >
+                      {modelsList
+                        .filter(
+                          (m) =>
+                            ![
+                              "auto",
+                              "codestral-latest",
+                              "solar-pro2",
+                              "reka-flash",
+                              "mimo-v2.5-pro",
+                            ].includes(m.id),
+                        )
+                        .map((m) => {
+                          const isSelected = m.id === selectedModel;
+                          return (
+                            <button
+                              key={m.id}
+                              onClick={() => {
+                                setSelectedModel(m.id);
+                                setIsModelMenuOpen(false);
+                              }}
+                              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-left transition-colors font-jakarta cursor-pointer ${
+                                isSelected
+                                  ? "bg-zinc-800/60 text-white font-medium"
+                                  : "text-zinc-400 hover:text-white hover:bg-zinc-800/20"
+                              }`}
+                            >
+                              <span className="text-[12.5px] leading-tight font-medium">
+                                {m.label}
+                              </span>
+                              {isSelected && (
+                                <Icon
+                                  icon="ph:check"
+                                  className="w-3.5 h-3.5 text-zinc-300"
+                                />
+                              )}
+                            </button>
+                          );
+                        })}
+
+                      <div className="h-[1px] bg-zinc-850/60 my-1 mx-2 shrink-0" />
+
+                      {/* More Models nested menu */}
+                      <div className="relative shrink-0">
+                        <button
+                          onClick={() => {
+                            setIsMoreModelsOpen(!isMoreModelsOpen);
+                            setIsThinkingMenuOpen(false);
+                          }}
+                          className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-left font-jakarta cursor-pointer transition-colors ${
+                            isMoreModelsOpen
+                              ? "bg-zinc-800/40 text-white"
+                              : "text-zinc-400 hover:text-white"
+                          }`}
+                        >
+                          <span className="text-[12.5px] font-semibold leading-none">
+                            More models
+                          </span>
+                          <Icon
+                            icon="ph:caret-right"
+                            className={`w-3 h-3 text-[#71717a] transition-transform ${
+                              isMoreModelsOpen ? "rotate-90" : ""
+                            }`}
+                          />
+                        </button>
+
+                        <AnimatePresence>
+                          {isMoreModelsOpen && (
+                            <motion.div
+                              initial={{ opacity: 0, x: 10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              exit={{ opacity: 0, x: 10 }}
+                              transition={{ duration: 0.1 }}
+                              className="absolute left-full bottom-0 ml-2.5 w-[180px] bg-[#1a1a1e] border border-zinc-800/80 rounded-xl p-1 shadow-2xl z-[110] flex flex-col gap-0.5"
+                            >
+                              {modelsList
+                                .filter((m) =>
+                                  [
+                                    "auto",
+                                    "codestral-latest",
+                                    "solar-pro2",
+                                    "reka-flash",
+                                    "mimo-v2.5-pro",
+                                  ].includes(m.id),
+                                )
+                                .map((m) => {
+                                  const isSelected = m.id === selectedModel;
+                                  return (
+                                    <button
+                                      key={m.id}
+                                      onClick={() => {
+                                        setSelectedModel(m.id);
+                                        setIsMoreModelsOpen(false);
+                                        setIsModelMenuOpen(false);
+                                      }}
+                                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors font-jakarta cursor-pointer ${
+                                        isSelected
+                                          ? "bg-zinc-800/60 text-white font-medium"
+                                          : "text-zinc-400 hover:text-white hover:bg-zinc-800/20"
+                                      }`}
+                                    >
+                                      <span className="text-[12.5px] leading-tight font-medium">
+                                        {m.label}
+                                      </span>
+                                      {isSelected && (
+                                        <Icon
+                                          icon="ph:check"
+                                          className="w-3.5 h-3.5 text-zinc-300"
+                                        />
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+
+                      <div className="h-[1px] bg-zinc-850/60 my-1 mx-2 shrink-0" />
+
+                      <div className="relative shrink-0">
+                        <button
+                          onClick={() => {
+                            setIsThinkingMenuOpen(!isThinkingMenuOpen);
+                            setIsMoreModelsOpen(false);
+                          }}
+                          className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-left font-jakarta cursor-pointer transition-colors ${
+                            isThinkingMenuOpen
+                              ? "bg-zinc-800/40 text-white"
+                              : "text-zinc-400 hover:text-white"
+                          }`}
+                        >
+                          <span className="text-[12.5px] font-semibold leading-none">
+                            Thinking level
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10.5px] text-zinc-500 font-normal">
+                              {thinkingLevel}
+                            </span>
+                            <Icon
+                              icon="ph:caret-right"
+                              className={`w-3 h-3 text-[#71717a] transition-transform ${
+                                isThinkingMenuOpen ? "rotate-90" : ""
+                              }`}
+                            />
+                          </div>
+                        </button>
+
+                        <AnimatePresence>
+                          {isThinkingMenuOpen && (
+                            <motion.div
+                              initial={{ opacity: 0, x: 10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              exit={{ opacity: 0, x: 10 }}
+                              transition={{ duration: 0.1 }}
+                              className="absolute left-full bottom-0 ml-2.5 w-[180px] bg-[#1a1a1e] border border-zinc-800/80 rounded-xl p-1 shadow-2xl z-[110] flex flex-col gap-0.5"
+                            >
+                              {[
+                                {
+                                  id: "Instant",
+                                  label: "Standard response",
+                                  desc: "Speed first",
+                                },
+                                {
+                                  id: "Standard",
+                                  label: "Balanced reasoning",
+                                  desc: "Smart defaults",
+                                },
+                                {
+                                  id: "Deep",
+                                  label: "Intense evaluation",
+                                  desc: "Ultra precision",
+                                },
+                              ].map((opt) => {
+                                const isSelected = opt.id === thinkingLevel;
+                                return (
+                                  <button
+                                    key={opt.id}
+                                    onClick={() => {
+                                      setThinkingLevel(
+                                        opt.id as
+                                          | "Standard"
+                                          | "Deep"
+                                          | "Instant",
+                                      );
+                                      setIsThinkingMenuOpen(false);
+                                      setIsModelMenuOpen(false);
+                                    }}
+                                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors font-jakarta cursor-pointer ${
+                                      isSelected
+                                        ? "bg-zinc-800/60 text-white font-medium"
+                                        : "text-zinc-400 hover:text-white hover:bg-zinc-800/20"
+                                    }`}
+                                  >
+                                    <div className="flex flex-col gap-0.5 text-left min-w-0 font-jakarta">
+                                      <span className="text-[12.5px] font-semibold text-zinc-100 leading-tight">
+                                        {opt.label}
+                                      </span>
+                                      <span className="text-[10px] text-zinc-400 leading-tight">
+                                        {opt.desc}
+                                      </span>
+                                    </div>
+                                    {isSelected && (
+                                      <Icon
+                                        icon="ph:check"
+                                        className="w-3.5 h-3.5 text-zinc-300"
+                                      />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Far right send / stop button */}
+            {isAiTyping ? (
+              <button
+                onClick={handleStopGeneration}
+                className="bg-white text-zinc-950 hover:bg-zinc-200 rounded-full transition-all flex items-center justify-center w-8.5 h-8.5 shrink-0 cursor-pointer shadow-sm"
+                title="Stop generating"
+              >
+                <Icon icon="ph:stop-fill" className="w-3.5 h-3.5" />
+              </button>
+            ) : (
+              <button
+                onClick={onSend}
+                disabled={!chatInput.trim()}
+                className={`flex items-center justify-center w-8.5 h-8.5 rounded-full transition-all shrink-0 ${
+                  chatInput.trim()
+                    ? "bg-white text-zinc-950 hover:bg-zinc-200 cursor-pointer shadow-sm"
+                    : "bg-zinc-800/40 text-zinc-600 cursor-not-allowed border border-zinc-800/10"
+                }`}
+                title="Send message"
+              >
+                <Plain2 weight="Linear" size={16} color="currentColor" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex-1 overflow-hidden flex flex-col h-full bg-[#121212] relative">
       <div
@@ -314,12 +888,14 @@ export const MainChat: React.FC<MainChatProps> = ({
           className="flex-1 flex flex-col items-center pt-[70px] pb-6 px-4 md:px-6 h-full overflow-y-auto custom-scrollbar-h"
         >
           {messages.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center w-full max-w-3xl">
-              <img
-                src="/cosmi.png"
-                alt="Cosmi Logo"
-                className="w-48 h-48 md:w-64 md:h-64 opacity-40 select-none grayscale invert"
-              />
+            <div className="flex-grow flex flex-col items-center justify-center w-full max-w-2xl px-4 py-8 my-auto">
+              {/* Header: Dynamic Random Greeting */}
+              <h1 className="text-3xl md:text-4xl text-[#f4f4f5] font-normal tracking-tight mb-8 text-center font-jakarta select-none">
+                {GREETINGS[getStableGreetingIndex(tab.id)](preferredName)}
+              </h1>
+
+              {/* Centered Chat Input Box */}
+              {renderChatInput()}
             </div>
           ) : (
             <div className="w-full max-w-3xl flex flex-col gap-4 pb-8">
@@ -527,66 +1103,85 @@ export const MainChat: React.FC<MainChatProps> = ({
           )}
         </div>
 
-        <div className="shrink-0 px-6 pb-1.5 pt-1 flex flex-col items-center gap-2 relative">
-          <AnimatePresence>
-            {showScrollBottom && (
-              <div className="absolute -top-12 left-1/2 -translate-x-1/2 flex items-center gap-2 z-50">
-                {isAiTyping || researchStatus ? (
-                  <motion.button
-                    initial={{ opacity: 0, y: 10, scale: 0.9 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.9 }}
-                    onClick={() => scrollToBottom(false)}
-                    className="h-[38px] flex items-center justify-center gap-1.5 px-4 bg-[#1a1a1a]/95 hover:bg-zinc-800 border border-zinc-800 rounded-full shadow-xl transition-all cursor-pointer hover:border-zinc-700"
-                    title="Scroll to bottom"
-                  >
-                    <motion.span
-                      animate={{ y: [0, -3.5, 0] }}
-                      transition={{
-                        repeat: Infinity,
-                        duration: 0.8,
-                        ease: "easeInOut",
-                        delay: 0,
-                      }}
-                      className="w-1.5 h-1.5 bg-zinc-400 rounded-full"
-                    />
-                    <motion.span
-                      animate={{ y: [0, -3.5, 0] }}
-                      transition={{
-                        repeat: Infinity,
-                        duration: 0.8,
-                        ease: "easeInOut",
-                        delay: 0.15,
-                      }}
-                      className="w-1.5 h-1.5 bg-zinc-400 rounded-full"
-                    />
-                    <motion.span
-                      animate={{ y: [0, -3.5, 0] }}
-                      transition={{
-                        repeat: Infinity,
-                        duration: 0.8,
-                        ease: "easeInOut",
-                        delay: 0.3,
-                      }}
-                      className="w-1.5 h-1.5 bg-zinc-400 rounded-full"
-                    />
-                  </motion.button>
-                ) : (
-                  <motion.button
-                    initial={{ opacity: 0, y: 10, scale: 0.9 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.9 }}
-                    onClick={() => scrollToBottom(false)}
-                    className="flex items-center justify-center bg-[#1a1a1a]/95 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white rounded-full w-[38px] h-[38px] shadow-xl transition-all cursor-pointer hover:border-zinc-700"
-                    title="Scroll to bottom"
-                  >
-                    <Icon icon="ph:arrow-down" className="w-4 h-4" />
-                  </motion.button>
-                )}
-              </div>
-            )}
-          </AnimatePresence>
+        {messages.length > 0 && (
+          <div className="shrink-0 px-6 pb-1.5 pt-1 flex flex-col items-center gap-2 relative">
+            <AnimatePresence>
+              {showScrollBottom && (
+                <div className="absolute -top-12 left-1/2 -translate-x-1/2 flex items-center gap-2 z-50">
+                  {isAiTyping || researchStatus ? (
+                    <motion.button
+                      initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                      onClick={() => scrollToBottom(false)}
+                      className="h-[38px] flex items-center justify-center gap-1.5 px-4 bg-[#1a1a1a]/95 hover:bg-zinc-800 border border-zinc-800 rounded-full shadow-xl transition-all cursor-pointer hover:border-zinc-700"
+                      title="Scroll to bottom"
+                    >
+                      <motion.span
+                        animate={{ y: [0, -3.5, 0] }}
+                        transition={{
+                          repeat: Infinity,
+                          duration: 0.8,
+                          ease: "easeInOut",
+                          delay: 0,
+                        }}
+                        className="w-1.5 h-1.5 bg-zinc-400 rounded-full"
+                      />
+                      <motion.span
+                        animate={{ y: [0, -3.5, 0] }}
+                        transition={{
+                          repeat: Infinity,
+                          duration: 0.8,
+                          ease: "easeInOut",
+                          delay: 0.15,
+                        }}
+                        className="w-1.5 h-1.5 bg-zinc-400 rounded-full"
+                      />
+                      <motion.span
+                        animate={{ y: [0, -3.5, 0] }}
+                        transition={{
+                          repeat: Infinity,
+                          duration: 0.8,
+                          ease: "easeInOut",
+                          delay: 0.3,
+                        }}
+                        className="w-1.5 h-1.5 bg-zinc-400 rounded-full"
+                      />
+                    </motion.button>
+                  ) : (
+                    <motion.button
+                      initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                      onClick={() => scrollToBottom(false)}
+                      className="flex items-center justify-center bg-[#1a1a1a]/95 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white rounded-full w-[38px] h-[38px] shadow-xl transition-all cursor-pointer hover:border-zinc-700"
+                      title="Scroll to bottom"
+                    >
+                      <Icon icon="ph:arrow-down" className="w-4 h-4" />
+                    </motion.button>
+                  )}
+                </div>
+              )}
+            </AnimatePresence>
 
+            {renderChatInput()}
+
+            <p className="text-xs text-zinc-500 font-normal leading-none font-sans text-center select-none pt-1">
+              Cosmi is AI. For guidance,{" "}
+              <a
+                href="https://genlang.vercel.app/#blog-post/why-human-authorship-matters"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-zinc-400 hover:text-white transition-colors underline decoration-zinc-750 hover:decoration-zinc-400 underline-offset-2 font-medium"
+              >
+                learn more
+              </a>
+              .
+            </p>
+          </div>
+        )}
+
+        <div className="hidden">
           <div className="w-full max-w-2xl bg-[#1a1a1a] rounded-[28px] p-2 flex flex-col transition-all relative">
             {/* Mention dropdown */}
             <AnimatePresence>

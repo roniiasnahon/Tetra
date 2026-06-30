@@ -165,6 +165,12 @@ app.use((req, res, next) => {
 });
 
 // Health check endpoint
+app.post("/api/log-error", express.json(), (req, res) => {
+  const fs = require('fs');
+  fs.writeFileSync('error-stack.txt', req.body.stack || req.body.message);
+  res.send('ok');
+});
+
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
@@ -4099,6 +4105,12 @@ ${textToAnalyze}
 
       const notesPrompt = `You are a world-class academic researcher and expert note-taker. 
 Your goal is to extract the most critical insights, facts, formulas, or structures from the source text and transform them into beautiful, comprehensive, highly-structured student/research study notes.
+
+CRITICAL FORMATTING RULES FOR SCIENCE, MATH, PHYSICS & CHEMISTRY:
+If the source text contains any formulas, equations, mathematical expressions, physics laws, or chemical structures/compounds (e.g., H2O, CO2, chemical reactions), you MUST format them using standard LaTeX/KaTeX notations.
+- Use single dollar signs $...$ for inline math (e.g. $E = mc^2$ or $\\text{H}_2\\text{O}$ or $x^2 + y^2 = r^2$).
+- Use double dollar signs $$\n...\n$$ for standalone/block equations.
+- Do NOT use plain text, caret symbol (e.g. x^2), or sub/superscript elements where LaTeX can represent them.
 
 Structure the notes neatly with bold main topics, numbered lists, and bullet points. Focus on:
 1. Executive Summary: A quick overview of the document's main focus.

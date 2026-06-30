@@ -39,13 +39,58 @@ export interface SuggestionPayload {
   targetSectionId?: string;
 }
 
+export interface FolderItem {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
+export interface PaperItem {
+  author: string;
+  title: string;
+  description: string;
+  url?: string;
+  added?: string;
+  fullTextStatus?: string;
+  viewed?: string;
+  fileType?: string;
+  summary?: string;
+  fileId?: string;
+  mimetype?: string;
+  extractedText?: string;
+  folderId?: string;
+  notes?: string;
+}
+
+export interface Tab {
+  id: string;
+  type: "home" | "document" | "library" | "chat" | "tools" | "settings";
+  title: string;
+  originalTitle?: string;
+  content?: string;
+  fileId?: string;
+  mimetype?: string;
+  messages?: ChatMessage[];
+  folderId?: string;
+  chatInput?: string;
+  undoStack?: string[];
+  redoStack?: string[];
+  starred?: boolean;
+}
+
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
-  timestamp: number;
-  isStreaming?: boolean;
-  isHidden?: boolean;
   thought?: string;
-  suggestion?: SuggestionPayload; 
+  timestamp: number;
+  isHidden?: boolean;
+  isStreaming?: boolean;
+  suggestion?: SuggestionPayload;
+  attachment?: {
+    fileId: string;
+    fileName: string;
+    mimetype: string;
+    url: string;
+  };
 }

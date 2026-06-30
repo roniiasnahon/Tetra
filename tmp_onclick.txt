@@ -1,0 +1,51 @@
+6575:            <button onClick={handleMinimize} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
+6578:            <button onClick={handleMaximize} className="h-full px-4 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center border-0 bg-transparent">
+6622:                onClick={(e: React.MouseEvent) => {
+6688:                  onClick={item.onClick}
+6734:                    onClick={(e) => e.stopPropagation()}
+7079:                              onClick={(e) => {
+7286:                            onClick={(e) => {
+7340:                                    onClick={(e) =>
+7485:                                  onClick={(e) => e.preventDefault()}
+7540:                                  onClick={(e) => e.preventDefault()}
+7666:                    onClick={handleGoogleLogin}
+7774:                    onClick={(e) => requestDeleteTab(tab.id, e)}
+8091:                          onClick={(e) => {
+8141:                          onClick={(e) => {
+8218:                          onClick={(e) => {
+8446:                                          onClick={(e) => e.stopPropagation()}
+8467:                                        onClick={(e) => {
+8483:                                        onClick={(e) => {
+8660:                                        onClick={(e) => {
+8707:                                        onClick={(e) => e.stopPropagation()}
+8723:                                            onClick={(e) => {
+8769:                                                onClick={(e) =>
+8823:                                          onClick={(e) => {
+9256:                      onClick={(e) => e.stopPropagation()}
+10602:                        onClick={(e) => {
+10907:                                onCitationClick={handleCitationClick}
+11461:          onClick={(e) => {
+11471:            onClick={(e) => {
+11493:            onClick={(e) => {
+11516:            onClick={(e) => {
+11555:          onClick={(e) => {
+11570:                onClick={(e) => {
+11617:                onClick={(e) => {
+11661:                onClick={(e) => {
+11715:                onClick={(e) => {
+11771:                onClick={(e) => {
+11803:                onClick={(e) => {
+11856:            onClick={(e) => {
+11893:          onClick={(e) => {
+11902:            onClick={(e) => {
+11941:            onClick={(e) => {
+11981:            onClick={(e) => e.stopPropagation()}
+12097:            onClick={(e) => e.stopPropagation()}
+12206:                      onClick={(e) => (e.target as HTMLInputElement).select()}
+12448:                onClick={closeChartModal}
+12930:                  onClick={closeChartModal}
+12936:                  onClick={handleInsertChart}
+13214:                onClick={(e) => e.stopPropagation()}
+13264:                onClick={(e) => e.stopPropagation()}
+13308:                onClick={(e) => e.stopPropagation()}
+13354:                onClick={(e) => e.stopPropagation()}

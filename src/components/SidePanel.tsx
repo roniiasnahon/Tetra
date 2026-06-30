@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { TypewriterMarkdown } from './TypewriterMarkdown';
 import { getUserFriendlyErrorMessage } from '../lib/error-utils';
 import { showToast } from './Toast';
 import { AudioVisualizerPlayer } from './AudioVisualizerPlayer';
@@ -114,13 +115,10 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   onUpdatePaper,
   extractTextFromPdf
 }) => {
-  // Compute document key for storage based on title, fallback to tabId
+  // Compute document key for storage based on unique identifier, fallback to tabId
   const docStorageKey = useMemo(() => {
-    if (activeTab?.title) {
-      return encodeURIComponent(activeTab.title).replace(/\./g, '%2E');
-    }
-    return tabId || 'default-doc';
-  }, [activeTab?.title, tabId]);
+    return activeTab?.fileId || activeTab?.id || tabId || 'default-doc';
+  }, [activeTab?.fileId, activeTab?.id, tabId]);
 
   const annoStorageKey = useMemo(() => {
     return activeTab?.fileId || activeTab?.id || tabId || 'default-doc';
@@ -246,8 +244,13 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   // Retrieve current paper matching activeTab
   const matchingPaper = useMemo(() => {
     if (!activeTab) return null;
+    if (activeTab.type === "document") {
+      const matchById = papers.find(p => p.fileId === activeTab.id);
+      if (matchById) return matchById;
+      return papers.find(p => p.title === activeTab.title && (!p.fileId || p.fileId === activeTab.id)) || null;
+    }
     return papers.find(p => p.fileId === activeTab.fileId || p.title === activeTab.title) || null;
-  }, [papers, activeTab?.fileId, activeTab?.title]);
+  }, [papers, activeTab?.fileId, activeTab?.id, activeTab?.title, activeTab?.type]);
 
   // Effect to load stored data when tab changes
   useEffect(() => {
@@ -370,7 +373,11 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
   // Auto-save notes
   const saveNotesToDB = (val: string) => {
-    const currentMatchingPaper = papersRef.current.find(p => p.title === activeTab?.title);
+    const currentMatchingPaper = papersRef.current.find(p => 
+      activeTab?.type === "document"
+        ? (p.fileId === activeTab.id || (p.title === activeTab.title && (!p.fileId || p.fileId === activeTab.id)))
+        : (p.fileId === activeTab?.fileId || p.title === activeTab?.title)
+    );
     if (currentMatchingPaper && onUpdatePaper) {
       onUpdatePaper({
         ...currentMatchingPaper,
@@ -411,7 +418,11 @@ export const SidePanel: React.FC<SidePanelProps> = ({
           if (extracted && extracted.trim()) {
             textToUse = extracted;
             // Dynamically save extracted text to the matching paper so we don't have to re-extract next time
-            const currentMatchingPaper = papersRef.current.find(p => p.title === activeTab?.title);
+            const currentMatchingPaper = papersRef.current.find(p => 
+              activeTab?.type === "document"
+                ? (p.fileId === activeTab.id || (p.title === activeTab.title && (!p.fileId || p.fileId === activeTab.id)))
+                : (p.fileId === activeTab?.fileId || p.title === activeTab?.title)
+            );
             if (currentMatchingPaper && onUpdatePaper) {
               onUpdatePaper({
                 ...currentMatchingPaper,
@@ -467,7 +478,11 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             localStorage.setItem(`notes_${docStorageKey}`, fullGeneratedNotes);
             
             // Save permanently to database
-            const currentMatchingPaper = papersRef.current.find(p => p.title === activeTab?.title);
+            const currentMatchingPaper = papersRef.current.find(p => 
+              activeTab?.type === "document"
+                ? (p.fileId === activeTab.id || (p.title === activeTab.title && (!p.fileId || p.fileId === activeTab.id)))
+                : (p.fileId === activeTab?.fileId || p.title === activeTab?.title)
+            );
             if (currentMatchingPaper && onUpdatePaper) {
               onUpdatePaper({
                 ...currentMatchingPaper,
@@ -1121,8 +1136,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                         [&>*:first-child]:mt-0"
                       onDoubleClick={() => { if (!isTyping) setIsEditingNotes(true); }}
                     >
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{notes}</ReactMarkdown>
-                      {isTyping && <span className="inline-block w-1.5 h-3 ml-1 bg-amber-400 animate-pulse" />}
+                      <TypewriterMarkdown content={notes} timestamp={Date.now()} isStreaming={isTyping} />
                     </div>
                   ) : (
                     <textarea
@@ -1526,9 +1540,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         {activeSubTab === 'attachments' && (
           <div className="flex-1 flex flex-col p-4 bg-transparent text-[13px] h-full min-h-0">
             <div className="flex items-center justify-between mb-4 shrink-0">
-              <span className="text-[11px] font-mono tracking-wider uppercase text-zinc-400 font-medium">Linked Attachments ({attachments.length})</span>
+              <span className="text-[11px] font-jakarta tracking-wider uppercase text-zinc-400 font-semibold">Linked Attachments ({attachments.length})</span>
               <label 
-                className={`p-1.5 hover:bg-[#1a1a1c] border border-zinc-800 rounded-lg cursor-pointer transition-all text-[#a1a1aa] hover:text-[#f4f4f5] flex items-center justify-center ${isUploadingAttachment ? 'opacity-50 pointer-events-none' : ''}`}
+                className={`p-1.5 hover:bg-[#1a1a1c] rounded-lg cursor-pointer transition-all text-[#a1a1aa] hover:text-[#f4f4f5] flex items-center justify-center ${isUploadingAttachment ? 'opacity-50 pointer-events-none' : ''}`}
                 title="Attach other file"
               >
                 <input 
@@ -1587,7 +1601,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     >
                       <div className="flex items-start justify-between gap-2.5">
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="p-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 shrink-0">
+                          <div className="p-1.5 rounded-lg bg-zinc-900 text-zinc-400 shrink-0">
                             {isAudio ? (
                               <Music className="w-5 h-5" />
                             ) : isImage ? (
@@ -1600,7 +1614,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                             <span className="block text-[12px] font-semibold text-zinc-200 truncate leading-tight" title={att.name}>
                               {att.name}
                             </span>
-                            <span className="block text-[9px] text-[#71717a] font-mono mt-0.5 uppercase tracking-wider">
+                            <span className="block text-[9px] text-[#71717a] font-jakarta mt-0.5 uppercase tracking-wider font-medium">
                               {att.mimetype.split('/')[1] || 'FILE'}
                             </span>
                           </div>
@@ -1744,14 +1758,14 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             <a
               href={activeLightboxImage.src}
               download={activeLightboxImage.name}
-              className="p-2 bg-[#18181b] border border-[#27272a] rounded-lg text-zinc-300 hover:text-white hover:bg-[#27272a] transition-all cursor-pointer flex items-center justify-center"
+              className="p-2 bg-[#18181b] rounded-lg text-zinc-300 hover:text-white hover:bg-[#27272a] transition-all cursor-pointer flex items-center justify-center"
               title="Download image"
             >
               <Download className="w-4 h-4" />
             </a>
             <button 
               onClick={() => setActiveLightboxImage(null)}
-              className="p-2 bg-[#18181b] border border-[#27272a] rounded-lg text-zinc-300 hover:text-white hover:bg-[#27272a] transition-all cursor-pointer flex items-center justify-center"
+              className="p-2 bg-[#18181b] rounded-lg text-zinc-300 hover:text-white hover:bg-[#27272a] transition-all cursor-pointer flex items-center justify-center"
               title="Close image"
             >
               <X className="w-4 h-4" />

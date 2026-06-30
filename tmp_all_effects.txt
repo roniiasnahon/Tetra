@@ -1,0 +1,517 @@
+1663:  useEffect(() => {
+1664-    const handleOnline = () => setIsOnline(true);
+1665-    const handleOffline = () => setIsOnline(false);
+1666-
+1667-    window.addEventListener("online", handleOnline);
+1668-    window.addEventListener("offline", handleOffline);
+1669-
+1670-    return () => {
+1671-      window.removeEventListener("online", handleOnline);
+1672-      window.removeEventListener("offline", handleOffline);
+1673-    };
+1674-  }, []);
+1675-  const [showBuyCoffeeModal, setShowBuyCoffeeModal] = useState(false);
+1676-  const [supportAmountPaid, setSupportAmountPaid] = useState<string | null>(
+1677-    null,
+1678-  );
+1679-  const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
+1680-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+1681-  const [sidebarView, setSidebarView] = useState<
+1682-    "files" | "chats" | "tools" | "library"
+1683-  >("files");
+--
+1829:  useEffect(() => {
+1830-    activeTabIdRef.current = activeTabId;
+1831-  }, [activeTabId]);
+1832-
+1833:  useEffect(() => {
+1834-    activeAssistantTabIdRef.current = activeAssistantTabId;
+1835-  }, [activeAssistantTabId]);
+1836-
+1837:  useEffect(() => {
+1838-    tabsRef.current = tabs;
+1839-  }, [tabs]);
+1840-
+1841-  const [appearanceTheme, setAppearanceTheme] = useState<string>(() => {
+1842-    return localStorage.getItem("cosmi_settings_appearance") || "dark";
+1843-  });
+1844-
+1845:  useEffect(() => {
+1846-    const isLight = appearanceTheme === "light" || 
+1847-      (appearanceTheme === "system" && window.matchMedia("(prefers-color-scheme: light)").matches);
+1848-    
+1849-    if (isLight) {
+1850-      document.documentElement.classList.add("light-mode");
+1851-    } else {
+1852-      document.documentElement.classList.remove("light-mode");
+1853-    }
+1854-    localStorage.setItem("cosmi_settings_appearance", appearanceTheme);
+1855-    localStorage.setItem("cosmi_light_mode", isLight.toString());
+1856-  }, [appearanceTheme]);
+1857-
+1858-  // Editor Styles and Customizations
+1859-  const [editorFont, setEditorFont] = useState("font-jakarta");
+1860-  const [editorFontSize, setEditorFontSize] = useState(18);
+1861-  const [currentSelectionSize, setCurrentSelectionSize] = useState(18);
+1862-  const [editorAlign, setEditorAlign] = useState<
+1863-    "left" | "center" | "right" | "justify"
+1864-  >("left");
+1865-  const [isFontDropdownOpen, setIsFontDropdownOpen] = useState(false);
+--
+2174:  useEffect(() => {
+2175-    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+2176-      // 1. Tab Switching: Ctrl+1 to Ctrl+9 or Cmd+1 to Cmd+9
+2177-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+2178-        // e.key could be "1"-"9"
+2179-        const keyNum = parseInt(e.key, 10);
+2180-        if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 9) {
+2181-          const tabIndex = keyNum - 1;
+2182-          if (tabIndex < tabs.length) {
+2183-            e.preventDefault();
+2184-            setActiveTabId(tabs[tabIndex].id);
+2185-          }
+2186-        }
+2187-      }
+2188-
+2189-      // 2. Alt+F4 for closing notice on Desktop
+2190-      if (e.altKey && e.key === "F4" && isDesktopApp) {
+2191-        e.preventDefault();
+2192-        setIsExitConfirmOpen(true);
+2193-      }
+2194-
+--
+2345:  useEffect(() => {
+2346-    const handleOutsideClick = () => {
+2347-      setLinkContextMenu(null);
+2348-      setTableContextMenu(null);
+2349-      setPdfContextMenu(null);
+2350-      setIsCreateDropdownOpen(false);
+2351-      setIsHomeCreateDropdownOpen(false);
+2352-      setIsDisplayDropdownOpen(false);
+2353-      setIsSortDropdownOpen(false);
+2354-      setIsFilterDropdownOpen(false);
+2355-    };
+2356-    window.addEventListener("click", handleOutsideClick);
+2357-    return () => {
+2358-      window.removeEventListener("click", handleOutsideClick);
+2359-    };
+2360-  }, []);
+2361-
+2362:  useEffect(() => {
+2363-    let active = true;
+2364-    if (activeTab && activeTab.fileId && activeTab.mimetype === "application/pdf") {
+2365-      setIsBlobLoading(true);
+2366-      getOrCreateCachedPdf(activeTab.fileId)
+2367-        .then((blobUrl) => {
+2368-          if (active) {
+2369-            setActivePdfBlobUrl(blobUrl);
+2370-            setIsBlobLoading(false);
+2371-          }
+2372-        })
+2373-        .catch((err) => {
+2374-          console.error("Local caching PDF load error:", err);
+2375-          if (active) {
+2376-            setActivePdfBlobUrl(`/api/files/${activeTab.fileId}`);
+2377-            setIsBlobLoading(false);
+2378-          }
+2379-        });
+2380-    } else {
+2381-      setActivePdfBlobUrl(null);
+2382-      setIsBlobLoading(false);
+--
+2395:  useEffect(() => {
+2396-    const handleSelectionChange = () => {
+2397-      const selection = window.getSelection();
+2398-      
+2399-      if (selection && selection.rangeCount > 0) {
+2400-        const range = selection.getRangeAt(0);
+2401-        
+2402-        if (editorRef.current && editorRef.current.contains(range.commonAncestorContainer)) {
+2403-          savedSelectionRangeRef.current = range.cloneRange();
+2404-        }
+2405-
+2406-        if (!selection.isCollapsed) {
+2407-          const parentNode = range.commonAncestorContainer.parentElement;
+2408-
+2409-          if (parentNode) {
+2410-            const parentStyle = window.getComputedStyle(parentNode);
+2411-            const sizeStr = parentStyle.fontSize;
+2412-            if (sizeStr) {
+2413-              const parsed = parseInt(sizeStr);
+2414-              if (!isNaN(parsed)) {
+2415-                setCurrentSelectionSize(parsed);
+--
+3055:  useEffect(() => {
+3056-    if (editorRef.current) {
+3057-      editorRef.current.style.textAlign = editorAlign;
+3058-    }
+3059-  }, [editorAlign]);
+3060-
+3061-  // Document Metadata State
+3062-  const [documentTitle, setDocumentTitle] = useState("");
+3063-  const [docSaveStatus, setDocSaveStatus] = useState<"saved" | "saving" | null>(
+3064-    "saved",
+3065-  );
+3066-  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+3067-  const [isExportSubmenuOpen, setIsExportSubmenuOpen] = useState(false);
+3068-  const [lastSavedTime, setLastSavedTime] = useState<number>(Date.now());
+3069-  const [saveMessage, setSaveMessage] = useState("Saved just now");
+3070-
+3071:  useEffect(() => {
+3072-    if (!isMoreMenuOpen) {
+3073-      setIsExportSubmenuOpen(false);
+3074-    }
+3075-  }, [isMoreMenuOpen]);
+3076-
+3077:  useEffect(() => {
+3078-    if (docSaveStatus === "saving") {
+3079-      setSaveMessage("Saving...");
+3080-    } else if (docSaveStatus === "saved") {
+3081-      setLastSavedTime(Date.now());
+3082-      setSaveMessage("Saved just now");
+3083-    }
+3084-  }, [docSaveStatus]);
+3085-
+3086:  useEffect(() => {
+3087-    const interval = setInterval(() => {
+3088-      if (docSaveStatus === "saving") return;
+3089-      const diff = Date.now() - lastSavedTime;
+3090-      if (diff < 10000) {
+3091-        setSaveMessage("Saved just now");
+3092-      } else if (diff < 60000) {
+3093-        setSaveMessage("Saved a few seconds ago");
+3094-      } else {
+3095-        const mins = Math.floor(diff / 60000);
+3096-        setSaveMessage(`Saved ${mins}m ago`);
+3097-      }
+3098-    }, 10000);
+3099-    return () => clearInterval(interval);
+3100-  }, [lastSavedTime, docSaveStatus]);
+3101-
+3102-  const handleExportMarkdown = () => {
+3103-    try {
+3104-      const content = editorRef.current?.innerText || "";
+3105-      const blob = new Blob([content], { type: "text/markdown;charset=utf-8;" });
+3106-      const url = URL.createObjectURL(blob);
+--
+3225:  useEffect(() => {
+3226-    if (isShareModalOpen && activeTabId) {
+3227-      setGeneratedLink(`${window.location.origin}/?tab=${activeTabId}`);
+3228-    }
+3229-  }, [isShareModalOpen, activeTabId]);
+3230-
+3231-  // PDF Annotation States
+3232-  const [selectionText, setSelectionText] = useState("");
+3233-  const [selectionPos, setSelectionPos] = useState<{
+3234-    x: number;
+3235-    y: number;
+3236-  } | null>(null);
+3237-  const [pdfContextMenu, setPdfContextMenu] = useState<{
+3238-    x: number;
+3239-    y: number;
+3240-  } | null>(null);
+3241-  const [selectedPageNum, setSelectedPageNum] = useState<number | null>(null);
+3242-  const [commentDraft, setCommentDraft] = useState("");
+3243-  const [activeHighlightColor, setActiveHighlightColor] = useState("#fef08a");
+3244-  const [folderName, setFolderName] = useState("");
+3245-  const [savedNoteName, setSavedNoteName] = useState("");
+--
+3265:  useEffect(() => {
+3266-    let unsubscribeDeepLink: (() => void) | undefined;
+3267-
+3268-    const setupDeepLinkListener = async () => {
+3269-      const isElectron = typeof window !== 'undefined' && (window as any).electron !== undefined;
+3270-      const isTauri = typeof window !== 'undefined' && ('___TAURI___' in window || (window as any).__TAURI__ !== undefined);
+3271-
+3272-      if (isElectron && (window as any).electron?.onDeepLink) {
+3273-        console.log("Electron: Registering deep link listener");
+3274-        unsubscribeDeepLink = (window as any).electron.onDeepLink(async (urlStr: string) => {
+3275-          try {
+3276-            console.log("Electron received deep link:", urlStr);
+3277-            const url = new URL(urlStr);
+3278-            const token = url.searchParams.get('token');
+3279-            const googleIdToken = url.searchParams.get('id_token') || url.searchParams.get('googleIdToken');
+3280-            
+3281-            if (token) {
+3282-              const { signInWithCustomToken } = await import('firebase/auth');
+3283-              await signInWithCustomToken(auth, token);
+3284-              console.log("Electron authenticated successfully with custom token");
+3285-            } else if (googleIdToken) {
+--
+3332:  useEffect(() => {
+3333-    const params = new URLSearchParams(window.location.search);
+3334-    if (params.get('google_callback') === '1') {
+3335-      // Handled by DesktopAuthBridge component entirely, skip this effect
+3336-      return;
+3337-    }
+3338-
+3339-    const isElectron = () => typeof window !== 'undefined' && (
+3340-      (window as any).electron !== undefined || 
+3341-      navigator.userAgent.toLowerCase().includes('electron') ||
+3342-      (window as any).ipcRenderer !== undefined ||
+3343-      (window as any).process?.versions?.electron !== undefined
+3344-    );
+3345-    const isTauri = () => typeof window !== 'undefined' && ('___TAURI___' in window || (window as any).__TAURI__ !== undefined);
+3346-    
+3347-    if (isElectron() || isTauri()) {
+3348-      console.log("Desktop shell detected (Electron/Tauri): Skipping third-party storage auth redirects.");
+3349-      return;
+3350-    }
+3351-    
+3352-    const checkRedirect = async () => {
+--
+3475:  useEffect(() => {
+3476-    if (!activeTab) {
+3477-      document.title = "Cosmi";
+3478-      return;
+3479-    }
+3480-
+3481-    switch (activeTab.type) {
+3482-      case "home":
+3483-        document.title = "Cosmi";
+3484-        break;
+3485-      case "library":
+3486-        if (selectedFolderId) {
+3487-          const folderObj = folders.find((f) => f.id === selectedFolderId);
+3488-          document.title = `Cosmi - ${folderObj?.name || "Library"}`;
+3489-        } else {
+3490-          document.title = "Cosmi - Library";
+3491-        }
+3492-        break;
+3493-      case "document": {
+3494-        const titleStr =
+3495-          activeTab.title && activeTab.title.trim() !== ""
+--
+4238:  useEffect(() => {
+4239-    let unsubscribeUser = () => {};
+4240-    let unsubFolders = () => {};
+4241-    let unsubPapers = () => {};
+4242-    let unsubChats = () => {};
+4243-    let unsubAnnos = () => {};
+4244-
+4245-    const setupListeners = async (user: any) => {
+4246-      // Clean up previous listeners
+4247-      unsubFolders();
+4248-      unsubPapers();
+4249-      unsubChats();
+4250-      unsubAnnos();
+4251-
+4252-      if (user) {
+4253-        // Save/Sync profile & Check Onboarding
+4254-        try {
+4255-          const userDocRef = doc(db, "users", user.uid);
+4256-          const userDocSnap = await getDocFromServer(userDocRef);
+4257-          
+4258-          if (!userDocSnap.exists() || !userDocSnap.data()?.onboardingComplete) {
+--
+4697:  useEffect(() => {
+4698-    messagesRef.current = messages;
+4699-  }, [messages]);
+4700-  const [chatInput, setChatInput] = useState("");
+4701-  const [selectedModel, setSelectedModel] = useState<string>(() => {
+4702-    try {
+4703-      const cachedRef = localStorage.getItem("cosmi_user_snapshot");
+4704-      const uid = cachedRef ? JSON.parse(cachedRef).uid : "guest";
+4705-      const cached = localStorage.getItem(`cosmi_selected_model_${uid}`) || localStorage.getItem("cosmi_selected_model");
+4706-      return cached || "command-a-plus-05-2026";
+4707-    } catch {
+4708-      return "command-a-plus-05-2026";
+4709-    }
+4710-  });
+4711-
+4712:  useEffect(() => {
+4713-    try {
+4714-      const cachedRef = localStorage.getItem("cosmi_user_snapshot");
+4715-      const uid = cachedRef ? JSON.parse(cachedRef).uid : "guest";
+4716-      localStorage.setItem(`cosmi_selected_model_${uid}`, selectedModel);
+4717-      localStorage.setItem("cosmi_selected_model", selectedModel);
+4718-    } catch {}
+4719-  }, [selectedModel, currentUser]);
+4720-  const [thinkingLevel, setThinkingLevel] = useState<'Standard' | 'Deep' | 'Instant'>('Standard');
+4721-  const [isAgentModelMenuOpen, setIsAgentModelMenuOpen] = useState(false);
+4722-  const [isAgentThinkingMenuOpen, setIsAgentThinkingMenuOpen] = useState(false);
+4723-  const [isAgentPlusMenuOpen, setIsAgentPlusMenuOpen] = useState(false);
+4724-  const [isAgentMoreModelsOpen, setIsAgentMoreModelsOpen] = useState(false);
+4725-  const [webSearchEnabled, setWebSearchEnabled] = useState(() => {
+4726-    return localStorage.getItem("cosmi_settings_web_search") === "true";
+4727-  });
+4728-  const [latexEnabled, setLatexEnabled] = useState(() => {
+4729-    return localStorage.getItem("cosmi_settings_latex") !== "false";
+4730-  });
+4731-  const [autoDraftEnabled, setAutoDraftEnabled] = useState(() => {
+4732-    return localStorage.getItem("cosmi_settings_auto_draft") !== "false";
+--
+5009:  useEffect(() => {
+5010-    const handleNewChat = () => {
+5011-      const newId = `chat-${Date.now()}`;
+5012-      const newChatTab: Tab = {
+5013-        id: newId,
+5014-        type: "chat",
+5015-        title: "New chat",
+5016-        messages: [],
+5017-      };
+5018-      setTabs((prev) => [...prev, newChatTab]);
+5019-      setActiveTabId(newId);
+5020-      setActiveAssistantTabId(newId);
+5021-      setMessages([]);
+5022-      saveChatToLibrary(currentUser?.uid || "guest", newChatTab);
+5023-    };
+5024-
+5025-    window.addEventListener("request-new-chat", handleNewChat);
+5026-    return () => {
+5027-      window.removeEventListener("request-new-chat", handleNewChat);
+5028-    };
+5029-  }, [currentUser?.uid, saveChatToLibrary, setTabs, setActiveTabId, setActiveAssistantTabId, setMessages]);
+--
+5079:  useEffect(() => {
+5080-    if (!isSessionLoaded || !tabs || tabs.length === 0) return;
+5081-
+5082-    if (currentUser && storageMode === "database") {
+5083-      if (loadedUserIdRef.current !== currentUser.uid) return; // Prevent leak!
+5084-      const handler = setTimeout(() => {
+5085-        const sessionRef = doc(
+5086-          db,
+5087-          "users",
+5088-          currentUser.uid,
+5089-          "workspace",
+5090-          "session",
+5091-        );
+5092-        const cleanTabs = JSON.parse(JSON.stringify(tabs));
+5093-        const cleanMessages = JSON.parse(JSON.stringify(messages));
+5094-
+5095-        setDoc(
+5096-          sessionRef,
+5097-          {
+5098-            tabs: cleanTabs,
+5099-            activeTabId,
+--
+5110:  useEffect(() => {
+5111-    const uid = currentUser ? currentUser.uid : "guest";
+5112-    if (loadedUserIdRef.current !== uid) return; // Prevent leak!
+5113-    localStorage.setItem(`cosmi_folders_${uid}`, JSON.stringify(folders));
+5114-  }, [folders, currentUser]);
+5115-
+5116:  useEffect(() => {
+5117-    const uid = currentUser ? currentUser.uid : "guest";
+5118-    if (loadedUserIdRef.current !== uid) return; // Prevent leak!
+5119-    localStorage.setItem(`cosmi_papers_${uid}`, JSON.stringify(papers));
+5120-  }, [papers, currentUser]);
+5121-
+5122:  useEffect(() => {
+5123-    const uid = currentUser ? currentUser.uid : "guest";
+5124-    if (loadedUserIdRef.current !== uid) return; // Prevent leak!
+5125-    localStorage.setItem(`cosmi_tabs_${uid}`, JSON.stringify(tabs));
+5126-  }, [tabs, currentUser]);
+5127-
+5128:  useEffect(() => {
+5129-    const uid = currentUser ? currentUser.uid : "guest";
+5130-    if (loadedUserIdRef.current !== uid) return; // Prevent leak!
+5131-    localStorage.setItem(`cosmi_activeTabId_${uid}`, activeTabId);
+5132-  }, [activeTabId, currentUser]);
+5133-
+5134:  useEffect(() => {
+5135-    const uid = currentUser ? currentUser.uid : "guest";
+5136-    if (loadedUserIdRef.current !== uid) return; // Prevent leak!
+5137-    localStorage.setItem(`cosmi_messages_${uid}`, JSON.stringify(messages));
+5138-  }, [messages, currentUser]);
+5139-
+5140-  // PDF Annotation Helpers & Highlight Engine
+5141-  const highlightPDFSpans = () => {
+5142-    const activeTab = tabs.find((t) => t.id === activeTabId);
+5143-    if (!activeTab || !activeTab.id) return;
+5144-    const fileKey = activeTab.fileId || activeTab.id;
+5145-    const saved = localStorage.getItem(`annotations_${fileKey}`);
+5146-    if (!saved) return;
+5147-    try {
+5148-      const annos = JSON.parse(saved);
+5149-      if (!annos || annos.length === 0) return;
+5150-
+5151-      annos.forEach((anno: any) => {
+5152-        const pageContainer = document.getElementById(`pdf-page-${anno.page}`);
+5153-        if (!pageContainer) return;
+5154-
+--
+5183:  useEffect(() => {
+5184-    const activeTab = tabs.find((t) => t.id === activeTabId);
+5185-    let intervalId: any;
+5186-    if (activeTab && activeTab.mimetype === "application/pdf") {
+5187-      highlightPDFSpans();
+5188-      intervalId = setInterval(highlightPDFSpans, 1500);
+5189-    }
+5190-
+5191-    const handleUpdate = () => {
+5192-      highlightPDFSpans();
+5193-    };
+5194-
+5195-    window.addEventListener("annotationsUpdated", handleUpdate);
+5196-    return () => {
+5197-      if (intervalId) clearInterval(intervalId);
+5198-      window.removeEventListener("annotationsUpdated", handleUpdate);
+5199-    };
+5200-  }, [activeTabId, pdfNumPages]);
+5201-
+5202:  useEffect(() => {
+5203-    if (!pdfNumPages) return;
+5204-
+5205-    const observer = new IntersectionObserver(
+5206-      (entries) => {
+5207-        // Find the entry that is intersecting the most
+5208-        let maxRatio = 0;
+5209-        let mostVisibleId = null;
+5210-
+5211-        entries.forEach((entry) => {
+5212-          if (entry.isIntersecting && entry.intersectionRatio > maxRatio) {
+5213-            maxRatio = entry.intersectionRatio;
+5214-            mostVisibleId = entry.target.id;
+5215-          }
+5216-        });
+5217-
+5218-        if (mostVisibleId) {
+5219-          const pageNum = parseInt(
+5220-            (mostVisibleId as string).replace("pdf-page-", ""),
+5221-          );
+5222-          if (!isNaN(pageNum)) {
+--
+5331:  useEffect(() => {
+5332-    if (ignoreNextTabSyncRef.current === activeTabId) {
+5333-      ignoreNextTabSyncRef.current = null;
+5334-      loadedTabIdRef.current = activeTabId;
+5335-      return;
+5336-    }
+5337-    // Always clear if we didn't match, so it doesn't leak to future unrelated tabs
+5338-    if (ignoreNextTabSyncRef.current !== null) {
+5339-      ignoreNextTabSyncRef.current = null;
+5340-    }
+5341-    
+5342-    const targetTab = tabs.find((t) => t.id === activeTabId);
+5343-    if (!targetTab) return;
+5344-
+5345-    const isDocNotPdf =
+5346-      targetTab.type === "document" &&
+5347-      (!targetTab.fileId ||
+5348-        !(
+5349-          targetTab.mimetype === "application/pdf" ||
+5350-          targetTab.title.toLowerCase().endsWith(".pdf")
+5351-        ));
+--
+5405:  useEffect(() => {
+5406-    if (docSaveStatus !== "saving") return;
+5407-
+5408-    if (!autoDraftEnabled) {
+5409-      // If auto-draft is disabled, we just show "saved" locally since we wait for blur events
+5410-      setDocSaveStatus("saved");
+5411-      return;
+5412-    }
+5413-
+5414-    const timer = setTimeout(async () => {
+5415-      const currentTab = tabs.find((t) => t.id === activeTabId);
+5416-      if (
+5417-        currentTab &&
+5418-        currentTab.type === "document" &&
+5419-        (!currentTab.fileId ||
+5420-          !(
+5421-            currentTab.mimetype === "application/pdf" ||
+5422-            currentTab.title.toLowerCase().endsWith(".pdf")
+5423-          ))
+5424-      ) {
+5425-        try {
