@@ -1469,11 +1469,11 @@ export const MainChat: React.FC<MainChatProps> = ({
                           .filter(
                             (m) =>
                               ![
-                                "hokku-iv",
-                                "codestral-latest",
+                                "auto",
                                 "reka-flash",
-                                "mimo-v2.5-pro",
                                 "solar-pro2",
+                                "codestral-latest",
+                                "mimo-v2.5-pro",
                               ].includes(m.id),
                           )
                           .map((m) => {
@@ -1533,9 +1533,10 @@ export const MainChat: React.FC<MainChatProps> = ({
                           <div className="flex items-center gap-1.5">
                             <div className="w-4 shrink-0 flex items-center justify-center">
                               {[
-                                "hokku-iv",
-                                "codestral-latest",
+                                "auto",
                                 "reka-flash",
+                                "solar-pro2",
+                                "codestral-latest",
                                 "mimo-v2.5-pro",
                               ].includes(selectedModel) ? (
                                 <Icon
@@ -1569,11 +1570,11 @@ export const MainChat: React.FC<MainChatProps> = ({
                               {modelsList
                                 .filter((m) =>
                                   [
-                                    "hokku-iv",
-                                    "codestral-latest",
+                                    "auto",
                                     "reka-flash",
-                                    "mimo-v2.5-pro",
                                     "solar-pro2",
+                                    "codestral-latest",
+                                    "mimo-v2.5-pro",
                                   ].includes(m.id),
                                 )
                                 .map((m) => {
@@ -1689,23 +1690,12 @@ export const MainChat: React.FC<MainChatProps> = ({
                                       setThinkingLevel(opt.id as any);
                                       setIsThinkingMenuOpen(false);
                                     }}
-                                    className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
+                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer font-jakarta hover:bg-zinc-800/40 ${
                                       isSelected
                                         ? "bg-zinc-800/25 text-white"
                                         : "text-zinc-300 hover:text-white"
                                     }`}
                                   >
-                                    {/* Left Check col */}
-                                    <div className="w-4 flex items-center justify-center shrink-0 pt-0.5">
-                                      {isSelected ? (
-                                        <Icon
-                                          icon="ph:check"
-                                          className="w-3.5 h-3.5 text-zinc-100 font-bold"
-                                        />
-                                      ) : (
-                                        <div className="w-3.5" />
-                                      )}
-                                    </div>
                                     {/* Options text block */}
                                     <div className="flex flex-col gap-0.5 text-left min-w-0 font-jakarta">
                                       <span className="text-[13.5px] font-semibold text-zinc-100 leading-tight">
@@ -1714,6 +1704,15 @@ export const MainChat: React.FC<MainChatProps> = ({
                                       <span className="text-[11.5px] text-zinc-400 leading-tight">
                                         {opt.desc}
                                       </span>
+                                    </div>
+                                    {/* Right Check col */}
+                                    <div className="w-5 flex items-center justify-center shrink-0">
+                                      {isSelected ? (
+                                        <Icon
+                                          icon="ph:check"
+                                          className="w-3.5 h-3.5 text-zinc-100 font-bold"
+                                        />
+                                      ) : null}
                                     </div>
                                   </button>
                                 );

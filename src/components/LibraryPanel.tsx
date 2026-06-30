@@ -982,10 +982,6 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
           {!selectedFolderId ? (
             // Folder Grid and Directory Layout
             <div className="px-4">
-              <h2 className="text-[#a1a1aa] text-[10px] font-bold tracking-widest uppercase mb-4">
-                {lt("researchFolders", "Research Folders")}
-              </h2>
-
               <div className="bg-[#121212] overflow-x-auto border border-[#27272a] rounded-xl mb-8">
                 <table className="w-full text-left border-collapse min-w-[700px]">
                   <thead>

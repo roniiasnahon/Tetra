@@ -146,6 +146,7 @@ export interface Tab {
   undoStack?: string[];
   redoStack?: string[];
   starred?: boolean;
+  updatedAt?: number;
 }
 
 export interface ChatMessage {
@@ -3066,12 +3067,23 @@ export default function App() {
               type: "chat",
               title: data.title || "Untitled",
               messages: data.messages || [],
+              updatedAt: data.updatedAt || 0,
             });
           });
-          const sorted = loadedChats.sort((a,b) => {
-            const aLast = a.messages && a.messages.length > 0 ? a.messages[a.messages.length - 1].timestamp : 0;
-            const bLast = b.messages && b.messages.length > 0 ? b.messages[b.messages.length - 1].timestamp : 0;
-            return bLast - aLast;
+          const sorted = loadedChats.sort((a, b) => {
+            const aTime = Math.max(
+              a.updatedAt || 0,
+              a.messages && a.messages.length > 0
+                ? a.messages[a.messages.length - 1].timestamp
+                : 0
+            );
+            const bTime = Math.max(
+              b.updatedAt || 0,
+              b.messages && b.messages.length > 0
+                ? b.messages[b.messages.length - 1].timestamp
+                : 0
+            );
+            return bTime - aTime;
           });
           setAllChats(prev => {
             if (JSON.stringify(prev) !== JSON.stringify(sorted)) {
@@ -3604,19 +3616,41 @@ export default function App() {
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, path);
       }
-    } else {
-      setAllChats((prev) => {
-        const filtered = prev.filter((c) => c.id !== chatTab.id);
-        const updatedChat = {
-          ...chatTab,
-          messages: chatTab.messages || [],
-        };
-        const next = [updatedChat, ...filtered];
-        localStorage.setItem(`cosmi_chats_${uid}`, JSON.stringify(next));
-        return next;
-      });
     }
+    
+    // Always update local state for immediate feedback
+    setAllChats((prev) => {
+      const filtered = prev.filter((c) => c.id !== chatTab.id);
+      const updatedChat = {
+        ...chatTab,
+        messages: chatTab.messages || [],
+        updatedAt: Date.now(),
+      };
+      const next = [updatedChat, ...filtered];
+      
+      // Also update localStorage for the specific user/guest as a backup
+      const uid = currentUser ? currentUser.uid : "guest";
+      localStorage.setItem(`cosmi_chats_${uid}`, JSON.stringify(next));
+      
+      return next;
+    });
   }, [currentUser, storageMode]);
+
+  const createNewChat = () => {
+    const newId = `chat-${Date.now()}`;
+    const newChatTab: Tab = {
+      id: newId,
+      type: "chat",
+      title: "New chat",
+      messages: [],
+    };
+    setTabs((prev) => [...prev, newChatTab]);
+    setActiveTabId(newId);
+    setActiveAssistantTabId(newId);
+    setMessages([]);
+    saveChatToLibrary(currentUser?.uid || "guest", newChatTab);
+    return newId;
+  };
 
   const updateChatMessages = (
     updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
@@ -4515,7 +4549,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
     if (
       currentTab &&
       currentTab.type === "chat" &&
-      (currentTab.title === "Untitled" || currentTab.title === "New chat")
+      (currentTab.title === "Untitled" || currentTab.title === "New chat" || currentTab.title === "New Chat")
     ) {
       // Fire and forget (don't await) so it runs in parallel with the main stream
       fetch("/api/research/generate-title", {
@@ -4526,20 +4560,34 @@ Once you have content, I can help you draft sections, summarize findings, or for
         .then((res) => (res.ok ? res.json() : null))
         .then((titleData) => {
           if (titleData?.title) {
-            setTabs((prev) => {
-              const updatedTabs = prev.map((t) =>
-                t.id === currentTabId ? { ...t, title: titleData.title } : t,
-              );
-              const updatedTab = updatedTabs.find(
-                (t) => t.id === currentTabId,
-              );
-              if (updatedTab) {
-                saveChatToLibrary(currentUser?.uid || "guest", updatedTab).catch(
-                  console.error,
-                );
-              }
-              return updatedTabs;
+            const newTitle = titleData.title;
+            
+            // 1. Update Tabs
+            setTabs((prev) =>
+              prev.map((t) =>
+                t.id === currentTabId ? { ...t, title: newTitle } : t,
+              ),
+            );
+
+            // 2. Update allChats for immediate sidebar feedback
+            setAllChats((prev) => {
+              const filtered = prev.filter((c) => c.id !== currentTabId);
+              const existingChat = prev.find((c) => c.id === currentTabId);
+              if (!existingChat) return prev;
+              
+              const updatedChat = {
+                ...existingChat,
+                title: newTitle,
+                updatedAt: Date.now(),
+              };
+              return [updatedChat, ...filtered];
             });
+
+            // 3. Persist to Firestore/LocalStorage
+            const updatedTab = { ...currentTab, title: newTitle };
+            saveChatToLibrary(currentUser?.uid || "guest", updatedTab).catch(
+              console.error,
+            );
           }
         })
         .catch((errTitle) =>
@@ -5304,6 +5352,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
         selectedFolderId={selectedFolderId}
         setSelectedFolderId={setSelectedFolderId}
         createNewDocument={createNewDocument}
+        createNewChat={createNewChat}
         dbSetFolder={dbSetFolder}
         fileInputRef={fileInputRef}
         handlePaperClick={handlePaperClick}
@@ -5557,16 +5606,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                             <div className="border-t border-[#2d2d30] my-1" />
                             <button
                               onClick={() => {
-                                const newId = `chat-${Date.now()}`;
-                                setTabs([
-                                  ...tabs,
-                                  {
-                                    id: newId,
-                                    type: "chat",
-                                    title: "Untitled",
-                                  },
-                                ]);
-                                setActiveTabId(newId);
+                                createNewChat();
                                 setIsChatDropdownOpen(false);
                               }}
                               className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-[#222222] transition-colors cursor-pointer"
@@ -5587,14 +5627,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
 
                   <div className="flex items-center gap-1.5 pointer-events-auto">
                     <button
-                      onClick={() => {
-                        const newId = `chat-${Date.now()}`;
-                        setTabs([
-                          ...tabs,
-                          { id: newId, type: "chat", title: "Untitled" },
-                        ]);
-                        setActiveTabId(newId);
-                      }}
+                      onClick={createNewChat}
                       className="p-2 text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#1a1a1a] rounded-xl transition-colors cursor-pointer flex items-center justify-center shrink-0"
                       title="New Chat"
                     >

@@ -33,6 +33,7 @@ interface SidebarPanelProps {
   selectedFolderId: string | null;
   setSelectedFolderId: (id: string | null) => void;
   createNewDocument: () => void;
+  createNewChat: () => void;
   dbSetFolder: (folder: any) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   handlePaperClick: (paper: any) => void;
@@ -95,6 +96,7 @@ export const SidebarPanel: React.FC<SidebarPanelProps> = ({
   selectedFolderId,
   setSelectedFolderId,
   createNewDocument,
+  createNewChat,
   dbSetFolder,
   fileInputRef,
   handlePaperClick,
@@ -313,12 +315,7 @@ export const SidebarPanel: React.FC<SidebarPanelProps> = ({
                   </button>
                   <button
                     onClick={() => {
-                      const newId = `chat-${Date.now()}`;
-                      setTabs([
-                        ...tabs,
-                        { id: newId, type: "chat", title: "Untitled" },
-                      ]);
-                      setActiveTabId(newId);
+                      createNewChat();
                       setIsCreateDropdownOpen(false);
                     }}
                     className="w-full flex items-center gap-3 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer group"
@@ -544,20 +541,7 @@ export const SidebarPanel: React.FC<SidebarPanelProps> = ({
                     Recent Chats
                   </span>
                   <button
-                    onClick={() => {
-                      const newId = `chat-${Date.now()}`;
-                      const newChatTab: Tab = {
-                        id: newId,
-                        type: "chat",
-                        title: "New chat",
-                        messages: [],
-                      };
-                      setTabs([...tabs, newChatTab]);
-                      setActiveTabId(newId);
-                      if (currentUser?.uid) {
-                        // Import dynamic helper or invoke directly if available
-                      }
-                    }}
+                    onClick={createNewChat}
                     className="p-1 hover:bg-[#27272a] rounded text-[#71717a] hover:text-[#f4f4f5] transition-colors cursor-pointer"
                     title="New Chat"
                   >
@@ -578,7 +562,9 @@ export const SidebarPanel: React.FC<SidebarPanelProps> = ({
                   <div className="space-y-1">
                     {getUniqueChats(allChats).map((chatTab) => {
                       const isCurrent = chatTab.id === activeTabId;
-                      const isOpenTab = tabs.some((t) => t.id === chatTab.id);
+                      const openTab = tabs.find((t) => t.id === chatTab.id);
+                      const displayTitle = openTab ? openTab.title : chatTab.title;
+                      const isOpenTab = !!openTab;
                       return (
                         <div
                           key={chatTab.id}
@@ -600,7 +586,7 @@ export const SidebarPanel: React.FC<SidebarPanelProps> = ({
                             className="flex-1 flex items-center gap-2 min-w-0 text-left cursor-pointer"
                           >
                             <span className="text-xs truncate font-medium">
-                              {translateDynamicTitle(chatTab.title)}
+                              {translateDynamicTitle(displayTitle)}
                             </span>
                           </button>
                           <button
