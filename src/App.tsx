@@ -347,7 +347,7 @@ export default function App() {
   const addToolsHistoryItem = (item: any) => {
     const newItem = {
       ...item,
-      id: `tool-hist-${Date.now()}`,
+      id: `tool-hist-${Date.now()}-${Math.random()}`,
       timestamp: Date.now(),
     };
     setToolsHistory((prev) => {
@@ -5513,10 +5513,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
               >
                 <img
                   src="/cosmi.png"
-                  alt="Blob"
+                  alt="Agent"
                   className="w-3.5 h-3.5 object-contain"
                 />
-                <span>Blob</span>
+                <span>Agent</span>
               </button>
             </div>
           )}
@@ -6262,7 +6262,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                           icon="ph:sparkle"
                           className="w-4 h-4 text-zinc-500 group-hover:text-white"
                         />
-                        <span>Blob</span>
+                        <span>Agent</span>
                       </button>
 
                       <div className="h-[1px] bg-[#2d2d30] mx-2 my-1" />
@@ -6989,30 +6989,47 @@ Once you have content, I can help you draft sections, summarize findings, or for
               </div>
             )}
           </div>
-          <SidePanel
-            isOpen={isSidePanelOpen && activeTab.type === "document"}
-            onClose={() => setIsSidePanelOpen(false)}
-            tabId={activeTabId}
-            activeTab={activeTab}
-            papers={papers}
-            onUpdatePaper={(updatedPaper) => {
-              dbSetPaper(updatedPaper);
-              if (
-                activeViewingPaper &&
-                activeViewingPaper.title === updatedPaper.title
-              ) {
-                setActiveViewingPaper(updatedPaper);
-              }
-            }}
-            extractTextFromPdf={extractTextFromPdf}
-          />
+          <AnimatePresence>
+            {isSidePanelOpen && activeTab.type === "document" && (
+              <SidePanel
+                isOpen={true}
+                onClose={() => setIsSidePanelOpen(false)}
+                tabId={activeTabId}
+                activeTab={activeTab}
+                papers={papers}
+                onUpdatePaper={(updatedPaper) => {
+                  dbSetPaper(updatedPaper);
+                  if (
+                    activeViewingPaper &&
+                    activeViewingPaper.title === updatedPaper.title
+                  ) {
+                    setActiveViewingPaper(updatedPaper);
+                  }
+                }}
+                extractTextFromPdf={extractTextFromPdf}
+              />
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
       {/* Right Section - AI Assistant Window Panel */}
-      {isAssistantOpen && (
-        <div className={`p-[4px] flex h-full shrink-0 ${isDesktopApp ? "pt-[38px]" : ""}`}>
-          <div className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden animate-slide-in relative">
+      <AnimatePresence>
+        {isAssistantOpen && (
+          <motion.div
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: "auto", opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className={`p-[4px] flex h-full shrink-0 overflow-hidden ${isDesktopApp ? "pt-[38px]" : ""}`}
+          >
+            <motion.div
+              initial={{ x: 50, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 50, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="w-[360px] md:w-[420px] bg-[#121212] rounded-2xl flex flex-col h-full shrink-0 overflow-hidden relative"
+            >
             <div className={`flex flex-col h-full w-full transition-all duration-300 ${!isOnline ? "blur-[6px] select-none pointer-events-none" : ""}`}>
             {/* Assistant Header */}
             <div className={`h-[52px] flex items-center justify-between px-5 shrink-0 bg-[#121212] relative ${isDesktopApp ? "" : "[-webkit-app-region:drag]"}`}>
@@ -7315,7 +7332,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                         const isSelected = idx === agentMentionState.selectedIndex;
                         return (
                           <button
-                            key={p.fileId || p.title + idx}
+                            key={p.fileId ? `${p.fileId}-${idx}` : `${p.title}-${idx}`}
                             onClick={() => selectAgentPaper(p)}
                             onMouseEnter={() => setAgentMentionState(prev => ({ ...prev, selectedIndex: idx }))}
                             className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-all text-left ${
@@ -7764,9 +7781,10 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 </div>
               </div>
             )}
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {linkContextMenu && (
         <div
@@ -9176,126 +9194,75 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 <XIcon className="w-5 h-5" />
               </button>
 
-              {supportAmountPaid ? (
-                <div className="flex flex-col items-center text-center space-y-4 py-4">
-                  <div className="w-14 h-14 rounded-full bg-emerald-950/30 border border-emerald-800/40 flex items-center justify-center text-emerald-400">
-                    <Mug weight="Outline" className="w-7 h-7" />
-                  </div>
+              <div className="flex flex-col items-center text-center space-y-4 pt-1">
+                {/* Coffee cup box */}
+                <div className="w-12 h-12 rounded-xl bg-[#221714] border border-[#44312a] flex items-center justify-center text-[#e3a088]">
+                  <Mug weight="Outline" className="w-6 h-6" />
+                </div>
 
-                  <div className="space-y-1">
-                    <h3 className="text-base font-bold text-zinc-100 font-jakarta">
-                      Support Succeeded!
-                    </h3>
-                    <span className="text-[10px] uppercase tracking-wider font-mono text-emerald-500 font-bold">
-                      Official Workspace Patron
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-zinc-400 leading-relaxed px-1">
-                    Thank you deep down for your virtual donation of{" "}
-                    <span className="text-emerald-400 font-bold">
-                      {supportAmountPaid}
-                    </span>
-                    ! This supports daily Gemini token requests, web
-                    parser microservices, and general app development.
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold text-zinc-100 font-jakarta">
+                    Support AI Research Workspace
+                  </h3>
+                  <p className="text-[10px] text-zinc-500 font-sans font-semibold uppercase tracking-wider">
+                    Keep the model intelligence active ☕
                   </p>
+                </div>
+
+                <p className="text-xs text-zinc-400 leading-relaxed px-1">
+                  If our draft optimizer, citation indexers, automatic
+                  web synthesis, or study panels have saved you time,
+                  consider buying us a coffee by scanning the QR code below.
+                </p>
+
+                {/* QR Code Container */}
+                <div className="bg-white p-3.5 rounded-2xl flex flex-col items-center justify-center border border-zinc-200 shadow-md my-1 w-[184px] h-[184px]">
+                  <svg width="156" height="156" viewBox="0 0 29 29" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-black">
+                    {/* Finder Pattern Top-Left */}
+                    <path d="M0 0h7v7H0V0zm1 1v5h5V1H1zm1 1h3v3H2V2z" fill="currentColor"/>
+                    {/* Finder Pattern Top-Right */}
+                    <path d="M22 0h7v7h-7V0zm1 1v5h5V1h-1zm1 1h3v3h-3V2z" fill="currentColor"/>
+                    {/* Finder Pattern Bottom-Left */}
+                    <path d="M0 22h7v7H0v-7zm1 1v5h5v-5H1zm1 1h3v3H2v-3z" fill="currentColor"/>
+                    {/* Alignment Pattern Bottom-Right */}
+                    <path d="M20 20h5v5h-5v-5zm1 1v3h3v-3h-3zm1 1h1v1h-1v-1z" fill="currentColor"/>
+                    {/* Timing Pattern Horizontal */}
+                    <path d="M8 6h1v1H8V6zm2 0h1v1h-1V6zm2 0h1v1h-1V6zm2 0h1v1h-1V6zm2 0h1v1h-1V6zm2 0h1v1h-1V6z" fill="currentColor"/>
+                    {/* Timing Pattern Vertical */}
+                    <path d="M6 8h1v1H6V8zm0 2h1v1H6v-1zm0 2h1v1H6v-1zm0 4h1v1H6v-1zm0 2h1v1H6v-1zm0 2h1v1H6v-1z" fill="currentColor"/>
+                    {/* Data modules */}
+                    <path d="M9 0h2v1H9V0zm4 0h1v2h-1V0zm2 0h3v1h-3V0zm1 1h2v1h-2V1zm-4 2h1v1h-1V3zm2 0h2v1h-2V3zm1 1h1v2h-1V4zm-5 1h2v1H9V5zm3 0h1v1h-1V5zm5 0h1v2h-1V5zm-8 3h2v1H9V8zm3 0h3v1h-3V8zm1 1h1v2h-1V9zm-5 2h2v1H9v-1zm3 0h1v1h-1v-1zm3 0h1v3h-1v-3zm3 0h1v1h-1v-1zm-8 3h2v1H9v-1zm3 0h2v1h-2v-1zm3 1h1v1h-1v-1zm2 0h1v2h-1v-2zm-9 2h1v2H8v-2zm3 0h2v1h-2v-1zm4 0h1v1h-1v-1zm2 0h1v1h-1v-1zm-8 3h3v1H9v-1zm4 0h1v1h-1v-1zm2 0h2v1h-2v-1zm1 1h1v2h-1v-2z" fill="currentColor"/>
+                    <path d="M9 13h1v1H9v-1zm4 0h1v1h-1v-1zm2 1h1v1h-1v-1zm1 1h1v1h-1v-1zm-3 1h2v1h-2v-1zm5 0h1v1h-1v-1zm1 1h1v1h-1v-1zm-8 2h2v1H9v-1zm4 0h1v1h-1v-1zm2 1h1v2h-1v-2zm-5 2h1v1H8v-1zm3 0h2v1h-2v-1zm4 1h1v1h-1v-1z" fill="currentColor"/>
+                  </svg>
+                </div>
+
+                <div className="text-[10px] uppercase font-sans font-semibold tracking-wider text-zinc-500 mt-1">
+                  SCAN TO DONATE
+                </div>
+
+                {/* Direct exterior Support links */}
+                <div className="w-full space-y-2 pt-1">
+                  <a
+                    href="https://buymeacoffee.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2.5 rounded-xl bg-[#e3a088] hover:bg-[#ebd0c5] text-zinc-950 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-[#221714]/20"
+                  >
+                    <Mug weight="Outline" className="w-3.5 h-3.5" />
+                    <span>Support on BuyMeACoffee.com</span>
+                    <ExternalLink className="w-3 h-3 ml-0.5" />
+                  </a>
 
                   <button
                     onClick={() => {
                       setShowBuyCoffeeModal(false);
-                      setSupportAmountPaid(null);
                     }}
-                    className="w-full py-2 bg-zinc-200 hover:bg-white text-zinc-950 rounded-xl font-bold text-xs transition-colors cursor-pointer mt-2"
+                    className="w-full py-2 text-[10.5px] text-zinc-500 hover:text-zinc-300 font-medium transition-colors cursor-pointer"
                   >
-                    Conclude & Return
+                    Maybe next time, thanks!
                   </button>
                 </div>
-              ) : (
-                <div className="flex flex-col items-center text-center space-y-4 pt-1">
-                  {/* Coffee cup box */}
-                  <div className="w-14 h-14 rounded-2xl bg-[#221714] border border-[#44312a] flex items-center justify-center text-[#e3a088]">
-                    <Mug weight="Outline" className="w-7 h-7" />
-                  </div>
-
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-zinc-100 font-jakarta">
-                      Support AI Research Workspace
-                    </h3>
-                    <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">
-                      Keep the model intelligence active ☕
-                    </p>
-                  </div>
-
-                  <p className="text-xs text-zinc-400 leading-relaxed px-1">
-                    If our draft optimizer, citation indexers, automatic
-                    web synthesis, or new interactive study panels have
-                    saved you time, consider buying us a coffee!
-                  </p>
-
-                  {/* Coffee visual selectors */}
-                  <div className="w-full flex gap-2.5 pt-2">
-                    {[
-                      {
-                        count: 1,
-                        label: "1 Coffee",
-                        price: "$5",
-                        desc: "Warm Thanks!",
-                      },
-                      {
-                        count: 3,
-                        label: "3 Coffees",
-                        price: "$15",
-                        desc: "Keep it up!",
-                      },
-                      {
-                        count: 5,
-                        label: "5 Coffees",
-                        price: "$25",
-                        desc: "Pro sponsor!",
-                      },
-                    ].map((item) => (
-                      <button
-                        key={item.count}
-                        onClick={() => setSupportAmountPaid(item.price)}
-                        className="flex-1 bg-[#161618] border border-[#242426] hover:border-zinc-500 p-3 rounded-xl transition-all cursor-pointer flex flex-col items-center gap-1 group"
-                      >
-                        <span className="text-xs font-bold text-zinc-300 group-hover:text-white">
-                          {item.label}
-                        </span>
-                        <span className="text-[10px] font-mono text-zinc-500">
-                          {item.price}
-                        </span>
-                        <span className="text-[9.5px] text-zinc-600 font-semibold">
-                          {item.desc}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Direct exterior Support links */}
-                  <div className="w-full space-y-2 pt-2">
-                    <a
-                      href="https://buymeacoffee.com"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-full py-2.5 rounded-xl bg-zinc-200 hover:bg-white text-[#121212] font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                    >
-                      <Mug weight="Outline" className="w-3.5 h-3.5" />
-                      <span>Support on BuyMeACoffee.com</span>
-                      <ExternalLink className="w-3 h-3 ml-0.5" />
-                    </a>
-
-                    <button
-                      onClick={() => {
-                        setShowBuyCoffeeModal(false);
-                      }}
-                      className="w-full py-2 text-[10.5px] text-zinc-500 hover:text-zinc-300 font-medium transition-colors cursor-pointer"
-                    >
-                      Maybe next time, thanks!
-                    </button>
-                  </div>
-                </div>
-              )}
+              </div>
             </motion.div>
           </motion.div>
         )}

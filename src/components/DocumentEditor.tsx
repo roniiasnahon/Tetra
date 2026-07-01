@@ -363,6 +363,186 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     }
   };
 
+  const handlePrint = useCallback(() => {
+    const title = documentTitle || "Untitled";
+    const content = editorRef.current?.innerHTML || documentContent || "";
+
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "none";
+    iframe.style.pointerEvents = "none";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (!doc) return;
+
+    let fontFamily = 'system-ui, -apple-system, sans-serif';
+    if (editorFont === "font-jakarta") {
+      fontFamily = '"Plus Jakarta Sans", system-ui, -apple-system, sans-serif';
+    } else if (editorFont === "font-serif") {
+      fontFamily = 'Lora, Georgia, serif';
+    } else if (editorFont === "font-mono") {
+      fontFamily = '"JetBrains Mono", monospace';
+    }
+
+    doc.open();
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>\${title}</title>
+          <link rel="preconnect" href="https://fonts.googleapis.com">
+          <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+          <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+          <style>
+            @page {
+              size: portrait;
+              margin: 20mm 20mm 20mm 20mm;
+            }
+            body {
+              font-family: \${fontFamily};
+              color: #111111;
+              line-height: 1.6;
+              font-size: \${editorFontSize}px;
+              margin: 0;
+              padding: 0;
+              background: #ffffff !important;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+              text-align: \${editorAlign};
+            }
+            h1.doc-title {
+              font-size: 2.2rem;
+              font-weight: 700;
+              margin-top: 0;
+              margin-bottom: 1.5rem;
+              color: #000000;
+              border-bottom: 1px solid #e5e7eb;
+              padding-bottom: 0.75rem;
+              line-height: 1.2;
+              letter-spacing: -0.025em;
+              text-align: left;
+            }
+            p {
+              margin-top: 0;
+              margin-bottom: 1rem;
+            }
+            h1, h2, h3, h4, h5, h6 {
+              color: #000000;
+              margin-top: 1.5rem;
+              margin-bottom: 0.75rem;
+              font-weight: 600;
+              line-height: 1.3;
+              text-align: left;
+            }
+            h1 { font-size: 1.6rem; }
+            h2 { font-size: 1.3rem; }
+            h3 { font-size: 1.15rem; }
+            
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 1rem;
+              margin-bottom: 1.5rem;
+              page-break-inside: avoid;
+            }
+            th, td {
+              border: 1px solid #d1d5db;
+              padding: 8px 10px;
+              text-align: left;
+              color: #111111 !important;
+              background-color: transparent !important;
+            }
+            th {
+              background-color: #f3f4f6 !important;
+              font-weight: 600;
+            }
+            
+            .table-embed-wrapper button,
+            .chart-embed-wrapper button {
+              display: none !important;
+            }
+
+            .table-embed-wrapper {
+              margin-bottom: 1.5rem;
+              position: relative;
+            }
+
+            img {
+              max-width: 100%;
+              height: auto;
+              page-break-inside: avoid;
+            }
+
+            blockquote {
+              border-left: 3px solid #d1d5db;
+              padding-left: 1rem;
+              margin-left: 0;
+              margin-right: 0;
+              color: #4b5563;
+              font-style: italic;
+            }
+
+            ul, ol {
+              margin-top: 0;
+              margin-bottom: 1rem;
+              padding-left: 1.5rem;
+            }
+            li {
+              margin-bottom: 0.25rem;
+            }
+
+            pre, code {
+              font-family: "JetBrains Mono", monospace;
+              background-color: #f3f4f6;
+              padding: 0.15rem 0.3rem;
+              border-radius: 4px;
+              font-size: 0.9em;
+            }
+            pre {
+              padding: 1rem;
+              overflow-x: auto;
+              margin-top: 1rem;
+              margin-bottom: 1rem;
+              background-color: #f3f4f6 !important;
+            }
+            pre code {
+              background-color: transparent !important;
+              padding: 0;
+              border-radius: 0;
+            }
+          </style>
+        </head>
+        <body>
+          <h1 class="doc-title">\${title}</h1>
+          <div class="content">
+            \${content}
+          </div>
+          <script>
+            window.onload = function() {
+              setTimeout(function() {
+                window.focus();
+                window.print();
+              }, 300);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    doc.close();
+
+    // Clean up iframe after 1 minute to ensure print processes finish
+    setTimeout(() => {
+      if (iframe && iframe.parentNode) {
+        iframe.parentNode.removeChild(iframe);
+      }
+    }, 60000);
+  }, [documentTitle, documentContent, editorFont, editorFontSize, editorAlign]);
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#121212]">
       {/* Format Toolbar */}
@@ -385,6 +565,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
           setChartBeingEdited={setChartBeingEdited}
           isSidePanelOpen={isSidePanelOpen}
           setIsSidePanelOpen={setIsSidePanelOpen}
+          handlePrint={handlePrint}
         />
       </div>
 

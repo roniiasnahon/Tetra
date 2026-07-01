@@ -49,7 +49,7 @@ export const DynamicShimmer: React.FC<DynamicShimmerProps> = ({
   } else if (researchStatus === "polishing") {
     text = "Polishing...";
   } else if (researchStatus === "editor_agent") {
-    text = "🤖 Blob is drafting content...";
+    text = "🤖 Agent is drafting content...";
   } else {
     // Get last user query to establish context
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");

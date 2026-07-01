@@ -290,26 +290,13 @@ input[type="number"] {
   margin: 2.5em 0;
 }
 
-/* Streaming Blinking Cursor */
-@keyframes cursor-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-.streaming-cursor p:last-child::after,
-.streaming-cursor li:last-child::after,
-.streaming-cursor h1:last-child::after,
-.streaming-cursor h2:last-child::after,
-.streaming-cursor h3:last-child::after,
-.streaming-cursor blockquote:last-child p:last-child::after,
-.streaming-cursor th:last-child::after,
-.streaming-cursor td:last-child::after {
-  content: "▍";
-  display: inline-block;
-  margin-left: 2px;
-  animation: cursor-blink 1s step-start infinite;
-  color: #60a5fa;
-  vertical-align: middle;
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out forwards;
 }
 
 /* React-PDF text layer transparency & black block prevention fixes */
@@ -558,6 +545,17 @@ input[type="number"] {
 #custom-code-block .token.important,
 #custom-code-block .token.variable {
   color: #fb923c !important; /* orange-400 */
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
 }
 
 

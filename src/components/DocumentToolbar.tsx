@@ -21,6 +21,7 @@ interface DocumentToolbarProps {
   setChartBeingEdited: (chart: any) => void;
   isSidePanelOpen?: boolean;
   setIsSidePanelOpen?: (isOpen: boolean) => void;
+  handlePrint?: () => void;
 }
 
 export const DocumentToolbar: React.FC<DocumentToolbarProps> = ({
@@ -40,7 +41,8 @@ export const DocumentToolbar: React.FC<DocumentToolbarProps> = ({
   setIsChartModalOpen,
   setChartBeingEdited,
   isSidePanelOpen,
-  setIsSidePanelOpen
+  setIsSidePanelOpen,
+  handlePrint
 }) => {
   const [isFontDropdownOpen, setIsFontDropdownOpen] = useState(false);
   const [isHeadingDropdownOpen, setIsHeadingDropdownOpen] = useState(false);
@@ -186,6 +188,9 @@ export const DocumentToolbar: React.FC<DocumentToolbarProps> = ({
           <IconButton icon="redo" onClick={() => handleFormat("redo")} title="Redo" />
           {width >= 580 && (
             <IconButton icon="spellcheck" onClick={() => {}} title="Spelling and grammar check" />
+          )}
+          {handlePrint && (
+            <IconButton icon="print" onClick={handlePrint} title="Print document" />
           )}
           
           <Divider />
@@ -411,22 +416,6 @@ export const DocumentToolbar: React.FC<DocumentToolbarProps> = ({
             </>
           )}
 
-          {/* Inserts (Group 2 - hidden if width < 700) */}
-          {width >= 700 && (
-            <>
-              <Divider />
-              <IconButton icon="link" onClick={() => {
-                const url = prompt("Enter link URL:");
-                if (url) handleFormat("createLink", url);
-              }} title="Insert link" />
-              <IconButton icon="add_comment" onClick={() => {}} title="Add comment" />
-              <IconButton icon="image" onClick={() => {
-                const url = prompt("Enter image URL:");
-                if (url) handleFormat("insertImage", url);
-              }} title="Insert image" />
-            </>
-          )}
-
           {/* Alignment & Spacing (Group 3 - hidden if width < 820) */}
           {width >= 820 && (
             <>
@@ -523,24 +512,9 @@ export const DocumentToolbar: React.FC<DocumentToolbarProps> = ({
 
                           {/* Spellcheck */}
                           <IconButton icon="spellcheck" onClick={() => {}} title="Spelling and grammar check" />
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Group 2 (Inserts) - hidden if width < 700 */}
-                    {width < 700 && (
-                      <div className="flex flex-col gap-2">
-                        <div className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider px-1">Insert</div>
-                        <div className="flex items-center gap-1 bg-[#1a1a1d] p-1.5 rounded-lg border border-zinc-800/50">
-                          <IconButton icon="link" onClick={() => {
-                            const url = prompt("Enter link URL:");
-                            if (url) handleFormat("createLink", url);
-                          }} title="Insert link" />
-                          <IconButton icon="add_comment" onClick={() => {}} title="Add comment" />
-                          <IconButton icon="image" onClick={() => {
-                            const url = prompt("Enter image URL:");
-                            if (url) handleFormat("insertImage", url);
-                          }} title="Insert image" />
+                          {handlePrint && (
+                            <IconButton icon="print" onClick={handlePrint} title="Print document" />
+                          )}
                         </div>
                       </div>
                     )}

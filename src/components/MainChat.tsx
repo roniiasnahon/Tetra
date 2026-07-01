@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import TextareaAutosize from "react-textarea-autosize";
 import ReactMarkdown from "react-markdown";
@@ -8,8 +8,8 @@ import { Icon } from "./SolarIcon";
 import { Tab, ChatMessage, PaperItem } from "../App";
 import { TypewriterMarkdown, preprocessLaTeX } from "./TypewriterMarkdown";
 import { DynamicShimmer } from "./DynamicShimmer";
-import { Plain2, PaperclipRounded2 } from "@solar-icons/react";
-import { Plus } from "lucide-react";
+import { Plain2, PaperclipRounded2, Like, Dislike, ChatSquareArrow, Copy } from "@solar-icons/react";
+import { Plus, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
 import { showToast } from "./Toast";
 import { auth } from "../firebase";
 
@@ -137,6 +137,80 @@ const renderLinkifiedText = (text: string) => {
   });
 };
 
+interface TruncatedMessageWrapperProps {
+  content: string;
+  children: React.ReactNode;
+  disableTruncation?: boolean;
+}
+
+const TruncatedMessageWrapper: React.FC<TruncatedMessageWrapperProps> = ({
+  content,
+  children,
+  disableTruncation = false,
+}) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [canTruncate, setCanTruncate] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setIsExpanded(false);
+  }, [content]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || disableTruncation) {
+      setCanTruncate(false);
+      return;
+    }
+
+    if (isExpanded) {
+      setCanTruncate(true);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const hasOverflow = el.scrollHeight > el.clientHeight;
+      setCanTruncate(prev => (prev !== hasOverflow ? hasOverflow : prev));
+    }, 50);
+
+    return () => clearTimeout(timer);
+  }, [content, isExpanded, disableTruncation]);
+
+  const shouldClamp = !isExpanded && !disableTruncation;
+
+  return (
+    <div className="flex flex-col w-full relative">
+      <div
+        ref={containerRef}
+        className={`w-full ${shouldClamp ? "line-clamp-4" : ""}`}
+        style={
+          shouldClamp
+            ? {
+                display: "-webkit-box",
+                WebkitLineClamp: 4,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+              }
+            : undefined
+        }
+      >
+        {children}
+      </div>
+      {!disableTruncation && (canTruncate || isExpanded) && (
+        <div className="flex justify-start mt-2">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center justify-center p-1.5 text-zinc-500 hover:text-white rounded-md hover:bg-zinc-800 transition-colors select-none cursor-pointer border-none shadow-none focus:outline-none"
+            title={isExpanded ? "Show less" : "Show more"}
+          >
+            {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const GREETINGS = [
   (name: string) => name ? `${name}, let's go?` : "Let's go?",
   (name: string) => name ? `What's on your mind, ${name}?` : "What's on your mind?",
@@ -163,6 +237,109 @@ const getStableGreetingIndex = (tabId: string) => {
     hash = tabId.charCodeAt(i) + ((hash << 5) - hash);
   }
   return Math.abs(hash) % GREETINGS.length;
+};
+
+const getSuggestionsForTab = (tabId: string, papersList?: PaperItem[]) => {
+  if (papersList && papersList.length > 0) {
+    // We have contents in the library! Make the suggestions related to the library papers.
+    const suggestions: string[] = [];
+    
+    let hash = 0;
+    for (let i = 0; i < tabId.length; i++) {
+      hash = tabId.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const seed = Math.abs(hash);
+    
+    // Deterministic shuffle of papers based on tabId seed
+    const shuffledPapers = [...papersList].sort((a, b) => {
+      const aHash = (a.title || "").split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const bHash = (b.title || "").split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      return ((aHash + seed) % 5) - ((bHash + seed) % 5);
+    });
+    
+    const paper1 = shuffledPapers[0];
+    const paper2 = shuffledPapers[1];
+    const paper3 = shuffledPapers[2];
+    
+    if (paper1) {
+      suggestions.push(`Summarize "${paper1.title}"`);
+      suggestions.push(`What are the key findings in "${paper1.title}"?`);
+    }
+    if (paper2) {
+      suggestions.push(`Analyze the methodology of "${paper2.title}"`);
+      suggestions.push(`What are the limitations of "${paper2.title}"?`);
+    } else if (paper1) {
+      suggestions.push(`Explain the main concepts in "${paper1.title}" to a beginner`);
+    }
+    
+    if (paper3) {
+      suggestions.push(`Provide a critical review of "${paper3.title}"`);
+    } else if (paper1 && paper2) {
+      suggestions.push(`Compare the approaches of "${paper1.title}" and "${paper2.title}"`);
+    } else if (paper1) {
+      suggestions.push(`Draft a research proposal extending "${paper1.title}"`);
+    }
+    
+    const backupLibraryPrompts = [
+      "Review the latest literature in my library",
+      "Suggest a research question based on my documents",
+      "Draft a synthesis of the saved papers",
+      "Find common themes across my library files",
+      "Organize my library into main key categories"
+    ];
+    
+    let padIdx = 0;
+    while (suggestions.length < 5 && padIdx < backupLibraryPrompts.length) {
+      const p = backupLibraryPrompts[(seed + padIdx) % backupLibraryPrompts.length];
+      if (!suggestions.includes(p)) {
+        suggestions.push(p);
+      }
+      padIdx++;
+    }
+    
+    return suggestions.slice(0, 5);
+  } else {
+    // Default suggestions when library is empty
+    const defaultPool = [
+      "Draft an abstract for a computer science paper",
+      "Explain quantum computing in simple terms",
+      "Generate 5 project ideas for machine learning",
+      "How do I structure a literature review?",
+      "Draft a professional email proposing a collaboration",
+      "Explain the difference between SQL and NoSQL",
+      "What are some best practices for API design?",
+      "Help me brainstorm titles for a tech blog post",
+      "Analyze the impact of artificial intelligence on design",
+      "Give me tips for writing a persuasive essay",
+      "Draft a polite response to a reviewer's comments",
+      "Outline a presentation about sustainable energy",
+      "Suggest a reading list for deep learning beginners",
+      "What is the best way to handle asynchronous code in JS?",
+      "Draft a short story about a time traveler",
+      "Explain blockchain technology using an analogy",
+      "What are the core concepts of clean architecture?",
+      "Suggest some ways to improve website performance",
+      "Explain the significance of the Turing test",
+      "Draft a summary of the latest web development trends"
+    ];
+    
+    let hash = 0;
+    for (let i = 0; i < tabId.length; i++) {
+      hash = tabId.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const seed = Math.abs(hash);
+    
+    const selected: string[] = [];
+    const poolCopy = [...defaultPool];
+    
+    for (let i = 0; i < 5; i++) {
+      const index = (seed + i * 7) % poolCopy.length;
+      selected.push(poolCopy[index]);
+      poolCopy.splice(index, 1);
+    }
+    
+    return selected;
+  }
 };
 
 export const MainChat: React.FC<MainChatProps> = ({
@@ -193,6 +370,50 @@ export const MainChat: React.FC<MainChatProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mainTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  
+  const suggestions = useMemo(() => {
+    return getSuggestionsForTab(tab.id, papers);
+  }, [tab.id, papers]);
+
+  const suggestionsScrollContainerRef = useRef<HTMLDivElement>(null);
+  const [showLeftArrow, setShowLeftArrow] = useState(false);
+  const [showRightArrow, setShowRightArrow] = useState(true);
+
+  const updateScrollIndicators = () => {
+    if (suggestionsScrollContainerRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = suggestionsScrollContainerRef.current;
+      setShowLeftArrow(scrollLeft > 5);
+      setShowRightArrow(scrollLeft < scrollWidth - clientWidth - 5);
+    }
+  };
+
+  useEffect(() => {
+    const el = suggestionsScrollContainerRef.current;
+    if (el) {
+      el.addEventListener("scroll", updateScrollIndicators);
+      updateScrollIndicators();
+      window.addEventListener("resize", updateScrollIndicators);
+      
+      const timer = setTimeout(updateScrollIndicators, 150);
+      return () => {
+        el.removeEventListener("scroll", updateScrollIndicators);
+        window.removeEventListener("resize", updateScrollIndicators);
+        clearTimeout(timer);
+      };
+    }
+  }, [suggestions]);
+
+  const handleScrollLeft = () => {
+    if (suggestionsScrollContainerRef.current) {
+      suggestionsScrollContainerRef.current.scrollBy({ left: -220, behavior: "smooth" });
+    }
+  };
+
+  const handleScrollRight = () => {
+    if (suggestionsScrollContainerRef.current) {
+      suggestionsScrollContainerRef.current.scrollBy({ left: 220, behavior: "smooth" });
+    }
+  };
   const [isThinkingMenuOpen, setIsThinkingMenuOpen] = useState(false);
   const [isMoreModelsOpen, setIsMoreModelsOpen] = useState(false);
   const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
@@ -346,7 +567,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                 const isSelected = idx === mentionState.selectedIndex;
                 return (
                   <button
-                    key={p.fileId || p.title + idx}
+                    key={p.fileId ? `${p.fileId}-${idx}` : `${p.title}-${idx}`}
                     onClick={() => selectPaper(p)}
                     onMouseEnter={() =>
                       setMentionState((prev) => ({
@@ -888,14 +1109,70 @@ export const MainChat: React.FC<MainChatProps> = ({
           className="flex-1 flex flex-col items-center pt-[70px] pb-6 px-4 md:px-6 h-full overflow-y-auto custom-scrollbar-h"
         >
           {messages.length === 0 ? (
-            <div className="flex-grow flex flex-col items-center justify-center w-full max-w-2xl px-4 py-8 my-auto">
+            <div className="flex-grow flex flex-col items-center justify-center w-full max-w-2xl px-4 py-8 my-auto -translate-y-10">
               {/* Header: Dynamic Random Greeting */}
-              <h1 className="text-3xl md:text-4xl text-[#f4f4f5] font-normal tracking-tight mb-8 text-center font-jakarta select-none">
+              <h1 className="text-2xl md:text-3xl text-[#f4f4f5] font-light tracking-tight mb-8 text-center font-jakarta select-none">
                 {GREETINGS[getStableGreetingIndex(tab.id)](preferredName)}
               </h1>
 
               {/* Centered Chat Input Box */}
               {renderChatInput()}
+
+              {/* Pill Short Prompt Suggestions Row */}
+              <div className="mt-5 relative w-full max-w-xl select-none flex items-center group px-6">
+                {/* Left Fade Overlay */}
+                <div 
+                  className="absolute left-6 top-0 bottom-0 w-8 bg-gradient-to-r from-[#121212] via-[#121212]/80 to-transparent pointer-events-none z-10 transition-opacity duration-200" 
+                  style={{ opacity: showLeftArrow ? 1 : 0 }}
+                />
+
+                {/* Left Slide Button */}
+                {showLeftArrow && (
+                  <button
+                    onClick={handleScrollLeft}
+                    className="absolute left-0 z-20 text-zinc-400 hover:text-zinc-100 active:scale-90 transition-all duration-150 cursor-pointer flex items-center justify-center w-8 h-8"
+                    title="Slide left"
+                  >
+                    <ChevronLeft size={20} />
+                  </button>
+                )}
+
+                {/* Scrollable Container */}
+                <div
+                  ref={suggestionsScrollContainerRef}
+                  className="w-full flex flex-row items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-1"
+                >
+                  {suggestions.map((sug, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        setChatInput("");
+                        handleSendMessage(sug);
+                      }}
+                      className="px-4 py-2 text-sm text-zinc-200 hover:text-white bg-[#161618] border border-zinc-800/80 hover:bg-zinc-800/40 rounded-full transition-colors duration-150 cursor-pointer shrink-0 select-none"
+                    >
+                      {sug}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Right Fade Overlay */}
+                <div 
+                  className="absolute right-6 top-0 bottom-0 w-8 bg-gradient-to-l from-[#121212] via-[#121212]/80 to-transparent pointer-events-none z-10 transition-opacity duration-200" 
+                  style={{ opacity: showRightArrow ? 1 : 0 }}
+                />
+
+                {/* Right Slide Button */}
+                {showRightArrow && (
+                  <button
+                    onClick={handleScrollRight}
+                    className="absolute right-0 z-20 text-zinc-400 hover:text-zinc-100 active:scale-90 transition-all duration-150 cursor-pointer flex items-center justify-center w-8 h-8"
+                    title="Slide right"
+                  >
+                    <ChevronRight size={20} />
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
             <div className="w-full max-w-3xl flex flex-col gap-4 pb-8">
@@ -1017,18 +1294,25 @@ export const MainChat: React.FC<MainChatProps> = ({
                                 </button>
                               </div>
                             </div>
-                          ) : m.role === "user" ? (
-                            renderLinkifiedText(m.content)
                           ) : (
-                            <TypewriterMarkdown
+                            <TruncatedMessageWrapper
                               content={m.content}
-                              timestamp={m.timestamp}
-                              isStreaming={
-                                isAiTyping &&
-                                m.id === messages[messages.length - 1]?.id
-                              }
-                              isBig={true}
-                            />
+                              disableTruncation={m.role === "assistant"}
+                            >
+                              {m.role === "user" ? (
+                                renderLinkifiedText(m.content)
+                              ) : (
+                                <TypewriterMarkdown
+                                  content={m.content}
+                                  timestamp={m.timestamp}
+                                  isStreaming={
+                                    isAiTyping &&
+                                    m.id === messages[messages.length - 1]?.id
+                                  }
+                                  isBig={true}
+                                />
+                              )}
+                            </TruncatedMessageWrapper>
                           )}
                         </div>
 
@@ -1072,11 +1356,66 @@ export const MainChat: React.FC<MainChatProps> = ({
                               className="p-1.5 text-zinc-500 hover:text-white rounded-md hover:bg-zinc-800 transition-colors"
                               title="Copy prompt"
                             >
-                              <Icon
-                                icon="ph:copy"
-                                className="w-[18px] h-[18px]"
+                              <Copy
+                                weight="BoldDuotone"
+                                size={18}
+                                color="currentColor"
                               />
                             </button>
+                          </div>
+                        )}
+
+                        {m.role === "assistant" && (
+                          <div className="flex items-center gap-1 opacity-0 group-hover/message:opacity-100 transition-opacity z-10 pointer-events-auto mt-2 -ml-1">
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(m.content);
+                                showToast("Copied to clipboard", "success");
+                              }}
+                              className="p-1.5 text-zinc-500 hover:text-white rounded-md hover:bg-zinc-800 transition-colors"
+                              title="Copy response"
+                            >
+                              <Copy weight="BoldDuotone" size={18} color="currentColor" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                showToast("Feedback submitted", "success");
+                              }}
+                              className="p-1.5 text-zinc-500 hover:text-white rounded-md hover:bg-zinc-800 transition-colors"
+                              title="Good response"
+                            >
+                              <Like weight="BoldDuotone" size={18} color="currentColor" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                showToast("Feedback submitted", "success");
+                              }}
+                              className="p-1.5 text-zinc-500 hover:text-white rounded-md hover:bg-zinc-800 transition-colors"
+                              title="Bad response"
+                            >
+                              <Dislike weight="BoldDuotone" size={18} color="currentColor" />
+                            </button>
+                            {m.id === array.filter((x) => x.role === "assistant").pop()?.id && (
+                              <button
+                                onClick={async () => {
+                                  const mIdx = array.findIndex(x => x.id === m.id);
+                                  let prevUserMsg = "";
+                                  for(let i = mIdx - 1; i >= 0; i--) {
+                                    if (array[i].role === "user") {
+                                      prevUserMsg = array[i].content;
+                                      break;
+                                    }
+                                  }
+                                  if (prevUserMsg && handleEditLastPrompt) {
+                                    await handleEditLastPrompt(prevUserMsg);
+                                  }
+                                }}
+                                className="p-1.5 text-zinc-500 hover:text-white rounded-md hover:bg-zinc-800 transition-colors"
+                                title="Retry"
+                              >
+                                <ChatSquareArrow weight="BoldDuotone" size={18} color="currentColor" />
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1200,7 +1539,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                     const isSelected = idx === mentionState.selectedIndex;
                     return (
                       <button
-                        key={p.fileId || p.title + idx}
+                        key={p.fileId ? `${p.fileId}-${idx}` : `${p.title}-${idx}`}
                         onClick={() => selectPaper(p)}
                         onMouseEnter={() =>
                           setMentionState((prev) => ({

@@ -36,8 +36,9 @@ export const linkifyHtml = (html: string): string => {
     // Process double bracket citations [[page:2|Title]]
     tokenText = tokenText.replace(/\[\[page:(\d+)\|(.+?)\]\]/g, (_, p, t) => {
       const cleanLabel = t.replace(/_/g, " ");
+      const displayLabel = cleanLabel.length > 50 ? cleanLabel.substring(0, 47) + "..." : cleanLabel;
       const href = `#cite-page-${p}-${encodeURIComponent(t)}`;
-      return `<a href="${href}" class="inline-flex items-center gap-1 bg-zinc-800/80 hover:bg-zinc-700/80 text-blue-400 hover:text-blue-300 px-1.5 py-0.5 rounded text-[11px] font-mono border border-zinc-700 transition-colors mx-0.5 cursor-pointer align-middle select-all" data-page="${p}" data-title="${t}">📄 ${cleanLabel} (p. ${p})</a>`;
+      return `<a href="${href}" class="inline-flex items-center gap-1 bg-zinc-800/80 hover:bg-zinc-700/80 text-blue-400 hover:text-blue-300 px-1.5 py-0.5 rounded text-[11px] font-mono border border-zinc-700 transition-colors mx-0.5 cursor-pointer align-middle select-all" data-page="${p}" data-title="${t}" title="${cleanLabel}">📄 ${displayLabel} (p. ${p})</a>`;
     });
 
     return tokenText;

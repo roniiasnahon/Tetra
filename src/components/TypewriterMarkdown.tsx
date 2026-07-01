@@ -729,6 +729,7 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
           try {
             const title = decodeURIComponent(encodedTitle);
             const cleanLabel = title.replace(/_/g, ' ');
+            const displayLabel = cleanLabel.length > 50 ? cleanLabel.substring(0, 47) + '...' : cleanLabel;
             return (
               <button 
                 onClick={() => {
@@ -754,9 +755,10 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
                   handleCitationClick(page, title, contextText);
                 }}
                 className="inline-flex items-center gap-1 bg-zinc-800/80 hover:bg-zinc-700/80 text-[#e0cfb8] px-2.5 py-0.5 rounded-full text-[11px] font-sans border border-zinc-700/50 transition-colors mx-0.5 cursor-pointer align-middle shadow-none"
+                title={cleanLabel}
               >
                 <Icon icon="ph:bookmark-simple-fill" className="w-3 h-3 text-[#e0cfb8]" />
-                📄 {cleanLabel} (p. {page})
+                📄 {displayLabel} (p. {page})
               </button>
             );
           } catch (e) {
@@ -854,7 +856,7 @@ export const TypewriterMarkdown = React.memo(({ content, timestamp, onCitationCl
   }), [isBig, content, handleCitationClick]);
 
   return (
-    <div className={isStreaming ? "streaming-cursor" : ""}>
+    <div>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>
         {processedContent}
       </ReactMarkdown>

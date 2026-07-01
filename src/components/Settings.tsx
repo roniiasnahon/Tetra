@@ -34,7 +34,7 @@ interface SettingsProps {
   setAppearanceTheme: (val: string) => void;
 }
 
-type TabType = "general" | "account" | "privacy" | "capabilities" | "connectors" | "desktop";
+type TabType = "general" | "account" | "privacy" | "capabilities" | "desktop";
 
 export const Settings = ({ 
   currentUser, 
@@ -324,7 +324,6 @@ export const Settings = ({
     { id: "account", label: "Account", icon: "ph:user", keywords: "email account password credentials active session details verified logout provider" },
     { id: "privacy", label: "Privacy", icon: "ph:shield-check", keywords: "history clear train storage data privacy" },
     { id: "capabilities", label: "Capabilities", icon: "ph:stack", keywords: "grounding search web websearch engine auto save rules" },
-    { id: "connectors", label: "Connectors", icon: "ph:plugs-connected", keywords: "github drive google slack integration notion connect" },
     { id: "desktop", label: "Desktop", icon: "ph:desktop", keywords: "desktop startup tray download window pdf accelerator shortcut system" },
   ];
 
@@ -1036,139 +1035,7 @@ export const Settings = ({
               </section>
             )}
 
-            {/* TAB: CONNECTORS */}
-            {activeTab === "connectors" && (
-              <section className="space-y-8 animate-fade-in">
-                <h2 className="text-[18px] font-bold text-[#e1e1e0]">Resource Connectors</h2>
-                
-                <div className="space-y-4">
-                  {/* Connector 1 */}
-                  <div className="flex items-center justify-between p-4 bg-[#1e1e1e] border border-[#3f3f3f] rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <Icon icon="logos:google-drive" className="w-7 h-7" />
-                      <div>
-                        <p className="text-[13px] font-medium text-white">Google Drive Workspace Plugin</p>
-                        <p className="text-[12px] text-zinc-400 mt-0.5">Directly pull thesis PDFs and spreadsheet uploads</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-[11px] font-medium px-2 py-0.5 bg-green-500/10 text-green-300 border border-green-500/20 rounded select-none flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                        Connected
-                      </span>
-                      <button 
-                        onClick={() => setDriveConnected(!driveConnected)}
-                        className="px-2.5 py-1 text-[11px] text-zinc-400 hover:text-white rounded hover:bg-[#2a2a2a] transition-all cursor-pointer"
-                      >
-                        Disconnect
-                      </button>
-                    </div>
-                  </div>
 
-                  {/* Connector 2 */}
-                  <div className="flex items-center justify-between p-4 bg-[#1e1e1e] border border-[#3f3f3f] rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <Icon icon="mdi:github" className="w-7 h-7 text-white" />
-                      <div>
-                        <p className="text-[13px] font-medium text-white">GitHub Academic Codebase</p>
-                        <p className="text-[12px] text-zinc-400 mt-0.5">Synchronize technical statistical formulas and reference structures</p>
-                      </div>
-                    </div>
-                    <div>
-                      {githubConnected ? (
-                        <div className="flex items-center gap-3">
-                          <span className="text-[11px] font-medium px-2 py-0.5 bg-green-500/10 text-green-300 border border-green-500/20 rounded select-none flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                            Connected
-                          </span>
-                          <button 
-                            onClick={() => setGithubConnected(false)}
-                            className="px-2.5 py-1 text-[11px] text-zinc-400 hover:text-white rounded hover:bg-[#2a2a2a] transition-all cursor-pointer"
-                          >
-                            Disconnect
-                          </button>
-                        </div>
-                      ) : (
-                        <button 
-                          onClick={() => setGithubConnected(true)}
-                          className="px-3 py-1.5 bg-[#3a3a3a] border border-[#4a4a4a] hover:bg-[#4f4f4f] transition-all text-zinc-200 text-[11px] font-medium rounded-lg cursor-pointer"
-                        >
-                          Connect GitHub
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Connector 3 */}
-                  <div className="flex items-center justify-between p-4 bg-[#1e1e1e] border border-[#3f3f3f] rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <Icon icon="logos:slack-icon" className="w-7 h-7" />
-                      <div>
-                        <p className="text-[13px] font-medium text-white">Slack Co-Work Bridge</p>
-                        <p className="text-[12px] text-zinc-400 mt-0.5">Post analytical graphs and custom citations to Slack streams</p>
-                      </div>
-                    </div>
-                    <div>
-                      {slackConnected ? (
-                        <div className="flex items-center gap-3">
-                          <span className="text-[11px] font-medium px-2 py-0.5 bg-green-500/10 text-green-300 border border-green-500/20 rounded select-none flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                            Connected
-                          </span>
-                          <button 
-                            onClick={() => setSlackConnected(false)}
-                            className="px-2.5 py-1 text-[11px] text-zinc-400 hover:text-white rounded hover:bg-[#2a2a2a] transition-all cursor-pointer"
-                          >
-                            Disconnect
-                          </button>
-                        </div>
-                      ) : (
-                        <button 
-                          onClick={() => setSlackConnected(true)}
-                          className="px-3 py-1.5 bg-[#3a3a3a] border border-[#4a4a4a] hover:bg-[#4f4f4f] transition-all text-zinc-200 text-[11px] font-medium rounded-lg cursor-pointer"
-                        >
-                          Connect Slack
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Connector 4 */}
-                  <div className="flex items-center justify-between p-4 bg-[#1e1e1e] border border-[#3f3f3f] rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <Icon icon="simple-icons:notion" className="w-7 h-7 text-white" />
-                      <div>
-                        <p className="text-[13px] font-medium text-white">Notion Database Link</p>
-                        <p className="text-[12px] text-zinc-400 mt-0.5">Synchronize bibliographic databases inside Notion workspaces</p>
-                      </div>
-                    </div>
-                    <div>
-                      {notionConnected ? (
-                        <div className="flex items-center gap-3">
-                          <span className="text-[11px] font-medium px-2 py-0.5 bg-green-500/10 text-green-300 border border-green-500/20 rounded select-none flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                            Connected
-                          </span>
-                          <button 
-                            onClick={() => setNotionConnected(false)}
-                            className="px-2.5 py-1 text-[11px] text-zinc-400 hover:text-white rounded hover:bg-[#2a2a2a] transition-all cursor-pointer"
-                          >
-                            Disconnect
-                          </button>
-                        </div>
-                      ) : (
-                        <button 
-                          onClick={() => setNotionConnected(true)}
-                          className="px-3 py-1.5 bg-[#3a3a3a] border border-[#4a4a4a] hover:bg-[#4f4f4f] transition-all text-zinc-200 text-[11px] font-medium rounded-lg cursor-pointer"
-                        >
-                          Connect Notion
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </section>
-            )}
 
             {/* TAB: DESKTOP SETTINGS (REPLACES COSMI CODE & BILLING) */}
             {activeTab === "desktop" && (

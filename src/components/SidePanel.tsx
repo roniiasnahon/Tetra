@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { motion } from 'motion/react';
 import { TypewriterMarkdown } from './TypewriterMarkdown';
 import { getUserFriendlyErrorMessage } from '../lib/error-utils';
 import { showToast } from './Toast';
@@ -884,9 +885,12 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div 
-      className="bg-[#121212] border-l border-[#1c1c1f] h-full flex flex-col shrink-0 overflow-hidden select-none animate-slide-in relative"
-      style={{ width: `${panelWidth}px` }}
+    <motion.div 
+      initial={{ width: 0, opacity: 0 }}
+      animate={{ width: panelWidth, opacity: 1 }}
+      exit={{ width: 0, opacity: 0 }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      className="bg-[#121212] border-l border-[#1c1c1f] h-full flex flex-col shrink-0 overflow-hidden select-none relative"
     >
       {/* Drag Handle */}
       <div 
@@ -1083,7 +1087,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     <div className="w-3.5 h-3.5 bg-zinc-800 rounded-full flex items-center justify-center shrink-0">
                       <span className="w-1.5 h-1.5 bg-zinc-600 rounded-full animate-ping" />
                     </div>
-                    <span className="text-[10.5px] font-mono font-medium text-zinc-500 uppercase tracking-wider">Generating notes...</span>
+                    <span className="text-[10.5px] font-sans font-semibold text-zinc-500 uppercase tracking-wider">Generating notes...</span>
                   </div>
                   <div className="h-5 shimmer-skeleton rounded w-11/12"></div>
                 </div>
@@ -1398,7 +1402,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   <div className="flex flex-col flex-1">
                     
                     {/* Header score / progress */}
-                    <div className="flex justify-between items-center text-[10.5px] font-mono text-zinc-500 px-4 py-3 bg-[#0c0c0d]">
+                    <div className="flex justify-between items-center text-[10.5px] font-sans font-medium text-zinc-500 px-4 py-3 bg-[#0c0c0d]">
                       <span>Comprehension Check</span>
                       <span>
                         {quizFinished ? 'Assessment completed' : `Question ${currentQuestionIndex + 1} of ${quizData.questions?.length}`}
@@ -1445,7 +1449,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                                 disabled={isRevealed}
                                 className={`w-full text-left px-4 py-3.5 text-[12px] leading-relaxed transition-all cursor-pointer flex items-start gap-3 ${optStyle}`}
                               >
-                                <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded ${
+                                <span className={`font-sans font-semibold text-[10px] px-1.5 py-0.5 rounded ${
                                   isRevealed && isCorrect ? 'bg-emerald-900/30 border border-emerald-800/30 text-emerald-400' : 'bg-zinc-900 border border-zinc-800 text-zinc-500'
                                 } shrink-0`}>
                                   {['A', 'B', 'C', 'D'][oIdx]}
@@ -1491,7 +1495,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
                         <div className="grid place-items-center">
                           <div className="inline-block px-5 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900/40">
-                            <div className="text-[10px] uppercase font-mono tracking-wider text-zinc-500">Your Score</div>
+                            <div className="text-[10px] uppercase font-sans font-semibold tracking-wider text-zinc-500">Your Score</div>
                             <div className="text-2xl font-bold text-white mt-1">
                               {quizScore} <span className="text-xs text-zinc-500">/ {quizData.questions?.length}</span>
                             </div>
@@ -1693,7 +1697,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             <form onSubmit={handleAddSource} className="space-y-3">
               <div className="space-y-2">
                 <div>
-                  <label className="text-[10px] text-zinc-400 font-mono uppercase tracking-wider block mb-1">Website Name</label>
+                  <label className="text-[10px] text-zinc-400 font-sans font-semibold uppercase tracking-wider block mb-1">Website Name</label>
                   <input 
                     type="text" 
                     className="w-full text-xs font-sans bg-[#1c1c1e] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-zinc-700 placeholder-zinc-600"
@@ -1703,7 +1707,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] text-zinc-400 font-mono uppercase tracking-wider block mb-1">Reference URL</label>
+                  <label className="text-[10px] text-zinc-400 font-sans font-semibold uppercase tracking-wider block mb-1">Reference URL</label>
                   <input 
                     type="text" 
                     className="w-full text-xs font-sans bg-[#1c1c1e] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-zinc-700 placeholder-zinc-600"
@@ -1722,7 +1726,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 </div>
               )}
 
-              <div className="flex gap-2 pt-1">
+              <div className="flex justify-end gap-2 pt-1">
                 <button 
                   type="button"
                   onClick={() => {
@@ -1731,13 +1735,13 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     setNewSourceUrl('');
                     setSourceError('');
                   }}
-                  className="flex-1 py-1.5 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white font-medium text-xs transition-colors cursor-pointer"
+                  className="px-3.5 py-1 rounded-full border border-zinc-800 text-zinc-400 hover:text-white font-medium text-[11px] transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button 
                   type="submit"
-                  className="flex-1 py-1.5 rounded-lg bg-zinc-200 hover:bg-white text-zinc-950 font-bold text-xs transition-colors cursor-pointer"
+                  className="px-4 py-1 rounded-full bg-zinc-200 hover:bg-white text-zinc-950 font-semibold text-[11px] transition-colors cursor-pointer"
                 >
                   Add
                 </button>
@@ -1822,6 +1826,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 };

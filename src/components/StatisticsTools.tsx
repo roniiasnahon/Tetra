@@ -2018,7 +2018,7 @@ export function StatisticsTools({
     return (
       <div className="space-y-4">
         {/* Input Mode Navigation */}
-        <div className="flex gap-1 bg-[#161616] p-1 rounded-xl mb-3">
+        <div className="flex flex-wrap gap-2 mb-3">
           {(['manual', 'doi', 'pdf'] as const).map(mode => (
             <button
               key={mode}
@@ -2026,10 +2026,10 @@ export function StatisticsTools({
                 setCitationInputMode(mode);
                 setCitationStatus(null);
               }}
-              className={`flex-1 py-1.5 text-[10px] font-bold capitalize rounded-lg transition-colors cursor-pointer select-none text-center ${
+              className={`px-4 py-1.5 text-[10px] font-bold capitalize transition-colors cursor-pointer select-none rounded-full ${
                 citationInputMode === mode 
-                  ? 'bg-[#27272a] text-white' 
-                  : 'text-zinc-400 hover:text-white'
+                  ? 'bg-zinc-800 text-white' 
+                  : 'text-zinc-400 hover:text-white hover:bg-zinc-800/40'
               }`}
             >
               {mode === 'manual' ? 'Manual Input' : mode === 'doi' ? 'DOI Resolving' : 'PDF Scan'}
@@ -2079,33 +2079,34 @@ export function StatisticsTools({
                 value={doiInput}
                 onChange={e => setDoiInput(e.target.value)}
                 placeholder="e.g., 10.1017/asi.2021.5"
-                className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors font-mono"
+                className="w-full bg-[#161616] border border-[#27272a] focus:border-zinc-700 rounded-xl px-3 py-2 text-[12px] text-[#f4f4f5] outline-none transition-colors"
               />
             </div>
-            <button
-              onClick={handleResolveDoi}
-              disabled={isResolvingDoi}
-              className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-[10px] font-bold text-white rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none animate-none"
-            >
-              {isResolvingDoi ? (
-                <>
-                  <Icon icon="ph:spinner-gap" className="animate-spin w-3.5 h-3.5" />
-                  Resolving doi registry...
-                </>
-              ) : (
-                <>
-                  <Icon icon="ph:radar-bold" className="w-3.5 h-3.5" />
-                  Resolve DOI via AI
-                </>
-              )}
-            </button>
+            <div className="flex justify-end pt-1">
+              <button
+                onClick={handleResolveDoi}
+                disabled={isResolvingDoi}
+                className="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-[10px] font-bold text-white rounded-full transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none animate-none"
+              >
+                {isResolvingDoi ? (
+                  <>
+                    <Icon icon="ph:spinner-gap" className="animate-spin w-3 h-3" />
+                    Resolving doi...
+                  </>
+                ) : (
+                  <>
+                    <Icon icon="ph:radar-bold" className="w-3 h-3" />
+                    Resolve DOI via AI
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         )}
 
         {citationInputMode === 'pdf' && (
           <div className="space-y-4 bg-[#161616]/40 p-5 rounded-xl border border-[#222225]">
             <label className="text-[10px] text-[#71717a] font-bold uppercase block tracking-wider">Upload Research PDF(s)</label>
-            <p className="text-[9px] text-[#52525b]">Select one or multiple PDFs to extract metadata structures automatically using Mistral.</p>
             
             <div 
               onClick={() => {
@@ -2128,7 +2129,7 @@ export function StatisticsTools({
               <div className="text-[11px] text-zinc-300 font-medium">
                 {isParsingPdf ? 'Processing drag/upload index...' : 'Click to Browse or Drag PDFs here'}
               </div>
-              <p className="text-[9px] text-zinc-500 font-mono italic">Supports uploading multiple PDFs in parallel</p>
+              <p className="text-[9px] text-zinc-500">Supports uploading multiple PDFs in parallel</p>
             </div>
 
             {pdfTasks.length > 0 && (
@@ -2195,12 +2196,16 @@ export function StatisticsTools({
             {/* Source Type Toggle */}
             <div>
               <label className="text-[10px] text-[#71717a] font-bold uppercase mb-2 block tracking-wider">Source Type</label>
-              <div className="grid grid-cols-3 gap-1 bg-[#161616] p-0.5 rounded-xl">
+              <div className="flex flex-wrap gap-2">
                 {(['book', 'journal', 'website'] as const).map(type => (
                   <button
                     key={type}
                     onClick={() => setCitationSourceType(type)}
-                    className={`py-1.5 text-[10px] font-bold capitalize rounded-lg transition-colors cursor-pointer select-none ${citationSourceType === type ? 'bg-[#27272a] text-white' : 'text-zinc-400 hover:text-white'}`}
+                    className={`px-4 py-1.5 text-[10px] font-bold capitalize transition-colors cursor-pointer select-none rounded-full ${
+                      citationSourceType === type 
+                        ? 'bg-zinc-800 text-white' 
+                        : 'text-zinc-400 hover:text-white hover:bg-zinc-800/40'
+                    }`}
                   >
                     {type}
                   </button>
@@ -2399,13 +2404,15 @@ export function StatisticsTools({
               )}
             </div>
             
-            <button
-              onClick={addCitationToLibrary}
-              className="w-full py-2.5 bg-zinc-200 hover:bg-white text-[11px] font-bold text-zinc-950 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none border-none animate-none"
-            >
-              <Icon icon="ph:bookmark-simple-fill" className="w-4 h-4" />
-              Save to Citation Library
-            </button>
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={addCitationToLibrary}
+                className="px-4 py-1.5 bg-zinc-200 hover:bg-white text-[10px] font-bold text-zinc-950 rounded-full transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none border-none animate-none"
+              >
+                <Icon icon="ph:bookmark-simple-fill" className="w-3.5 h-3.5" />
+                Save to Citation Library
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -2596,16 +2603,16 @@ export function StatisticsTools({
                       </button>
 
                       <div className="flex items-center gap-2">
-                        <span className="text-[9px] text-zinc-300 bg-zinc-800/50 border border-zinc-700/50 font-bold px-2 py-0.5 rounded-full uppercase font-mono">
+                        <span className="text-[9px] text-zinc-300 bg-zinc-800/50 border border-zinc-700/50 font-bold px-2 py-0.5 rounded-full uppercase">
                           {citation.sourceType}
                         </span>
                         {citation.fields.year && (
-                          <span className="text-[9px] text-zinc-500 font-bold font-mono">
+                          <span className="text-[9px] text-zinc-500 font-bold">
                             ({citation.fields.year})
                           </span>
                         )}
                         {citation.fields.doi && (
-                          <span className="text-[9px] text-zinc-600 font-mono select-all truncate max-w-[150px]" title={`DOI: ${citation.fields.doi}`}>
+                          <span className="text-[9px] text-zinc-600 select-all truncate max-w-[150px]" title={`DOI: ${citation.fields.doi}`}>
                             doi:{citation.fields.doi}
                           </span>
                         )}
@@ -2617,8 +2624,8 @@ export function StatisticsTools({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2 pt-1.5 border-t border-[#222225]/60">
-                        <span className="text-[9px] text-zinc-500 font-mono font-bold uppercase tracking-wider">In-Text:</span>
-                        <span className="text-[10px] text-zinc-300 font-mono bg-[#161616] px-1.5 py-0.5 border border-[#27272a] rounded select-all mb-1 sm:mb-0">
+                        <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">In-Text:</span>
+                        <span className="text-[10px] text-zinc-300 bg-[#161616] px-1.5 py-0.5 border border-[#27272a] rounded select-all mb-1 sm:mb-0">
                           {activeCite.inText}
                         </span>
                         
@@ -2693,7 +2700,7 @@ export function StatisticsTools({
                 Open Library ({savedCitations.length})
               </button>
             )}
-            <span className="text-[10px] text-[#71717a] font-mono capitalize px-2 py-0.5 bg-[#161618] border border-[#222225] rounded-md font-bold">
+            <span className="text-[10px] text-[#71717a] capitalize px-2 py-0.5 bg-[#161618] border border-[#222225] rounded-md font-bold">
               {citationSourceType} Format
             </span>
           </div>
@@ -2706,7 +2713,7 @@ export function StatisticsTools({
               return (
                 <div key={style.id} className="py-4 space-y-3 hover:bg-white/[0.02] transition-colors -mx-8 px-8">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-[#8e8e93] font-bold uppercase tracking-wide font-mono">{style.label}</span>
+                    <span className="text-[10px] text-[#8e8e93] font-bold uppercase tracking-wide">{style.label}</span>
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => triggerCopy(res.reference.replace(/\*(.*?)\*/g, '$1'), `${style.id}-ref`)}
@@ -2729,8 +2736,8 @@ export function StatisticsTools({
                       {res.reference.replace(/\*(.*?)\*/g, '$1')}
                     </div>
                     <div className="flex gap-2 items-center text-[10px]">
-                      <span className="text-[#52525b] uppercase font-bold tracking-wider font-mono">In-Text Citation:</span>
-                      <span className="text-zinc-400 font-mono select-all">{res.inText}</span>
+                      <span className="text-[#52525b] uppercase font-bold tracking-wider">In-Text Citation:</span>
+                      <span className="text-zinc-400 select-all">{res.inText}</span>
                     </div>
                   </div>
                 </div>
