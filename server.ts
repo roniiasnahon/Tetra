@@ -68,6 +68,7 @@ import {
 import { getGeminiClient, getVoyageClient, getBasetenClient, getMistralClient, getGroqClient, getCohereClient, getUpstageClient, getRekaClient, getInceptionClient, getXiaomiClient } from "./src/api/services/ai.js";
 import { saveFile, getFile, getR2Client, getCachedPaper, setCachedPaper } from "./src/api/services/storage.js";
 
+// Removed top-level ai initialization to prevent crash if key is missing during build
 const ai = getGeminiClient();
 const PORT = 3000;
 
@@ -166,7 +167,6 @@ app.use((req, res, next) => {
 
 // Health check endpoint
 app.post("/api/log-error", express.json(), (req, res) => {
-  const fs = require('fs');
   fs.writeFileSync('error-stack.txt', req.body.stack || req.body.message);
   res.send('ok');
 });
@@ -1767,15 +1767,15 @@ CRITICAL RULES:
             );
             if (process.env.GEMINI_API_KEY) {
               const response = await ai.models.generateContent({
-                model: "gemini-3.1-flash-lite",
-                contents: [{ role: "user", parts: [{ text: userQuery }] }],
+                model: "gemini-3.5-flash",
+                contents: userQuery,
                 config: {
                   systemInstruction:
                     "You are a strict title generator. Generate an appropriate, natural, and descriptive title of maximum 7 words based on the user's initial query. Do NOT include ANY explanation, introduction, conversational text, parentheses, notes, or suggestions. Output ONLY the plain text title, nothing else. For casual greetings or brief casual text (e.g., 'yo', 'hi', 'hello', 'hey'), output a simple, clean title like 'New Conversation' or 'Casual Chat'.",
-                  temperature: 0,
+                  temperature: 0.1,
                 },
               });
-              titleComponentText = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+              titleComponentText = response.text || "";
             } else {
               throw new Error(
                 "No LLM clients available or configured for title generation.",
@@ -4396,6 +4396,21 @@ ${textToAnalyze}
       }
       return res.status(500).json({ error: "Failed to rerank via Voyage AI." });
     }
+  });
+
+  // Global error handler for API routes to ensure JSON response instead of HTML
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) {
+      return next(err);
+    }
+    console.error("[Global Error Handler]", err);
+    if (req.path.startsWith("/api/")) {
+      return res.status(err.status || 500).json({
+        error: err.message || "Internal Server Error",
+        status: err.status || 500
+      });
+    }
+    next(err);
   });
 
   // serve static UI assets and delegate routing
