@@ -872,10 +872,10 @@ async function startServer() {
           text: "Extract and transcribe all text from this image. Output only the plain text found in the image, preserving the layout as much as possible. Do not add any conversational commentary, explanations, or wrapper markdown blocks."
         };
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
-          contents: { parts: [imagePart, promptPart] }
+          model: "gemini-flash-latest",
+          contents: [{ role: "user", parts: [imagePart, promptPart] }]
         });
-        const transText = response.text || "";
+        const transText = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
         return res.json({ success: true, text: transText });
       } else if (extension === "docx") {
         const result = await mammoth.extractRawText({ buffer: file.buffer });
@@ -924,11 +924,10 @@ async function startServer() {
       };
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: { parts: [imagePart, promptPart] }
+        model: "gemini-flash-latest",
+        contents: [{ role: "user", parts: [imagePart, promptPart] }]
       });
-
-      const transcribedText = response.text || "";
+      const transcribedText = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
       res.json({ success: true, text: transcribedText });
     } catch (err: any) {
       throw err;
@@ -1123,15 +1122,15 @@ async function startServer() {
   "journal": "Academic Journal"
 }`;
         const aiResponse = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
-          contents: `DOI: ${doiClean}`,
+          model: "gemini-flash-latest",
+          contents: [{ role: "user", parts: [{ text: `DOI: ${doiClean}` }] }],
           config: {
             systemInstruction: systemPrompt,
             temperature: 0.1,
             responseMimeType: "application/json",
           },
         });
-        const content = aiResponse.text || "{}";
+        const content = aiResponse.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
         const parsed = cleanAndParseJSON(content);
         return res.json({
           success: true,
@@ -1214,15 +1213,15 @@ Ensure fields are filled accurately based on the text. If certain fields are mis
           err.message || err,
         );
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
-          contents: `Text snippet: ${text.substring(0, 12000)}`,
+          model: "gemini-flash-latest",
+          contents: [{ role: "user", parts: [{ text: `Text snippet: ${text.substring(0, 12000)}` }] }],
           config: {
             systemInstruction: systemPrompt,
             temperature: 0.1,
             responseMimeType: "application/json",
           },
         });
-        const content = response.text || "{}";
+        const content = response.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
         parsed = cleanAndParseJSON(content);
       }
 
@@ -1346,15 +1345,14 @@ Use a professional, encouraging tone. Do not use markdown headers; use bolding f
             err2.message || err2,
           );
           const response = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
-            contents: prompt,
+            model: "gemini-flash-latest",
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
             config: {
-              systemInstruction:
-                "You are an expert academic research assistant specializing in synthesizing search results.",
               temperature: 0.7,
+              systemInstruction: "You are an expert academic research assistant specializing in synthesizing search results.",
             },
           });
-          responseText = response.text || "";
+          responseText = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
         }
       }
 
@@ -1576,11 +1574,10 @@ CRITICAL RULES:
             err2.message || err2,
           );
           const response = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-flash-latest",
             contents: mistralPrompt,
             config: {
-              systemInstruction:
-                "You are a professional reading assistant. Output ONLY valid JSON.",
+              systemInstruction: "You are a professional reading assistant. Output ONLY valid JSON.",
               temperature: 0.3,
               responseMimeType: "application/json",
               responseSchema: {
@@ -1598,7 +1595,7 @@ CRITICAL RULES:
               },
             },
           });
-          const rText = response.text || "";
+          const rText = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
           parsedJSON = cleanAndParseJSON(rText);
         }
       }
@@ -1771,14 +1768,14 @@ CRITICAL RULES:
             if (process.env.GEMINI_API_KEY) {
               const response = await ai.models.generateContent({
                 model: "gemini-3.1-flash-lite",
-                contents: userQuery,
+                contents: [{ role: "user", parts: [{ text: userQuery }] }],
                 config: {
                   systemInstruction:
                     "You are a strict title generator. Generate an appropriate, natural, and descriptive title of maximum 7 words based on the user's initial query. Do NOT include ANY explanation, introduction, conversational text, parentheses, notes, or suggestions. Output ONLY the plain text title, nothing else. For casual greetings or brief casual text (e.g., 'yo', 'hi', 'hello', 'hey'), output a simple, clean title like 'New Conversation' or 'Casual Chat'.",
                   temperature: 0,
                 },
               });
-              titleComponentText = response.text || "";
+              titleComponentText = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
             } else {
               throw new Error(
                 "No LLM clients available or configured for title generation.",
@@ -2207,14 +2204,14 @@ OPTIMIZED SEARCH QUERY:`;
       } else {
         // Fallback to Gemini
         const response = await ai.models.generateContent({
-          model: "gemini-2.0-flash",
-          contents: prompt,
+          model: "gemini-flash-latest",
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
           config: {
             temperature: 0.1,
             maxOutputTokens: 20,
           },
         });
-        extracted = response.text?.trim() || "";
+        extracted = response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
       }
 
       extracted = extracted.replace(/^["']|["']$/g, "") || lastMessage;
@@ -3388,7 +3385,7 @@ ${researchContext}
         }
 
         const responseStream = await ai.models.generateContentStream({
-          model: "gemini-3.5-flash",
+          model: "gemini-flash-latest",
           contents: geminiContents,
           config: geminiConfig,
         });
@@ -3435,7 +3432,7 @@ ${researchContext}
               }
             }
           } else {
-            const content = chunk.text || "";
+            const content = chunk.candidates?.[0]?.content?.parts?.[0]?.text || "";
             if (content) {
               let textToStream = "";
               if (inThoughtBlock) {
@@ -3748,10 +3745,10 @@ Return ONLY a valid JSON array of objects, with no markdown formatting around it
 - url: (string) A placeholder URL or DOI link
 `;
           const aiResponse = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-flash-latest",
             contents: prompt,
           });
-          const textResponse = aiResponse.text || "[]";
+          const textResponse = aiResponse.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
           const cleanJsonText = textResponse.replace(/```json|```/g, "").trim();
           const syntheticPapers = JSON.parse(cleanJsonText);
           entries = syntheticPapers.map((sp: any) => {
@@ -4151,7 +4148,7 @@ ${textToAnalyze}
         );
 
         const aiResponse = await ai.models.generateContent({
-          model: "gemini-1.5-flash",
+          model: "gemini-flash-latest",
           contents: quizPrompt,
           config: {
             responseMimeType: "application/json",
@@ -4200,7 +4197,7 @@ ${textToAnalyze}
           },
         });
 
-        const text = aiResponse.text;
+        const text = aiResponse.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!text) {
           throw new Error("Received empty content output from Gemini.");
         }
@@ -4289,13 +4286,13 @@ ${textToAnalyze}
         );
         try {
           const aiResponse = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-flash-latest",
             contents: notesPrompt,
           });
-          generatedNotes = aiResponse.text || "";
+          generatedNotes = aiResponse.candidates?.[0]?.content?.parts?.[0]?.text || "";
         } catch (gemIniErr: any) {
           console.warn(
-            "[NOTES_API] gemini-3.5-flash failed, trying gemini-3.1-flash-lite:",
+            "[NOTES_API] gemini-flash-latest failed, trying gemini-3.1-flash-lite:",
             gemIniErr.message || gemIniErr,
           );
           try {
@@ -4303,7 +4300,7 @@ ${textToAnalyze}
               model: "gemini-3.1-flash-lite",
               contents: notesPrompt,
             });
-            generatedNotes = aiResponse2.text || "";
+            generatedNotes = aiResponse2.candidates?.[0]?.content?.parts?.[0]?.text || "";
           } catch (gemIniErr2: any) {
             console.warn(
               "[NOTES_API] gemini-3.1-flash-lite failed, trying gemini-flash-latest fallback:",
@@ -4313,7 +4310,7 @@ ${textToAnalyze}
               model: "gemini-flash-latest",
               contents: notesPrompt,
             });
-            generatedNotes = aiResponse3.text || "";
+            generatedNotes = aiResponse3.candidates?.[0]?.content?.parts?.[0]?.text || "";
           }
         }
       }

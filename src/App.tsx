@@ -7143,6 +7143,19 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 )}
               </div>
               <button
+                onClick={() => {
+                  const targetId = activeAssistantTabId || tabs.find((t) => t.type === "chat")?.id;
+                  if (targetId) {
+                    onTabUpdate(targetId, { messages: [] });
+                    showToast("Conversation cleared", "success");
+                  }
+                }}
+                className="text-[#52525b] hover:text-[#e4e4e7] transition-colors p-[4px] rounded-md hover:bg-[#1c1c1e] cursor-pointer shrink-0 [-webkit-app-region:no-drag]"
+                title="Restart Conversation"
+              >
+                <Icon icon="ph:arrow-counter-clockwise" className="w-4 h-4" />
+              </button>
+              <button
                 onClick={() => setIsAssistantOpen(false)}
                 className="text-[#52525b] hover:text-[#e4e4e7] transition-colors p-[4px] rounded-md hover:bg-[#1c1c1e] cursor-pointer shrink-0 [-webkit-app-region:no-drag]"
                 aria-label="Close Assistant"
