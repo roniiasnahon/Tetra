@@ -978,24 +978,6 @@ export const Settings = ({
                 <h2 className="text-[18px] font-bold text-[#e1e1e0]">Advanced Capabilities</h2>
                 
                 <div className="space-y-8">
-                  {/* Switch 1: search web */}
-                  <div className="flex items-center justify-between border-b border-[#3f3f3f]/60 pb-6">
-                    <div className="max-w-[480px]">
-                      <p className="text-[13px] font-medium text-[#e1e1e0]">Internet Search Grounding</p>
-                      <p className="text-[12px] text-zinc-400 mt-1 leading-[1.4]">
-                        Allow research model queries to utilize live Google Search results for grounding citations and statistics.
-                      </p>
-                    </div>
-                    <button 
-                      onClick={() => setWebSearchEnabled(!webSearchEnabled)}
-                      className={`w-11 h-6 transition-colors duration-200 rounded-full p-0.5 outline-none flex items-center cursor-pointer ${webSearchEnabled ? "bg-[#a1a1aa]" : "bg-zinc-700"}`}
-                    >
-                      <div className={`w-5 h-5 bg-black rounded-full transition-transform duration-200 flex items-center justify-center ${webSearchEnabled ? "translate-x-5" : "translate-x-0"}`}>
-                        {webSearchEnabled && <Icon icon="ph:check" className="w-3 h-3 text-white" />}
-                      </div>
-                    </button>
-                  </div>
-
                   {/* Switch 2: LaTeX rendering */}
                   <div className="flex items-center justify-between border-b border-[#3f3f3f]/60 pb-6">
                     <div className="max-w-[480px]">

@@ -183,7 +183,10 @@ export async function getCachedPaper(key: string): Promise<CachedPaper | null> {
     if (doc.exists) {
       return doc.data() as CachedPaper;
     }
-  } catch (e) {
+  } catch (e: any) {
+    if (e.code === 5 || e.message?.includes('NOT_FOUND') || e.code === 'not-found') {
+      return null;
+    }
     console.warn(`[CACHE] Failed to get cached paper:`, e);
   }
   return null;

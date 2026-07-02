@@ -162,6 +162,7 @@ export interface ChatMessage {
     mimetype: string;
     url: string;
   };
+  groundingMetadata?: any;
 }
 
 
@@ -3423,7 +3424,7 @@ export default function App() {
   const [isAgentPlusMenuOpen, setIsAgentPlusMenuOpen] = useState(false);
   const [isAgentMoreModelsOpen, setIsAgentMoreModelsOpen] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => {
-    return localStorage.getItem("cosmi_settings_web_search") === "true";
+    return localStorage.getItem("cosmi_settings_web_search") !== "false";
   });
   const [latexEnabled, setLatexEnabled] = useState(() => {
     return localStorage.getItem("cosmi_settings_latex") !== "false";
@@ -4729,6 +4730,15 @@ Once you have content, I can help you draft sections, summarize findings, or for
                 } else if (parsed.status === "editor_agent_done") {
                   setResearchStatus(null);
                 }
+                if (parsed.groundingMetadata) {
+                  updateChatMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMessageIdRef.current
+                        ? { ...m, groundingMetadata: parsed.groundingMetadata }
+                        : m,
+                    ),
+                  );
+                }
                 if (parsed.text) {
                   accumulatedText += parsed.text;
 
@@ -4827,7 +4837,7 @@ Once you have content, I can help you draft sections, summarize findings, or for
                                   const assistantMsg: ChatMessage = {
                                     id: String(Date.now() + Math.random()),
                                     role: "assistant",
-                                    content: `### ⚠️ No free version available: ${p.title}\n\nThe full-text document is hosted behind a restricted publisher credential check or locked portal, and no free/open-access PDF could be found.\n\n* **Direct Link:** [Open original paper URL in browser](${p.url || "#"}) ↗\n* **Suggested Alternative:** Look for this title on open repositories like Google Scholar, ResearchGate, or arXiv.\n* **Manual Upload:** If you already have the PDF file downloaded locally on your device, simply drag and drop or click upload inside your folders sidebar to instantly parse, summarize, and cite the document here!`,
+                                    content: `### ⚠️ No free version available: ${p.title}\n\nThe full-text document is hosted behind a restricted publisher credential check or locked portal, and no free/open-access PDF could be found.\n\n* **Suggested Alternative:** Look for alternative papers or try refining the keywords/search terms to target open-access repositories.\n* **Manual Upload:** If you have this document's PDF stored locally on your device, you can manually upload it to the workspace for a robust analysis.`,
                                     timestamp: Date.now(),
                                   };
                                   updateChatMessages(
@@ -7007,6 +7017,8 @@ Once you have content, I can help you draft sections, summarize findings, or for
                   }
                 }}
                 extractTextFromPdf={extractTextFromPdf}
+                currentUser={currentUser}
+                storageMode={storageMode}
               />
             )}
           </AnimatePresence>

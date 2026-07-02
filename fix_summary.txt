@@ -1,0 +1,3 @@
+Resolved the final React 18 strict mode warning ("Cannot update a component while rendering a different component") that was triggered by a parent-sync side-effect hidden inside a queued ChatPanel state updater. 
+Finished wiring up the Crossref to Unpaywall pipeline, vastly improving Open-Access full text PDF retrievals when initial DOIs are missing.
+Demoted noisy server fallback logs and handled benign 5 NOT_FOUND database misses transparently so your console stays pristine.

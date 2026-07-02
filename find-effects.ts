@@ -1,62 +1,43 @@
-import fs from 'fs';
+import ts from 'typescript';
+import * as fs from 'fs';
 
-function findUseEffects(filePath) {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const lines = content.split('\n');
-    const results = [];
-
-    for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes('useEffect')) {
-            // Find where this useEffect ends and its dependency array
-            let bracketCount = 0;
-            let foundStart = false;
-            let effectBody = "";
-            let deps = "NO_DEPS_FOUND";
-
-            for (let j = i; j < lines.length; j++) {
-                const line = lines[j];
-                if (!foundStart && line.includes('useEffect(() => {')) {
-                    foundStart = true;
-                    bracketCount = 1;
-                    continue;
-                }
-                if (foundStart) {
-                    // Check for matching closing bracket
-                    for (let k = 0; k < line.length; k++) {
-                        if (line[k] === '{') bracketCount++;
-                        if (line[k] === '}') bracketCount--;
-                        
-                        if (bracketCount === 0) {
-                            // We found the end of the arrow function
-                            // Now look for the dependency array
-                            const remaining = line.slice(k+1);
-                            const nextLines = lines.slice(j+1, j+5).join(' ');
-                            const fullSuffix = remaining + ' ' + nextLines;
-                            const match = fullSuffix.match(/,\s*\[(.*?)\]\);/);
-                            if (match) {
-                                deps = match[1];
-                            } else if (fullSuffix.includes('});')) {
-                                deps = "EMPTY_OR_NO_ARRAY";
-                            }
-                            break;
-                        }
-                    }
-                    if (bracketCount === 0) break;
-                }
+function findRenderSetState(file: string) {
+    const content = fs.readFileSync(file, 'utf-8');
+    const sourceFile = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
+    
+    function visit(node: ts.Node, inComponentBody: boolean) {
+        let isComponent = false;
+        
+        // Identify top-level component function
+        if (ts.isFunctionDeclaration(node) && node.name && node.name.text[0] === node.name.text[0].toUpperCase()) {
+            isComponent = true;
+        } else if (ts.isVariableDeclaration(node) && node.name && ts.isIdentifier(node.name) && node.name.text[0] === node.name.text[0].toUpperCase()) {
+            if (node.initializer && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) {
+                isComponent = true;
             }
-            results.push({ line: i + 1, deps });
         }
+        
+        const isNestedFunc = ts.isFunctionDeclaration(node) || ts.isArrowFunction(node) || ts.isFunctionExpression(node);
+        
+        // If we are currently inside a component body, and we hit a nested function, we are no longer in the render body.
+        const currentlyInRender = inComponentBody && !isNestedFunc;
+        const newInComponentBody = isComponent || currentlyInRender;
+        
+        if (ts.isCallExpression(node) && newInComponentBody) {
+            const exp = node.expression;
+            if (ts.isIdentifier(exp) && exp.text.startsWith('set')) {
+                const lineAndChar = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+                console.log(`[${file}] Line ${lineAndChar.line + 1}: Direct call in render: ${exp.text}`);
+            }
+        }
+        
+        ts.forEachChild(node, child => visit(child, newInComponentBody));
     }
-    return results;
+    
+    ts.forEachChild(sourceFile, child => visit(child, false));
 }
 
-const files = ['src/App.tsx', 'src/components/SidePanel.tsx', 'src/components/OnboardingScreen.tsx', 'src/components/StatisticsTools.tsx'];
-files.forEach(f => {
-    console.log(`--- ${f} ---`);
-    try {
-        const effects = findUseEffects(f);
-        effects.forEach(e => console.log(`Line ${e.line}: [${e.deps}]`));
-    } catch (err) {
-        console.log(`Error reading ${f}`);
-    }
-});
+findRenderSetState('src/App.tsx');
+findRenderSetState('src/components/ChatPanel.tsx');
+findRenderSetState('src/components/MainChat.tsx');
+findRenderSetState('src/components/SidebarPanel.tsx');

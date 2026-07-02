@@ -1,7 +1,9 @@
 import ts from 'typescript';
 import * as fs from 'fs';
+import * as path from 'path';
 
-function findRenderSetState(file: string) {
+function findRender(file: string) {
+    if (!fs.existsSync(file)) return;
     const content = fs.readFileSync(file, 'utf-8');
     const sourceFile = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
     
@@ -11,12 +13,9 @@ function findRenderSetState(file: string) {
             newDepth = depth + 1;
         }
         
-        // In most React components like `const A = () => { }`, the arrow function is depth=1.
-        // If it's `function A() {}`, it's also depth=1.
-        // We want to flag any `set*` calls that are exactly at depth=1.
         if (ts.isCallExpression(node) && newDepth === 1) {
             const exp = node.expression;
-            if (ts.isIdentifier(exp) && exp.text.startsWith('set')) {
+            if (ts.isIdentifier(exp) && (exp.text.startsWith('set') || exp.text === 'onTabUpdate')) {
                 const lineAndChar = sourceFile.getLineAndCharacterOfPosition(node.getStart());
                 console.log(`[${file}] Line ${lineAndChar.line + 1}: Direct call in render: ${exp.text}`);
             }
@@ -28,7 +27,7 @@ function findRenderSetState(file: string) {
     ts.forEachChild(sourceFile, child => visit(child, 0));
 }
 
-findRenderSetState('src/App.tsx');
-findRenderSetState('src/components/ChatPanel.tsx');
-findRenderSetState('src/components/MainChat.tsx');
-findRenderSetState('src/components/SidebarPanel.tsx');
+const dir = 'src/components';
+const files = fs.readdirSync(dir).filter(f => f.endsWith('.tsx')).map(f => path.join(dir, f));
+files.push('src/App.tsx');
+files.forEach(findRender);

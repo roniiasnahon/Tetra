@@ -93,4 +93,5 @@ export interface ChatMessage {
     mimetype: string;
     url: string;
   };
+  groundingMetadata?: any;
 }

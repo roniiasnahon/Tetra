@@ -8,6 +8,7 @@ import { showToast } from './Toast';
 import { AudioVisualizerPlayer } from './AudioVisualizerPlayer';
 import { Icon } from './SolarIcon';
 import { MaterialIcon } from './MaterialIcon';
+import { parseAssistantResponse } from '../app-utils';
 
 interface ShimProps extends React.HTMLAttributes<HTMLSpanElement> {
   className?: string;
@@ -87,6 +88,8 @@ interface SidePanelProps {
   papers: any[];
   onUpdatePaper?: (paper: any) => void;
   extractTextFromPdf?: (url: string) => Promise<string>;
+  currentUser?: any;
+  storageMode?: "local" | "database";
 }
 
 interface SourceItem {
@@ -107,6 +110,83 @@ interface QuizData {
   questions?: QuizQuestion[];
 }
 
+const CHAT_PROMPTS_LOOP = [
+  "How can I help you today?",
+  "Ask me to summarize key sections.",
+  "Generate a quick practice quiz.",
+  "Ask for core concepts and definitions.",
+  "Translate or define complex terms.",
+  "Brainstorm ideas or critique arguments.",
+  "Explain complex sections step by step.",
+  "Synthesize the main takeaways.",
+  "Clarify any details in the document.",
+  "Ask anything about this PDF!"
+];
+
+const TypewriterSubtitle: React.FC = () => {
+  const [index, setIndex] = useState(0);
+  const [subIndex, setSubIndex] = useState(0);
+  const [reverse, setReverse] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+
+  useEffect(() => {
+    if (isPaused) {
+      const timeout = setTimeout(() => {
+        setIsPaused(false);
+        setReverse(true);
+      }, 2500);
+      return () => clearTimeout(timeout);
+    }
+
+    if (reverse && subIndex === 0) {
+      setReverse(false);
+      setIndex((prev) => (prev + 1) % CHAT_PROMPTS_LOOP.length);
+      return;
+    }
+
+    if (!reverse && subIndex === CHAT_PROMPTS_LOOP[index].length) {
+      setIsPaused(true);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setSubIndex((prev) => prev + (reverse ? -1 : 1));
+    }, reverse ? 20 : 40);
+
+    return () => clearTimeout(timeout);
+  }, [subIndex, index, reverse, isPaused]);
+
+  return (
+    <span className="inline-block border-r border-zinc-500 pr-1 min-h-[1.5em] select-none">
+      {CHAT_PROMPTS_LOOP[index].substring(0, subIndex)}
+    </span>
+  );
+};
+
+const cleanMessageContentAndThought = (content: string, thought?: string) => {
+  let cleanContent = content;
+  let extractedThought = thought || "";
+  
+  if (content.includes("<thought>")) {
+    const startTag = "<thought>";
+    const endTag = "</thought>";
+    const startIdx = content.indexOf(startTag);
+    const endIdx = content.indexOf(endTag);
+    
+    if (endIdx !== -1) {
+      extractedThought = content.substring(startIdx + startTag.length, endIdx).trim();
+      cleanContent = (content.substring(0, startIdx) + content.substring(endIdx + endTag.length)).trim();
+    } else {
+      extractedThought = content.substring(startIdx + startTag.length).trim();
+      cleanContent = content.substring(0, startIdx).trim();
+    }
+  }
+  
+  cleanContent = cleanContent.replace(/<\/?chat>/g, "").trim();
+  
+  return { cleanContent, extractedThought };
+};
+
 export const SidePanel: React.FC<SidePanelProps> = ({ 
   isOpen, 
   onClose, 
@@ -114,7 +194,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   activeTab, 
   papers,
   onUpdatePaper,
-  extractTextFromPdf
+  extractTextFromPdf,
+  currentUser,
+  storageMode = "local"
 }) => {
   // Compute document key for storage based on unique identifier, fallback to tabId
   const docStorageKey = useMemo(() => {
@@ -125,7 +207,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     return activeTab?.fileId || activeTab?.id || tabId || 'default-doc';
   }, [activeTab?.fileId, activeTab?.id, tabId]);
 
-  const [activeSubTab, setActiveSubTab] = useState<'notes' | 'details' | 'sources' | 'quizzes' | 'attachments' | 'comments'>('notes');
+  const [activeSubTab, setActiveSubTab] = useState<'notes' | 'details' | 'sources' | 'quizzes' | 'attachments' | 'comments' | 'chat'>('chat');
 
   // Annotations / Comments state
   const [annotations, setAnnotations] = useState<any[]>([]);
@@ -241,6 +323,120 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const [quizScore, setQuizScore] = useState(0);
   const [quizFinished, setQuizFinished] = useState(false);
   const [quizHistory, setQuizHistory] = useState<Record<number, number>>({}); // maps question index to chosen option
+
+  // Chat sub-tab state
+  const [chatMessages, setChatMessages] = useState<{ id: string; role: 'user' | 'assistant'; content: string; thought?: string; timestamp: number }[]>([]);
+  const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
+  const [chatInput, setChatInput] = useState('');
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const [chatModel, setChatModel] = useState<'command-a-plus-05-2026' | 'auto' | 'mistral-large-latest'>('command-a-plus-05-2026');
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const [chatThinkingLevel, setChatThinkingLevel] = useState<'Standard' | 'Deep' | 'Instant'>('Standard');
+  const [isThinkingDropdownOpen, setIsThinkingDropdownOpen] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const handleRestartChat = () => {
+    setChatMessages([]);
+    setExpandedThoughts({});
+    setChatInput('');
+    showToast("Chat history restarted", "info");
+  };
+
+  const currentDocKeyRef = useRef(docStorageKey);
+
+  // Load chat messages when document changes or when panel opens
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    currentDocKeyRef.current = docStorageKey;
+    
+    // Always hydrate from local storage first for instant load
+    const saved = localStorage.getItem(`chat_history_${docStorageKey}`);
+    if (saved) {
+      try {
+        setChatMessages(JSON.parse(saved));
+      } catch {
+        setChatMessages([]);
+      }
+    } else {
+      setChatMessages([]);
+    }
+
+    // Then try to fetch from Firestore if in database mode
+    if (currentUser && storageMode === "database") {
+      const loadFromDb = async () => {
+        try {
+          const { db: firestoreDb } = await import('../firebase');
+          const { getDoc, doc: fDoc } = await import('firebase/firestore');
+          const safeId = encodeURIComponent(docStorageKey).replace(/\./g, "%2E");
+          const docRef = fDoc(firestoreDb, 'users', currentUser.uid, 'document_chats', safeId);
+          const snap = await getDoc(docRef);
+          if (snap.exists()) {
+            const data = snap.data();
+            if (data && data.messages && currentDocKeyRef.current === docStorageKey) {
+              setChatMessages(data.messages);
+              // Also update local storage cache
+              localStorage.setItem(`chat_history_${docStorageKey}`, JSON.stringify(data.messages));
+            }
+          }
+        } catch (e) {
+          console.error("Failed to load document chat from Firestore", e);
+        }
+      };
+      loadFromDb();
+    }
+  }, [docStorageKey, isOpen, currentUser, storageMode]);
+
+  // Save chat messages when they change
+  useEffect(() => {
+    // Prevent saving if the docStorageKey just changed and we haven't loaded the new messages yet
+    if (currentDocKeyRef.current !== docStorageKey) return;
+    
+    const saveChats = async () => {
+      if (chatMessages.length > 0) {
+        localStorage.setItem(`chat_history_${docStorageKey}`, JSON.stringify(chatMessages));
+        
+        if (currentUser && storageMode === "database") {
+          try {
+            const { db: firestoreDb } = await import('../firebase');
+            const { setDoc, doc: fDoc } = await import('firebase/firestore');
+            const safeId = encodeURIComponent(docStorageKey).replace(/\./g, "%2E");
+            await setDoc(fDoc(firestoreDb, 'users', currentUser.uid, 'document_chats', safeId), {
+              docId: docStorageKey,
+              messages: chatMessages,
+              updatedAt: Date.now()
+            });
+          } catch (e) {
+            console.error("Failed to save document chat to Firestore", e);
+          }
+        }
+      } else {
+        localStorage.removeItem(`chat_history_${docStorageKey}`);
+        
+        if (currentUser && storageMode === "database") {
+          try {
+            const { db: firestoreDb } = await import('../firebase');
+            const { deleteDoc, doc: fDoc } = await import('firebase/firestore');
+            const safeId = encodeURIComponent(docStorageKey).replace(/\./g, "%2E");
+            await deleteDoc(fDoc(firestoreDb, 'users', currentUser.uid, 'document_chats', safeId));
+          } catch (e) {
+            console.error("Failed to delete document chat from Firestore", e);
+          }
+        }
+      }
+    };
+    
+    saveChats();
+  }, [chatMessages, docStorageKey, currentUser, storageMode]);
+
+  // Scroll to bottom of chat when messages or loading state changes
+  useEffect(() => {
+    if (activeSubTab === 'chat') {
+      setTimeout(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 80);
+    }
+  }, [chatMessages, activeSubTab, isChatLoading]);
 
   // Retrieve current paper matching activeTab
   const matchingPaper = useMemo(() => {
@@ -703,6 +899,149 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     showToast(`Deleted attachment: "${attachmentName}"`, 'info');
   };
 
+  // Chat logic
+  const handleSendChatMessage = async (overrideText?: string) => {
+    const textToSend = overrideText || chatInput;
+    if (!textToSend.trim() || isChatLoading) return;
+
+    if (!overrideText) {
+      setChatInput('');
+    }
+
+    const userMsg = {
+      id: String(Date.now()),
+      role: 'user' as const,
+      content: textToSend,
+      timestamp: Date.now()
+    };
+    
+    const nextMsgs = [...chatMessages, userMsg];
+    setChatMessages(nextMsgs);
+    setIsChatLoading(true);
+
+    try {
+      let textToUse = matchingPaper?.extractedText || activeTab?.content || matchingPaper?.summary || matchingPaper?.description || "";
+      const isDocPdf = activeTab?.mimetype === 'application/pdf' || activeTab?.title?.toLowerCase()?.endsWith('.pdf') || matchingPaper?.mimetype === 'application/pdf';
+
+      if (isDocPdf && (!textToUse || textToUse.trim().length < 200) && extractTextFromPdf && activeTab?.fileId) {
+        try {
+          const extracted = await extractTextFromPdf(`/api/files/${activeTab.fileId}`);
+          if (extracted && extracted.trim()) {
+            textToUse = extracted;
+            if (onUpdatePaper && matchingPaper) {
+              onUpdatePaper({
+                ...matchingPaper,
+                extractedText: extracted
+              });
+            }
+          }
+        } catch (pdfErr) {
+          console.error("Chat PDF text extraction failed:", pdfErr);
+        }
+      }
+
+      if (!textToUse || !textToUse.trim()) {
+        textToUse = "(The active document is currently empty or does not contain readable text.)";
+      }
+
+      const response = await fetch("/api/research/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: nextMsgs.slice(-20).map((m) => ({
+            role: m.role,
+            content: m.content
+          })),
+          model: chatModel,
+          thinkingLevel: chatThinkingLevel,
+          webSearch: false,
+          customInstructions: `You are an AI chatbot built specifically for discussing the active document. The context you know is STRICTLY and EXCLUSIVELY limited to what is on this PDF viewer or document editor. Answer the user's queries using the provided document content. If the query cannot be answered using the document content, gently inform the user that you are designed only to answer questions about this active document. Keep answers highly professional, clean, accurate, and concise. Do not guess or hallucinate details.`,
+          context: {
+            notes: [
+              `Document Title: ${activeTab?.title || "Document"}`
+            ],
+            citations: [
+              {
+                title: activeTab?.title || "Document",
+                fullText: textToUse,
+                fileId: activeTab?.fileId || activeTab?.id || "doc"
+              }
+            ],
+            outline: []
+          }
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch response from chat server");
+      }
+
+      const assistantMsgId = String(Date.now() + 1);
+      const initialAssistantMsg = {
+        id: assistantMsgId,
+        role: 'assistant' as const,
+        content: '',
+        timestamp: Date.now()
+      };
+
+      let currentMsgs = [...nextMsgs, initialAssistantMsg];
+      setChatMessages(currentMsgs);
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let streamBuffer = '';
+      let accumulatedText = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          streamBuffer += decoder.decode(value, { stream: true });
+          const lines = streamBuffer.split("\n");
+          streamBuffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (!trimmedLine) continue;
+            if (trimmedLine.startsWith("data: ")) {
+              const data = trimmedLine.slice(6).trim();
+              if (data === "[DONE]") break;
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.text) {
+                  accumulatedText += parsed.text;
+                  const { chat, thought } = parseAssistantResponse(accumulatedText);
+                  
+                  currentMsgs = currentMsgs.map((m) => {
+                    if (m.id === assistantMsgId) {
+                      return {
+                        ...m,
+                        content: chat || accumulatedText,
+                        thought: thought || undefined
+                      };
+                    }
+                    return m;
+                  });
+                  setChatMessages(currentMsgs);
+                }
+              } catch (err) {
+                // Ignore chunk parsing errors during stream transitions
+              }
+            }
+          }
+        }
+      }
+
+    } catch (error: any) {
+      console.error("Chat error:", error);
+      showToast(getUserFriendlyErrorMessage(error), "error");
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
+
   // Quizzes logic
   const handleGenerateQuiz = async () => {
     setIsGeneratingQuiz(true);
@@ -904,10 +1243,12 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       <div className="flex items-center gap-1.5 px-4 h-[56px] pl-3 bg-[#121212] shrink-0">
         <div className="flex-1 flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden py-1">
           {(([
+            'chat',
             activeTab?.mimetype === 'application/pdf' || activeTab?.fileId ? 'comments' : null,
             'quizzes', 'notes', 'details', 'sources', 'attachments'
           ].filter(Boolean)) as any[]).map(tab => {
             let label = tab as string;
+            if (tab === 'chat') label = 'Chat';
             if (tab === 'quizzes') label = 'Test';
             if (tab === 'sources') label = 'Sources';
             if (tab === 'attachments') label = 'Files';
@@ -929,6 +1270,17 @@ export const SidePanel: React.FC<SidePanelProps> = ({
           })}
         </div>
         
+        {activeSubTab === 'chat' && (
+          <button
+            onClick={handleRestartChat}
+            className="p-1 px-1.5 hover:bg-[#1a1a1c] rounded-md cursor-pointer transition-all text-[#71717a] hover:text-[#f2f2f3]"
+            title="Restart Chat"
+            aria-label="Restart Chat"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+        )}
+        
         <button 
           onClick={onClose} 
           className="p-1 px-1.5 ml-1 hover:bg-[#1a1a1c] rounded-md cursor-pointer transition-all text-[#71717a] hover:text-[#f2f2f3]"
@@ -939,8 +1291,149 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       </div>
 
       {/* Main Tab Scrolling Viewer container */}
-      <div className="flex-1 overflow-y-auto flex flex-col min-h-0 bg-[#121212]">
+      <div className={`flex-1 flex flex-col min-h-0 bg-[#121212] ${activeSubTab === 'chat' ? '' : 'overflow-y-auto'}`}>
         
+        {/* TAB CHAT: Doc/PDF chatbot */}
+        {activeSubTab === 'chat' && (
+          <div className="flex flex-col flex-1 h-full min-h-0 bg-transparent text-[13px] relative">
+            {/* Scrollable conversation history */}
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 flex flex-col custom-scrollbar">
+              {chatMessages.length === 0 ? (
+                <div className="flex-1 flex flex-col justify-center items-start pt-12 pb-6 px-4">
+                  <h1 className="text-3xl font-sans font-medium text-zinc-100 tracking-tight leading-tight select-none">
+                    Hello, {currentUser?.displayName || "Ron"}
+                  </h1>
+                  <p className="text-lg font-sans text-zinc-400 mt-1 mb-8 select-none min-h-[1.5em] flex items-center">
+                    <TypewriterSubtitle />
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4 flex flex-col">
+                  {chatMessages.map((msg, idx) => {
+                    const isUser = msg.role === 'user';
+                    const { cleanContent, extractedThought } = isUser 
+                      ? { cleanContent: msg.content, extractedThought: "" }
+                      : cleanMessageContentAndThought(msg.content, msg.thought);
+
+                    const isMsgStreaming = isChatLoading && idx === chatMessages.length - 1;
+                    const isExpanded = expandedThoughts[msg.id] || false;
+                    const toggleThought = () => {
+                      setExpandedThoughts(prev => ({ ...prev, [msg.id]: !prev[msg.id] }));
+                    };
+
+                    return (
+                      <div
+                        key={msg.id}
+                        className={`flex flex-col gap-1.5 max-w-[85%] ${isUser ? 'self-end items-end' : 'self-start items-start w-full'}`}
+                      >
+                        {/* Thinking dropdown if thought exists */}
+                        {!isUser && extractedThought && (
+                          <div className="flex flex-col gap-1.5 self-start items-start w-full mb-1">
+                            <button
+                              type="button"
+                              onClick={toggleThought}
+                              className={`flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 transition-colors select-none py-1 text-[11px] font-medium cursor-pointer`}
+                            >
+                              <Icon 
+                                icon="ph:brain" 
+                                className={`w-3.5 h-3.5 ${isMsgStreaming ? 'animate-pulse text-zinc-500' : 'text-zinc-400'}`} 
+                              />
+                              <span className={`${isMsgStreaming ? 'shimmer-text font-semibold' : 'text-zinc-500'}`}>
+                                {isMsgStreaming ? 'Thinking...' : 'Thought'}
+                              </span>
+                            </button>
+                            
+                            {isExpanded && (
+                              <div className="w-full pl-3.5 border-l border-zinc-800 text-[12px] text-zinc-400 font-sans leading-relaxed markdown-body max-w-none prose prose-invert prose-sm py-1">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                  {extractedThought}
+                                </ReactMarkdown>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Message box */}
+                        {cleanContent && (
+                          <div
+                            className={`px-4 py-2.5 rounded-2xl text-[13px] font-sans leading-relaxed ${
+                              isUser
+                                ? 'bg-[#27272a] text-[#f4f4f5] rounded-tr-sm'
+                                : 'text-zinc-200'
+                            }`}
+                          >
+                            {isUser ? (
+                              <span className="whitespace-pre-wrap">{cleanContent}</span>
+                            ) : (
+                              <div className="markdown-body text-zinc-200 prose prose-invert max-w-none prose-sm leading-relaxed">
+                                <TypewriterMarkdown 
+                                  content={cleanContent} 
+                                  timestamp={msg.timestamp} 
+                                  isStreaming={isChatLoading && idx === chatMessages.length - 1} 
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  
+                  {isChatLoading && chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === 'user' && (
+                    <div className="flex flex-col gap-1 max-w-[85%] self-start items-start px-4">
+                      <div className="text-xs flex items-center gap-2">
+                        <span className="shimmer-text font-medium text-[13px]">Thinking...</span>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div ref={chatEndRef} />
+                </div>
+              )}
+            </div>
+
+            {/* Message Input Container */}
+            <div className="bg-[#18181b] border border-[#27272a] rounded-2xl p-2.5 mx-4 mb-4 flex flex-col gap-2 shrink-0">
+              <textarea
+                className="w-full bg-transparent text-[13px] text-zinc-100 placeholder-zinc-500 focus:outline-none resize-none font-sans min-h-[40px] max-h-[120px]"
+                placeholder="Ask about this document..."
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendChatMessage();
+                  }
+                }}
+                rows={1}
+              />
+              
+              <div className="flex items-center justify-between pt-1 border-t border-zinc-900/40 relative">
+                {/* Left: Model Indicator */}
+                <div className="flex items-center">
+                  <div className="flex items-center px-2 py-1 text-xs text-zinc-450 font-sans select-none">
+                    <span className="font-medium text-zinc-400">Ericka V</span>
+                  </div>
+                </div>
+
+                {/* Right: Send Button */}
+                <button
+                  type="button"
+                  disabled={!chatInput.trim() || isChatLoading}
+                  onClick={() => handleSendChatMessage()}
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center cursor-pointer transition-all ${
+                    chatInput.trim() && !isChatLoading
+                      ? 'bg-zinc-250 hover:bg-white text-zinc-950'
+                      : 'bg-zinc-900 text-zinc-600 cursor-not-allowed'
+                  }`}
+                >
+                  <Icon icon="ph:paper-plane-right-fill" className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* TAB COMMENTS: Annotations */}
         {activeSubTab === 'comments' && (
           <div className="flex flex-col flex-1 min-h-0 bg-transparent text-[13px]">

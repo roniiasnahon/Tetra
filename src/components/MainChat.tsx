@@ -110,6 +110,83 @@ export const modelsList = [
   },
 ];
 
+const renderGroundingSources = (groundingMetadata: any) => {
+  if (!groundingMetadata) return null;
+  const chunks = groundingMetadata.groundingChunks || [];
+  if (!chunks || chunks.length === 0) return null;
+
+  // Extract sources safely
+  const sources: Array<{ uri: string; title: string }> = [];
+  const seenUrls = new Set<string>();
+
+  chunks.forEach((chunk: any) => {
+    let uri = "";
+    let title = "";
+
+    if (chunk.web) {
+      uri = chunk.web.uri || "";
+      title = chunk.web.title || "";
+    } else {
+      uri = chunk.uri || "";
+      title = chunk.title || "";
+    }
+
+    if (uri && !seenUrls.has(uri)) {
+      seenUrls.add(uri);
+      sources.push({ uri, title: title || new URL(uri).hostname });
+    }
+  });
+
+  if (sources.length === 0) return null;
+
+  const queries: string[] = groundingMetadata.webSearchQueries || [];
+
+  return (
+    <div className="mt-4 pt-3.5 border-t border-zinc-850/80 flex flex-col gap-2.5">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-zinc-400 select-none">
+        <Icon icon="ph:globe" className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+        <span>Sources</span>
+        {queries && queries.length > 0 && (
+          <span className="text-zinc-500 font-normal truncate max-w-[300px]">
+            for "{queries.join(", ")}"
+          </span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {sources.map((src, idx) => {
+          let domain = "";
+          try {
+            domain = new URL(src.uri).hostname.replace("www.", "");
+          } catch {
+            domain = "web";
+          }
+          return (
+            <a
+              key={idx}
+              href={src.uri}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1 bg-[#1c1c1f] hover:bg-[#27272a] border border-zinc-800/80 rounded-full text-xs text-zinc-300 hover:text-white transition-all duration-150"
+              id={`source-link-${idx}`}
+            >
+              <img
+                src={`https://www.google.com/s2/favicons?sz=32&domain=${domain}`}
+                alt=""
+                className="w-3.5 h-3.5 rounded-sm object-contain shrink-0"
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = "none";
+                }}
+              />
+              <span className="max-w-[180px] truncate font-medium">{src.title}</span>
+              <span className="text-zinc-500 text-[10px] truncate">({domain})</span>
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 const renderLinkifiedText = (text: string) => {
   if (!text) return "";
   const urlPattern =
@@ -700,7 +777,7 @@ export const MainChat: React.FC<MainChatProps> = ({
 
         <div className="flex items-center justify-between px-1">
           {/* Left Plus/Upload Icon */}
-          <div className="relative shrink-0 flex items-center gap-2">
+          <div className="relative shrink-0 flex items-center gap-1.5">
             <button
               onClick={() => setIsPlusMenuOpen(!isPlusMenuOpen)}
               className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors cursor-pointer shrink-0 ${
@@ -709,14 +786,16 @@ export const MainChat: React.FC<MainChatProps> = ({
                   : "text-[#71717a] hover:text-[#e4e4e7] bg-transparent hover:bg-[#222222]"
               }`}
               title="Upload or Search Options"
+              id="plus-menu-btn-primary"
             >
               <Plus
                 className={`w-5 h-5 transition-transform duration-200 ${isPlusMenuOpen ? "rotate-45" : ""}`}
               />
             </button>
 
-            {webSearchVal && (
+            {webSearchEnabled && (
               <button
+                type="button"
                 onClick={() => setWebSearchEnabled(false)}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-[#252528] hover:bg-[#2a2a2d] transition-colors rounded-full text-[#e4e4e7] cursor-pointer group shrink-0"
               >
@@ -724,7 +803,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                   icon="ph:globe"
                   className="w-[15px] h-[15px] text-[#a1a1aa] group-hover:text-[#e4e4e7] transition-colors"
                 />
-                <span className="text-[13px] font-normal leading-none font-jakarta">
+                <span className="text-[13px] font-normal leading-none font-sans">
                   Search web
                 </span>
               </button>
@@ -739,14 +818,14 @@ export const MainChat: React.FC<MainChatProps> = ({
                 />
 
                 {/* Plus Options Menu */}
-                <div className="absolute bottom-full left-0 mb-2.5 w-[200px] bg-[#1a1a1e] rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
+                <div className="absolute bottom-full left-0 mb-2.5 w-[220px] bg-[#1a1a1e] border border-zinc-800 rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
                   {/* Upload files */}
                   <button
                     onClick={() => {
                       setIsPlusMenuOpen(false);
                       handlePaperclipClick();
                     }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-zinc-350 hover:text-white hover:bg-zinc-850/40 transition-none font-jakarta cursor-pointer"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-zinc-350 hover:text-white hover:bg-zinc-800/40 transition-none font-jakarta cursor-pointer"
                   >
                     <PaperclipRounded2
                       weight="Linear"
@@ -760,27 +839,28 @@ export const MainChat: React.FC<MainChatProps> = ({
 
                   {/* Web Search Grounding */}
                   <button
+                    type="button"
                     onClick={() => {
-                      setWebSearchEnabled(!webSearchVal);
+                      setWebSearchEnabled(!webSearchEnabled);
                       setIsPlusMenuOpen(false);
                     }}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left font-jakarta cursor-pointer transition-none ${
-                      webSearchVal
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left font-sans cursor-pointer transition-none ${
+                      webSearchEnabled
                         ? "bg-zinc-800/30 text-zinc-100"
-                        : "text-zinc-300 hover:text-white hover:bg-zinc-850/40"
+                        : "text-zinc-300 hover:text-white hover:bg-zinc-800/40"
                     }`}
                   >
                     <div className="flex items-center gap-3">
                       <Icon
                         icon="ph:globe"
-                        className={`w-[18px] h-[18px] shrink-0 ${webSearchVal ? "text-zinc-400" : "text-zinc-500"}`}
+                        className={`w-[18px] h-[18px] shrink-0 ${webSearchEnabled ? "text-zinc-400" : "text-zinc-500"}`}
                       />
                       <span className="text-[13px] font-normal text-zinc-300 leading-none">
                         Search web
                       </span>
                     </div>
-                    {webSearchVal && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-zinc-550" />
+                    {webSearchEnabled && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
                     )}
                   </button>
                 </div>
@@ -1302,15 +1382,18 @@ export const MainChat: React.FC<MainChatProps> = ({
                               {m.role === "user" ? (
                                 renderLinkifiedText(m.content)
                               ) : (
-                                <TypewriterMarkdown
-                                  content={m.content}
-                                  timestamp={m.timestamp}
-                                  isStreaming={
-                                    isAiTyping &&
-                                    m.id === messages[messages.length - 1]?.id
-                                  }
-                                  isBig={true}
-                                />
+                                <>
+                                  <TypewriterMarkdown
+                                    content={m.content}
+                                    timestamp={m.timestamp}
+                                    isStreaming={
+                                      isAiTyping &&
+                                      m.id === messages[messages.length - 1]?.id
+                                    }
+                                    isBig={true}
+                                  />
+                                  {m.groundingMetadata && renderGroundingSources(m.groundingMetadata)}
+                                </>
                               )}
                             </TruncatedMessageWrapper>
                           )}
@@ -1672,7 +1755,7 @@ export const MainChat: React.FC<MainChatProps> = ({
 
             <div className="flex items-center justify-between px-1">
               {/* Left Plus/Upload Icon */}
-              <div className="relative shrink-0 flex items-center gap-2">
+              <div className="relative shrink-0 flex items-center gap-1.5">
                 <button
                   onClick={() => setIsPlusMenuOpen(!isPlusMenuOpen)}
                   className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors cursor-pointer shrink-0 ${
@@ -1681,14 +1764,16 @@ export const MainChat: React.FC<MainChatProps> = ({
                       : "text-[#71717a] hover:text-[#e4e4e7] bg-transparent hover:bg-[#222222]"
                   }`}
                   title="Upload or Search Options"
+                  id="plus-menu-btn-secondary"
                 >
                   <Plus
                     className={`w-5 h-5 transition-transform duration-200 ${isPlusMenuOpen ? "rotate-45" : ""}`}
                   />
                 </button>
 
-                {webSearchVal && (
+                {webSearchEnabled && (
                   <button
+                    type="button"
                     onClick={() => setWebSearchEnabled(false)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-[#252528] hover:bg-[#2a2a2d] transition-colors rounded-full text-[#e4e4e7] cursor-pointer group shrink-0"
                   >
@@ -1696,7 +1781,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                       icon="ph:globe"
                       className="w-[15px] h-[15px] text-[#a1a1aa] group-hover:text-[#e4e4e7] transition-colors"
                     />
-                    <span className="text-[13px] font-normal leading-none font-jakarta">
+                    <span className="text-[13px] font-normal leading-none font-sans">
                       Search web
                     </span>
                   </button>
@@ -1711,7 +1796,7 @@ export const MainChat: React.FC<MainChatProps> = ({
                     />
 
                     {/* Plus Options Menu */}
-                    <div className="absolute bottom-full left-0 mb-2.5 w-[200px] bg-[#1a1a1e] rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
+                    <div className="absolute bottom-full left-0 mb-2.5 w-[220px] bg-[#1a1a1e] border border-zinc-800 rounded-2xl p-1.5 shadow-2xl z-[100] flex flex-col gap-0.5">
                       {/* Upload files */}
                       <button
                         onClick={() => {
@@ -1732,12 +1817,13 @@ export const MainChat: React.FC<MainChatProps> = ({
 
                       {/* Web Search Grounding */}
                       <button
+                        type="button"
                         onClick={() => {
-                          setWebSearchEnabled(!webSearchVal);
+                          setWebSearchEnabled(!webSearchEnabled);
                           setIsPlusMenuOpen(false);
                         }}
-                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left font-jakarta cursor-pointer transition-none ${
-                          webSearchVal
+                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left font-sans cursor-pointer transition-none ${
+                          webSearchEnabled
                             ? "bg-zinc-800/30 text-zinc-100"
                             : "text-zinc-300 hover:text-white hover:bg-zinc-800/40"
                         }`}
@@ -1745,13 +1831,13 @@ export const MainChat: React.FC<MainChatProps> = ({
                         <div className="flex items-center gap-3">
                           <Icon
                             icon="ph:globe"
-                            className={`w-[18px] h-[18px] shrink-0 ${webSearchVal ? "text-zinc-400" : "text-zinc-500"}`}
+                            className={`w-[18px] h-[18px] shrink-0 ${webSearchEnabled ? "text-zinc-400" : "text-zinc-500"}`}
                           />
                           <span className="text-[13px] font-normal text-zinc-300 leading-none">
                             Search web
                           </span>
                         </div>
-                        {webSearchVal && (
+                        {webSearchEnabled && (
                           <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
                         )}
                       </button>

@@ -2259,7 +2259,11 @@ OPTIMIZED SEARCH QUERY:`;
       const lastMessage = messages[messages.length - 1]?.content || "";
       const isSearchRequest = false;
       const requestedModel = model || "auto";
-      const webSearchEnabled = !!webSearch;
+      const cleanedLastMsg = lastMessage.toLowerCase().trim();
+      const webSearchEnabled = !!webSearch || 
+        cleanedLastMsg.startsWith("web search") || 
+        cleanedLastMsg.startsWith("websearch") || 
+        cleanedLastMsg.startsWith("search ");
 
       let researchContext = "";
       if (attachment && attachment.fileId && !attachment.mimetype?.startsWith("image/")) {
@@ -2676,20 +2680,19 @@ ${autoDownloadedInfo}
 The top paper was successfully downloaded and stored. Please let the user know, highlight elements of it, and offer to cite it or help them integrate it.
 `;
           } else {
-            const paperUrl = topPaper.url || pdfUrl || "N/A";
             researchContext = `
 --- AUTOMATIC SCHOLAR SEARCH RESULTS ---
 The user requested papers. I found these academic papers:
 
-${papers.map((p: any, i: number) => `[${i + 1}] ${p.title} (${p.year}). Authors: ${p.authors?.map((a: any) => a.name).join(", ")}. Link: ${p.url || p.openAccessPdf?.url || "N/A"}. Abstract: ${p.abstract?.substring(0, 300)}...`).join("\n\n")}
+${papers.map((p: any, i: number) => `[${i + 1}] ${p.title} (${p.year}). Authors: ${p.authors?.map((a: any) => a.name).join(", ")}. Abstract: ${p.abstract?.substring(0, 300)}...`).join("\n\n")}
 
 -----------------------------------------
 CRITICAL INSTRUCTION: The automated PDF download for "${topPaper.title}" failed.
-DO NOT summarize or produce/hallucinate an abstract or brief of this paper in your response.
-Instead, do the following:
-1. Provide the direct original link (${paperUrl}) clearly in your chat response so the user can easily find and browse/download the full-text paper themselves.
-2. Directly present alternative papers from the search results index above or suggest alternative keywords/search areas.
-3. Suggest that if they have the document's PDF stored locally, they can manually upload it to the workspace for robust analysis.
+DO NOT provide any external download or reference links/URLs for papers in your response.
+DO NOT summarize or produce/hallucinate an abstract or brief of this failed paper in your response.
+Instead, do the following (Strategy 2):
+1. Directly present alternative papers or suggest alternative keywords/search areas to refine the topic.
+2. Suggest that if they have the document's PDF stored locally, they can manually upload it to the workspace for robust analysis.
 `;
           }
         } else {
@@ -3393,6 +3396,13 @@ ${researchContext}
         let inThoughtBlock = false;
 
         for await (const chunk of responseStream) {
+          const groundingMetadata = chunk.candidates?.[0]?.groundingMetadata;
+          if (groundingMetadata) {
+            res.write(
+              `data: ${JSON.stringify({ groundingMetadata })}\n\n`,
+            );
+          }
+
           const parts = chunk.candidates?.[0]?.content?.parts;
           if (parts && Array.isArray(parts) && parts.length > 0) {
             for (const part of parts) {
@@ -3573,40 +3583,116 @@ CRITICAL PROTOCOLS:
         return res.status(400).json({ success: false, error: "Missing query" });
       }
 
-      const fetchWithRetry = async (
-        url: string,
-        opts: any = {},
-        retries = 3,
-      ) => {
-        for (let i = 0; i < retries; i++) {
-          try {
-            return await axios.get(url, { ...opts, timeout: 15000 });
-          } catch (err: any) {
-            if (i === retries - 1) throw err;
-            await new Promise((resolve) => setTimeout(resolve, 2000 * (i + 1)));
-          }
-        }
-        throw new Error("Max retries reached");
-      };
-
       let cleanQuery = query
         .replace(/[^\w\s-]/g, " ")
         .replace(/\s+/g, " ")
         .trim();
       if (!cleanQuery) cleanQuery = query.trim() || "academic research";
 
-      const searchUrl = `https://api.openalex.org/works?search=${encodeURIComponent(cleanQuery)}&filter=has_pdf_url:true&per-page=1&mailto=asnahonron@gmail.com`;
-      let entries = [];
+      let entries: any[] = [];
+      let sourceEngine = "Semantic Scholar";
+
+      // 1. TRY SEMANTIC SCHOLAR FIRST
       try {
-        const response = await fetchWithRetry(searchUrl, {
+        console.log(`[SEARCH-API] Searching Semantic Scholar for: "${cleanQuery}"`);
+        const ssUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(cleanQuery)}&limit=10&fields=title,authors,year,abstract,openAccessPdf,url,externalIds`;
+        const ssResponse = await axios.get(ssUrl, {
+          timeout: 10000,
           headers: { "User-Agent": "Mozilla/5.0" },
         });
-        const data = response.data;
-        entries = data.results || [];
-      } catch (err: any) {
-        console.warn(`[SEARCH-FALLBACK] OpenAlex search failed with: ${err.message || err}. Trying CrossRef fallback...`);
+
+        if (ssResponse.status === 200 && ssResponse.data?.data) {
+          const rawData = ssResponse.data.data || [];
+          console.log(`[SEARCH-API] Semantic Scholar returned ${rawData.length} papers.`);
+          
+          entries = rawData.map((paper: any) => {
+            const authorNames = (paper.authors || [])
+              .map((a: any) => a.name)
+              .filter(Boolean)
+              .join(", ");
+
+            let pdfLink = paper.openAccessPdf?.url || null;
+            if (paper.externalIds?.ArXiv) {
+              const arxivId = paper.externalIds.ArXiv.split("/").pop();
+              pdfLink = `https://arxiv.org/pdf/${arxivId}.pdf`;
+            }
+
+            return {
+              title: paper.title || "Unknown Title",
+              author: authorNames || "Unknown Author",
+              abstract: paper.abstract || "No abstract available.",
+              year: paper.year?.toString() || "2026",
+              url: paper.url || "",
+              pdfLink: pdfLink,
+              doi: paper.externalIds?.DOI || "",
+              arxivId: paper.externalIds?.ArXiv || null,
+            };
+          });
+        }
+      } catch (ssErr: any) {
+        console.warn(`[SEARCH-API] Semantic Scholar failed: ${ssErr.message}. Falling back to OpenAlex...`);
+      }
+
+      // 2. FALLBACK TO OPENALEX
+      if (entries.length === 0) {
+        sourceEngine = "OpenAlex";
         try {
-          const crossrefUrl = `https://api.crossref.org/works?query=${encodeURIComponent(cleanQuery)}&rows=3`;
+          console.log(`[SEARCH-API] Searching OpenAlex for: "${cleanQuery}"`);
+          const openAlexUrl = `https://api.openalex.org/works?search=${encodeURIComponent(cleanQuery)}&filter=has_pdf_url:true&per-page=10&mailto=asnahonron@gmail.com`;
+          const alexResponse = await axios.get(openAlexUrl, {
+            timeout: 10000,
+            headers: { "User-Agent": "Mozilla/5.0" },
+          });
+
+          if (alexResponse.status === 200 && alexResponse.data?.results) {
+            const results = alexResponse.data.results || [];
+            console.log(`[SEARCH-API] OpenAlex returned ${results.length} papers.`);
+            
+            entries = results.map((entry: any) => {
+              let abstract = "No abstract available.";
+              if (entry.abstract_inverted_index) {
+                const index = entry.abstract_inverted_index;
+                const words: string[] = [];
+                for (const key of Object.keys(index)) {
+                  for (const pos of index[key]) {
+                    words[pos] = key;
+                  }
+                }
+                abstract = words.join(" ").trim();
+              }
+
+              const author = entry.authorships?.[0]?.author?.display_name || "Unknown Author";
+              let pdfLink = entry.best_oa_location?.pdf_url || entry.open_access?.oa_url;
+              if (entry.ids?.arxiv) {
+                const arxivId = entry.ids.arxiv.split("/").pop();
+                if (!pdfLink?.includes("arxiv.org")) {
+                  pdfLink = `https://arxiv.org/pdf/${arxivId}.pdf`;
+                }
+              }
+
+              return {
+                title: entry.title || "Unknown Title",
+                author: author,
+                abstract: abstract,
+                year: entry.publication_year?.toString() || "2026",
+                url: entry.id || "",
+                pdfLink: pdfLink,
+                doi: entry.doi || "",
+                arxivId: entry.ids?.arxiv ? entry.ids.arxiv.split("/").pop() : null,
+              };
+            });
+          }
+        } catch (alexErr: any) {
+          console.warn(`[SEARCH-API] OpenAlex fallback failed: ${alexErr.message}`);
+        }
+      }
+
+      // 3. FALLBACK TO CROSSREF
+      if (entries.length === 0) {
+        sourceEngine = "CrossRef";
+        try {
+          console.log(`[SEARCH-API] Searching CrossRef fallback for: "${cleanQuery}"`);
+          const crossrefUrl = `https://api.crossref.org/works?query=${encodeURIComponent(cleanQuery)}&rows=5`;
           const crRes = await axios.get(crossrefUrl, {
             timeout: 10000,
             headers: { "User-Agent": "mailto:asnahonron@gmail.com" },
@@ -3624,8 +3710,6 @@ CRITICAL PROTOCOLS:
 
             const yearStr = item.issued?.["date-parts"]?.[0]?.[0]
               ? String(item.issued["date-parts"][0][0])
-              : item.created?.["date-parts"]?.[0]?.[0]
-              ? String(item.created["date-parts"][0][0])
               : "2026";
 
             const doiVal = item.DOI || "";
@@ -3635,30 +3719,26 @@ CRITICAL PROTOCOLS:
 
             return {
               title: item.title?.[0] || "Unknown Title",
-              authorships: [
-                {
-                  author: {
-                    display_name: authorName || "Unknown Author",
-                  }
-                }
-              ],
+              author: authorName || "Unknown Author",
               abstract: "Abstract resolved from CrossRef bibliographic metadata.",
-              abstract_inverted_index: null,
-              publication_year: yearStr,
-              open_access: {
-                oa_url: bestPdf,
-              },
-              best_oa_location: {
-                pdf_url: bestPdf,
-              },
-              doi: doiVal,
+              year: yearStr,
               url: item.URL || (doiVal ? `https://doi.org/${doiVal}` : ""),
+              pdfLink: bestPdf,
+              doi: doiVal,
+              arxivId: null,
             };
           });
         } catch (crErr: any) {
-          console.warn(`[SEARCH-FALLBACK] CrossRef fallback also failed: ${crErr.message || crErr}. Trying Gemini synthetic fallback...`);
-          try {
-            const prompt = `You are an academic database search engine. The user is searching for: "${query}". 
+          console.warn(`[SEARCH-API] CrossRef fallback failed: ${crErr.message}`);
+        }
+      }
+
+      // 4. GENERATE SYNTHETIC AS LAST RESORT
+      if (entries.length === 0) {
+        sourceEngine = "Synthetic Fallback";
+        try {
+          console.log(`[SEARCH-API] Creating synthetic papers fallback...`);
+          const prompt = `You are an academic database search engine. The user is searching for: "${query}". 
 Generate a list of 2 highly realistic, relevant academic research papers.
 Return ONLY a valid JSON array of objects, with no markdown formatting around it (no backticks, no \`\`\`json, just the array). Each object must have these exact fields:
 - title: (string) A realistic, relevant academic paper title
@@ -3667,68 +3747,46 @@ Return ONLY a valid JSON array of objects, with no markdown formatting around it
 - year: (string) A realistic publication year between 2018 and 2026
 - url: (string) A placeholder URL or DOI link
 `;
-            const aiResponse = await ai.models.generateContent({
-              model: "gemini-3.5-flash",
-              contents: prompt,
-            });
-            const textResponse = aiResponse.text || "[]";
-            const cleanJsonText = textResponse.replace(/```json|```/g, "").trim();
-            const syntheticPapers = JSON.parse(cleanJsonText);
-            entries = syntheticPapers.map((sp: any) => {
-              return {
-                title: sp.title || "Synthetic Research Paper",
-                authorships: [
-                  {
-                    author: {
-                      display_name: sp.author || "Unknown Author",
-                    }
-                  }
-                ],
-                abstract: sp.abstract || "Abstract unavailable.",
-                abstract_inverted_index: null,
-                publication_year: sp.year || "2026",
-                open_access: null,
-                best_oa_location: null,
-                doi: "",
-                url: sp.url || "https://doi.org",
-              };
-            });
-          } catch (geminiErr: any) {
-            console.error("[SEARCH-FALLBACK] Gemini synthetic fallback failed:", geminiErr.message || geminiErr);
-            throw err; // throw original OpenAlex error if everything failed
-          }
+          const aiResponse = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: prompt,
+          });
+          const textResponse = aiResponse.text || "[]";
+          const cleanJsonText = textResponse.replace(/```json|```/g, "").trim();
+          const syntheticPapers = JSON.parse(cleanJsonText);
+          entries = syntheticPapers.map((sp: any) => {
+            return {
+              title: sp.title || "Synthetic Research Paper",
+              author: sp.author || "Unknown Author",
+              abstract: sp.abstract || "Abstract unavailable.",
+              year: sp.year || "2026",
+              url: sp.url || "https://doi.org",
+              pdfLink: null,
+              doi: "",
+              arxivId: null,
+            };
+          });
+        } catch (geminiErr: any) {
+          console.error("[SEARCH-API] Synthetic fallback failed:", geminiErr.message);
         }
       }
+
       const papers = [];
+      const sortedEntries = [...entries].sort((a, b) => {
+        const scoreA = (a.pdfLink ? 2 : 0) + (a.arxivId ? 1 : 0);
+        const scoreB = (b.pdfLink ? 2 : 0) + (b.arxivId ? 1 : 0);
+        return scoreB - scoreA;
+      });
 
-      for (const entry of entries) {
-        const title = entry.title || "Unknown Title";
-        const author =
-          entry.authorships?.[0]?.author?.display_name || "Unknown Author";
+      const candidatesToProcess = sortedEntries.slice(0, 3);
+      console.log(`[SEARCH-API] Processing ${candidatesToProcess.length} candidate papers for download.`);
 
-        let abstract = entry.abstract || "No abstract available.";
-        if (entry.abstract_inverted_index) {
-          const index = entry.abstract_inverted_index;
-          const words: string[] = [];
-          for (const key of Object.keys(index)) {
-            for (const pos of index[key]) {
-              words[pos] = key;
-            }
-          }
-          abstract = words.join(" ").trim();
-        }
-
-        const year = entry.publication_year?.toString() || "2026";
-        let pdfLink =
-          entry.open_access?.oa_url || entry.best_oa_location?.pdf_url;
-
-        // Try to find a direct Arxiv link if the main one isn't Arxiv but it's an Arxiv paper
-        if (entry.ids?.arxiv) {
-          const arxivId = entry.ids.arxiv.split("/").pop();
-          if (!pdfLink?.includes("arxiv.org")) {
-            pdfLink = `https://arxiv.org/pdf/${arxivId}.pdf`;
-          }
-        }
+      for (const entry of candidatesToProcess) {
+        const title = entry.title;
+        const author = entry.author;
+        const abstract = entry.abstract;
+        const year = entry.year;
+        let pdfLink = entry.pdfLink;
 
         const normalizedTitle = title
           .toLowerCase()
@@ -3750,9 +3808,8 @@ Return ONLY a valid JSON array of objects, with no markdown formatting around it
           console.log(`[DEDUPLICATION] Reusing existing downloaded PDF for "${title}" with fileId: ${existingCachedPaper.fileId}`);
           fileId = existingCachedPaper.fileId;
           mimetype = existingCachedPaper.mimetype;
-        } else if (pdfLink) {
+        } else if (pdfLink || entry.doi) {
           try {
-            // wait a little bit to respect rate limits
             await new Promise((resolve) => setTimeout(resolve, 500));
 
             const attemptDownload = async (url: string) => {
@@ -3764,75 +3821,66 @@ Return ONLY a valid JSON array of objects, with no markdown formatting around it
             };
 
             let pdfRes;
-            try {
-              pdfRes = await attemptDownload(pdfLink);
-            } catch (pdfErr: any) {
-              const statusStr = pdfErr.response
-                ? ` [Status ${pdfErr.response.status}]`
-                : "";
-              // Primary direct download failed, silently attempt fallbacks
-
-              const locations = entry.locations || [];
-              for (const loc of locations) {
-                if (loc.pdf_url && loc.pdf_url !== pdfLink) {
-                  try {
-                    await new Promise((resolve) => setTimeout(resolve, 1000));
-                    pdfRes = await attemptDownload(loc.pdf_url);
-                    pdfLink = loc.pdf_url;
-                    break;
-                  } catch (e) {
-                    console.warn(
-                      `Fallback download failed for ${title} from ${loc.pdf_url}`,
-                    );
-                    pdfRes = null;
-                    continue;
-                  }
+            let doiClean = entry.doi
+              ? entry.doi.replace(/^(https?:\/\/)?(www\.)?(dx\.)?doi\.org\//i, "")
+              : null;
+              
+            if (!doiClean && title) {
+              try {
+                console.log(`[Crossref] Looking up DOI for title: ${title}`);
+                const crossrefUrl = `https://api.crossref.org/works?query.title=${encodeURIComponent(title)}&select=DOI,title&rows=3&mailto=asnahonron@gmail.com`;
+                const crossrefRes = await axios.get(crossrefUrl, { timeout: 8000 });
+                if (crossrefRes.data?.message?.items?.length > 0) {
+                  doiClean = crossrefRes.data.message.items[0].DOI;
+                  console.log(`[Crossref] Found DOI: ${doiClean}`);
                 }
+              } catch (crossErr: any) {
+                console.warn(`[Crossref] DOI lookup failed: ${crossErr.message}`);
               }
             }
-
-            // Unpaywall API fallback
-            if (!pdfRes) {
-              const doiClean = entry.doi
-                ? entry.doi.replace(
-                    /^(https?:\/\/)?(www\.)?(dx\.)?doi\.org\//i,
-                    "",
-                  )
-                : null;
-              if (doiClean) {
-                try {
-                  console.log(`[Unpaywall] Direct/OpenAlex fallback download failed. Trying Unpaywall for DOI: ${doiClean}`);
-                  const unpaywallUrl = `https://api.unpaywall.org/v2/${encodeURIComponent(doiClean)}?email=asnahonron@gmail.com`;
-                  const unpaywallRes = await axios.get(unpaywallUrl, { timeout: 8000 });
-                  if (unpaywallRes.data && unpaywallRes.data.is_oa) {
-                    const unpaywallPdfLink = unpaywallRes.data.best_oa_location?.url_for_pdf;
-                    if (unpaywallPdfLink && unpaywallPdfLink !== pdfLink) {
-                      console.log(`[Unpaywall] Found fallback open-access PDF: ${unpaywallPdfLink}`);
-                      try {
-                        pdfRes = await attemptDownload(unpaywallPdfLink);
-                        pdfLink = unpaywallPdfLink;
-                      } catch (e: any) {
-                        console.warn(`[Unpaywall] Failed to download PDF from Unpaywall URL: ${unpaywallPdfLink}`);
-                      }
+              
+            if (doiClean) {
+              try {
+                console.log(`[Unpaywall] Checking Unpaywall first for DOI: ${doiClean}`);
+                const unpaywallUrl = `https://api.unpaywall.org/v2/${encodeURIComponent(doiClean)}?email=asnahonron@gmail.com`;
+                const unpaywallRes = await axios.get(unpaywallUrl, { timeout: 8000 });
+                if (unpaywallRes.data && unpaywallRes.data.is_oa) {
+                  const unpaywallPdfLink = unpaywallRes.data.best_oa_location?.url_for_pdf;
+                  if (unpaywallPdfLink) {
+                    console.log(`[Unpaywall] Found prioritized open-access PDF: ${unpaywallPdfLink}`);
+                    try {
+                      pdfRes = await attemptDownload(unpaywallPdfLink);
+                      pdfLink = unpaywallPdfLink;
+                    } catch (e: any) {
+                      console.warn(`[Unpaywall] Failed to download PDF from Unpaywall URL: ${unpaywallPdfLink}`);
                     }
-                    if (!pdfRes && unpaywallRes.data.oa_locations) {
-                      for (const loc of unpaywallRes.data.oa_locations) {
-                        if (loc.url_for_pdf && loc.url_for_pdf !== pdfLink && loc.url_for_pdf !== unpaywallPdfLink) {
-                          try {
-                            await new Promise((resolve) => setTimeout(resolve, 500));
-                            pdfRes = await attemptDownload(loc.url_for_pdf);
-                            pdfLink = loc.url_for_pdf;
-                            break;
-                          } catch (e: any) {
-                            console.warn(`[Unpaywall] Fallback download failed for: ${loc.url_for_pdf}`);
-                          }
+                  }
+                  if (!pdfRes && unpaywallRes.data.oa_locations) {
+                    for (const loc of unpaywallRes.data.oa_locations) {
+                      if (loc.url_for_pdf && loc.url_for_pdf !== unpaywallPdfLink) {
+                        try {
+                          await new Promise((resolve) => setTimeout(resolve, 500));
+                          pdfRes = await attemptDownload(loc.url_for_pdf);
+                          pdfLink = loc.url_for_pdf;
+                          break;
+                        } catch (e: any) {
+                          console.warn(`[Unpaywall] Fallback download failed for: ${loc.url_for_pdf}`);
                         }
                       }
                     }
                   }
-                } catch (unpaywallErr: any) {
-                  console.warn(`[Unpaywall] API query failed: ${unpaywallErr.message}`);
                 }
+              } catch (unpaywallErr: any) {
+                console.warn(`[Unpaywall] API query failed: ${unpaywallErr.message}`);
+              }
+            }
+
+            if (!pdfRes && pdfLink) {
+              try {
+                console.log(`[DOWNLOAD] Attempting direct download from PDF Link: ${pdfLink}`);
+                pdfRes = await attemptDownload(pdfLink);
+              } catch (pdfErr: any) {
+                console.warn(`[DOWNLOAD] Direct download failed for: ${pdfLink}: ${pdfErr.message}`);
               }
             }
 
@@ -3850,9 +3898,7 @@ Return ONLY a valid JSON array of objects, with no markdown formatting around it
                   sniffed.mimetype.includes("word") ||
                   sniffed.mimetype.includes("docx")
                 ) {
-                  console.log(
-                    `[DOWNLOAD-MIME] Successfully resolved readable document type: ${sniffed.mimetype} for ${title}`,
-                  );
+                  console.log(`[DOWNLOAD-MIME] Successfully resolved readable document type: ${sniffed.mimetype} for ${title}`);
                   await saveFile(fileId, {
                     buffer: buffer,
                     mimetype: sniffed.mimetype,
@@ -3860,7 +3906,6 @@ Return ONLY a valid JSON array of objects, with no markdown formatting around it
                   });
                   mimetype = sniffed.mimetype;
 
-                  // Save to our deduplication cache
                   const cacheEntry = {
                     fileId,
                     title,
@@ -3871,31 +3916,23 @@ Return ONLY a valid JSON array of objects, with no markdown formatting around it
                   if (pdfLink) {
                     await setCachedPaper(pdfLink, cacheEntry);
                   }
-                  
                 } else {
-                  console.warn(
-                    `Downloaded content for ${title} has unsupported mime type: ${sniffed.mimetype}. No fallback generated.`,
-                  );
+                  console.warn(`Downloaded content for ${title} has unsupported mime type: ${sniffed.mimetype}.`);
                   fileId = null;
                   mimetype = null;
                 }
-              } catch (saveErr) {
-                console.error(
-                  `Failed to save real file for ${title}, no fallback generated:`,
-                  saveErr,
-                );
+              } catch (saveErr: any) {
+                console.error(`Failed to save real file for ${title}:`, saveErr.message);
                 fileId = null;
                 mimetype = null;
               }
             } else {
-              console.warn(
-                `All download attempts failed for ${title}. No fallback generated.`,
-              );
+              console.log(`[INFO] Could not download PDF for paper: ${title}`);
               fileId = null;
               mimetype = null;
             }
           } catch (outerErr: any) {
-            console.error(`Outer error for ${title}:`, outerErr.message);
+            console.error(`Outer error downloading ${title}:`, outerErr.message);
           }
         }
 
@@ -3910,7 +3947,7 @@ Return ONLY a valid JSON array of objects, with no markdown formatting around it
         });
       }
 
-      res.json({ success: true, papers });
+      res.json({ success: true, papers, engine: sourceEngine });
     } catch (err: any) {
       console.error("Error searching OpenAlex:", err);
       res.status(500).json({ success: false, error: err.message });
